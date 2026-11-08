@@ -178,23 +178,26 @@ pkgs.testers.runNixOSTest {
 
         pw_err = attacker.fail(
             "sshpass -p 'test-password-must-not-work-over-ssh' ssh "
-            "-F /dev/null "
+            "-n -F /dev/null "
+            "-o LogLevel=ERROR "
             "-o PreferredAuthentications=password,keyboard-interactive "
             "-o PubkeyAuthentication=no "
             "-o StrictHostKeyChecking=no "
             "-o UserKnownHostsFile=/dev/null "
-            "thomas@host true 2>&1"
+            "thomas@host true </dev/null 2>&1"
         )
         assert "Permission denied" in pw_err, f"unexpected ssh failure: {pw_err!r}"
 
         attacker.succeed("install -d -m 700 /root/.ssh")
         attacker.succeed("cat ${snakeOilPrivateKey} > /root/.ssh/id_key && chmod 600 /root/.ssh/id_key")
         out = attacker.succeed(
-            "ssh -F /dev/null -i /root/.ssh/id_key "
+            "ssh -n -F /dev/null -i /root/.ssh/id_key "
+            "-o BatchMode=yes "
+            "-o LogLevel=ERROR "
             "-o IdentitiesOnly=yes "
             "-o StrictHostKeyChecking=no "
             "-o UserKnownHostsFile=/dev/null "
-            "thomas@host id -un"
+            "thomas@host id -un </dev/null"
         ).strip()
         assert out == "thomas", f"expected thomas, got {out!r}"
 

@@ -27,6 +27,10 @@ let
   );
 in
 {
+  imports = [
+    ./aurora-sep.nix
+  ];
+
   options.omarchnix.hardware.m2air = {
     enable = lib.mkEnableOption "MacBook Air M2 (J413 / J415) hardware polish: Asahi DSP audio, Liquid Retina HiDPI + notch metadata, SMC power/battery charge thresholds, and s2idle sleep tuning";
 

@@ -59,10 +59,11 @@
    ```
 4. Verify `/mnt/boot/vendorfw/firmware.cpio` is intact (`ls -lh /mnt/boot/vendorfw/firmware.cpio`).
 5. Copy the owner `sops-nix` age secret key (`0600`) to `/mnt/var/lib/sops-nix/key.txt` and provision `thomas`'s SSH authorized key.
-6. Install the `m2air` system closure:
+6. Install the `m2air` system closure and stage the verified Aurora Stage 2 (`aura` `1.0.0b8` + `linux-aurora` `7.3.0` DTBs + `uboot-aurora`, preserving `/mnt/boot/m1n1/boot.bin.pre-aurora`):
    ```console
    nixos-install --flake github:Th0rgal/omarchnix#m2air --no-root-passwd
    nixos-enter --root /mnt -c 'passwd thomas'
+   nixos-enter --root /mnt -c '/run/current-system/sw/bin/omarchnix-install-stage2 /boot'
    umount -R /mnt
    cryptsetup close cryptroot
    reboot
@@ -88,6 +89,11 @@ Record all outputs verbatim into `docs/logs/g6-<YYYY-MM-DD>.md`:
   - Close lid for 60s -> `journalctl -b -u systemd-suspend` confirms clean `s2idle` entry/resume, `hyprlock` locked before sleep, DPMS restored on wake, Wi-Fi (`brcmfmac` firmware supplicant) reconnects automatically.
 - [ ] **Omarchnix Shell & System Health:**
   - `omarchnix status --json` and `omarchnix check --json` report `omarchy-shell` active, current theme staged cleanly, and all 4 coding-agent skill directories provisioned.
+- [ ] **Secure Enclave, Touch ID & FIDO2 Passkeys (`modules/aurora-sep.nix`):**
+  - Wait ~45s after boot for initial SEP keybag bring-up, then run `omarchnix-touchid-status` (verifies `linux-aurora` `7.3.0`, `/dev/disk/by-partlabel/iBootSystemContainer`, `/dev/sep-bio`, `aurora-sep-ready.service`, `fprintd.service`, and `aurora-fido.service`).
+  - Enroll fingerprint: `sudo fprintd-enroll thomas` and test `fprintd-verify`.
+  - Verify Touch ID prompts on `sudo -k true`, Polkit GUI dialogs, `omarchy-system-lock`, and `hyprlock` (`SUPER + ESCAPE`), plus WebAuthn passkeys in Brave/Firefox (`aurora-fido status`).
+  - *(Rollback note: if ever needed from macOS or live USB, copying `/boot/m1n1/boot.bin.pre-aurora` back to `/boot/m1n1/boot.bin` restores the original stock `alx.sh` Stage 2).*
 
 ---
 

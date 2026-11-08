@@ -147,3 +147,18 @@ Upstream Omarchy M's Apple Silicon Secure Enclave Processor (SEP) and Touch ID s
 2. **Adoption sequence (preserving DR-5 BootROM safety):**
    - **Step 1 (initial cutover):** Install `m2air` on the battle-tested `nixos-apple-silicon` kernel + `alx.sh` boot chain first so dual-boot, LUKS2 `cryptroot`, Wi-Fi, DSP audio, and `omarchy-shell` are verified cleanly.
    - **Step 2 (opt-in `omarchnix.hardware.m2air.sep.enable`):** Add `nixos-aurora` as an optional flake input/overlay paired with an explicit `aura` Stage 1/2 transition runbook, enabling Touch ID for `sudo`, `polkit`, `hyprlock`, and `aurora-fido` WebAuthn passkeys once Stage 1 is provisioned to `aura`.
+
+
+## DR-16 — Ship Aurora Silicon (`nixos-aurora`) SEP, Touch ID & FIDO2 Enabled on `m2air`
+
+Date: 2026-11-08. Status: accepted. Supersedes DR-2's deferral and DR-15's two-step staging.
+
+Direct inspection of `AsahiLinux/m1n1` (`src/main.c`, `src/asc.c`, `src/chainload.c`), `aurora-silicon/aura` (`src/kboot.c`, `src/ctxr_exec.c`), `aurora-silicon/linux` (`drivers/soc/apple/{sep.rs,xart_store.rs}`), and `aurora-silicon/nixos-aurora` (`4b025a0cfd35bede6bc87a50fcce6e2a95170f39`) established that `m2air` (`Mac14,2` / `J413`, `T8112`) can run the full Secure Enclave + Touch ID + FIDO2 stack out of the box from day one:
+
+1. **Stage 1 compatibility (`alx.sh` Stage 1 -> `aura` Stage 2):** Stock `alx.sh` `m1n1` Stage 1 sends zero ASC mailbox commands to `/arm-io/sep` during `chainload_load()`. Installing the checked `system.build.auroraStage2` (`aura` `1.0.0b8` + `linux-aurora` `7.3.0` DTBs + `uboot-aurora` `2026.07`) to `/boot/m1n1/boot.bin` via `omarchnix-install-stage2` (preserving `/boot/m1n1/boot.bin.pre-aurora`) preserves `T8112`'s iBoot warm SEP registration and forwards `/chosen/apfs-preboot-uuid` without touching Stage 1 or NVRAM.
+2. **Binary-cache identity:** `nixosConfigurations.m2air` overlays `nixos-aurora.inputs.apple-silicon.overlays.default` + `nixos-aurora.overlays.default` on the shared `nixpkgs` lock (`1d060086...`) and configures `https://aurorasilicon.org/nixos-aurora/cache`, achieving 100% store-path binary cache substitution for `linux-aurora` `7.3.0`, `aura`, `uboot-aurora`, `mesa` `26.3.0`, `aurora-sep`, `libfprint`, `fprintd`, `aurora-touchid-rearm`, `aurora-fido`, and `aurora-xart`.
+3. **GPT & PAM resilience (`modules/aurora-sep.nix`):**
+   - `61-omarchnix-iboot-isc.rules` maps GPT partition type `69646961-6700-11AA-AA11-00306543ECAC` (`Apple_APFS_ISC`) to `/dev/disk/by-partlabel/iBootSystemContainer` even when factory macOS GPT tables leave `PartName` blank.
+   - Touch ID (`pam_fprintd.so`) is enabled on `sudo`, `polkit-1` (with `omarchy-hw-laptop-closed` clamshell bypass), `hyprlock`, and `omarchy-lock-fingerprint` (for `omarchy-shell`'s native Quickshell lock screen), while `sshd`, `login`, and `su` remain strictly non-fingerprint.
+   - `pam_aurora_touchid.so` re-arming is wired after `pam_unix.so` on `sudo`, `polkit-1`, `login`, `hyprlock`, and `omarchy-lock-password`, matching macOS's `require_password_after_boot = yes` policy.
+   - `aurora-fidod` (`/dev/uhid`) runs by default (`omarchnix.hardware.m2air.touchId.fido.enable = true`) so Brave, Firefox, Orb WebAuthn passkeys, and `ssh-keygen -t ecdsa-sk` authenticate via Touch ID + Secure Enclave.

@@ -26,7 +26,14 @@
         variant = "intl";
       };
     };
-    hardware.m2air.enable = true;
+    hardware.m2air = {
+      enable = true;
+      touchId = {
+        enable = true;
+        requirePasswordAfterBoot = true;
+        fido.enable = true;
+      };
+    };
   };
 
   environment.systemPackages = with pkgs; [

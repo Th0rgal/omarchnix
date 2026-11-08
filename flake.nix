@@ -10,6 +10,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    nixos-aurora = {
+      url = "github:aurora-silicon/nixos-aurora/4b025a0cfd35bede6bc87a50fcce6e2a95170f39";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     disko = {
       url = "github:nix-community/disko";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -46,6 +51,7 @@
       self,
       nixpkgs,
       apple-silicon-support,
+      nixos-aurora,
       ...
     }@inputs:
     let
@@ -101,6 +107,7 @@
         {
           system ? "aarch64-linux",
           withAsahiOverlay ? true,
+          withAuroraOverlay ? false,
           modules,
         }:
         nixpkgs.lib.nixosSystem {
@@ -111,12 +118,17 @@
           };
           modules = modules ++ [
             {
-              nixpkgs.overlays = [
-                omarchnixOverlay
-              ]
-              ++ nixpkgs.lib.optionals withAsahiOverlay [
-                apple-silicon-support.overlays.default
-              ];
+              nixpkgs.overlays =
+                nixpkgs.lib.optionals withAuroraOverlay [
+                  nixos-aurora.inputs.apple-silicon.overlays.default
+                  nixos-aurora.overlays.default
+                ]
+                ++ nixpkgs.lib.optionals (withAsahiOverlay && !withAuroraOverlay) [
+                  apple-silicon-support.overlays.default
+                ]
+                ++ [
+                  omarchnixOverlay
+                ];
               nix.registry.nixpkgs.flake = nixpkgs;
             }
           ];
@@ -145,8 +157,9 @@
       nixosConfigurations = {
         # Target machine: MacBook Air M2 (daily driver after cutover).
         m2air = mkNixos {
+          withAuroraOverlay = true;
           modules = [
-            apple-silicon-support.nixosModules.apple-silicon-support
+            nixos-aurora.inputs.apple-silicon.nixosModules.default
             ./hosts/common.nix
             ./hosts/m2air.nix
           ];
@@ -292,6 +305,12 @@
             inherit pkgs inputs omarchyLib;
             inherit (nixpkgs) lib;
             self = self;
+          };
+
+          aurora-sep = import ./tests/aurora-sep.nix {
+            inherit pkgs inputs self;
+            inherit (nixpkgs) lib;
+            m2airConfig = self.nixosConfigurations.m2air.config;
           };
 
           modules-eval =

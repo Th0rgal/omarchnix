@@ -1,10 +1,12 @@
 {
+  config,
   lib,
   pkgs,
   theme,
   ...
 }:
 let
+  cfg = config.programs.omarchnix;
   inherit (lib.generators) mkLuaInline;
 
   foot = "${pkgs.foot}/bin/foot";
@@ -157,7 +159,8 @@ in
         };
 
         input = {
-          kb_layout = "fr";
+          kb_layout = cfg.keyboard.layout;
+          kb_variant = cfg.keyboard.variant;
           follow_mouse = 1;
           sensitivity = 0;
           touchpad = {

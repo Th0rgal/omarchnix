@@ -133,3 +133,17 @@ Date: 2026-11-06. Status: accepted. Refines DR-9 and DR-11.
 Date: 2026-11-07. Status: accepted. Supersedes DR-9, DR-11, and DR-13.
 
 `omarchnix-receipt-gate` was the sole package built through `buildVerifiedLeanSys`: it existed only to verify its own receipt, delegated hashing and signature verification to external `b3sum` and `openssl` processes, and duplicated plugin and container invariants already enforced declaratively in Nix (`lib.omarchy.buildPlugin` in `lib/omarchy.nix`, `omarchnix-plugin`, and `modules/containers.nix` / `modules/hardening.nix`). Carrying `lean-sys`, `turbo-lean`, `lean4`, LLVM 18 `LeanNative` cross-architecture patches, `security.omarchnix.*` receipt keys, `omarchnix audit` / `omarchnix sandbox`, and dedicated CI builds added heavy toolchain maintenance and build cost with zero operational leverage for a declarative NixOS + Omarchy workstation config. Lean 4 inputs, derivations, module options, CLI subcommands, and receipt checks are removed cleanly in favor of pure Nix evaluation/build gates and NixOS VM tests.
+
+## DR-15 — Aurora Silicon (`nixos-aurora`) Secure Enclave & Touch ID Integration Path for `m2air`
+
+Date: 2026-11-08. Status: planned (opt-in after initial `m2air` cutover). Refines DR-2.
+
+Upstream Omarchy M's Apple Silicon Secure Enclave Processor (SEP) and Touch ID stack is published openly as NixOS modules and binary-cached derivations in [`aurora-silicon/nixos-aurora`](https://github.com/aurora-silicon/nixos-aurora) (`https://aurorasilicon.org/nixos-aurora/cache`, public key `aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14=`):
+
+1. **Architecture on M2 Air (`J413`, `T8112` warm-attach SEP):**
+   - **Kernel (`linux-aurora` 7.3.0):** Ships the `apple_sep` module (`/dev/sep-bio`, `/dev/sep-key`) with APFS `iBootSystemContainer` xART GigaLocker ownership checks and `xart_guard = 1` by default on M2 (`T8112` warm-attach performs zero pre-Linux xART writes during Linux keybag creation, preserving macOS Touch ID records).
+   - **Boot chain requirement:** `linux-aurora` 7.3.0 builds with `CONFIG_ARM64_CTXR_EXECMEM=y` and requires Aurora's monitor-free Stage 1/2 bootloader (`aura` `1.0.0b8+` + `uboot-aurora`), not stock upstream `m1n1`.
+   - **Userspace & PAM (`modules/sep.nix`, `modules/fido.nix`):** Overlays `aurora-sep` (`aurora-touchid-setup`, `aurora-sep-load`, `aurora-sep-ready`), `aurora-xart`, `aurora-touchid-rearm` (`pam_aurora_touchid.so` re-arming Touch ID after first post-boot password, matching macOS behavior), patched `libfprint` (`1.94.100-apple-sep`) + `fprintd --no-timeout` (`sudo`, `polkit-1`, and `hyprlock` via `security.pam.services.hyprlock.fprintAuth = true`), plus optional `aurora-fido` (`aurora-fidod` exposing Touch ID + `/dev/sep-key` as a native `/dev/uhid` FIDO2/WebAuthn passkey & `ecdsa-sk` authenticator).
+2. **Adoption sequence (preserving DR-5 BootROM safety):**
+   - **Step 1 (initial cutover):** Install `m2air` on the battle-tested `nixos-apple-silicon` kernel + `alx.sh` boot chain first so dual-boot, LUKS2 `cryptroot`, Wi-Fi, DSP audio, and `omarchy-shell` are verified cleanly.
+   - **Step 2 (opt-in `omarchnix.hardware.m2air.sep.enable`):** Add `nixos-aurora` as an optional flake input/overlay paired with an explicit `aura` Stage 1/2 transition runbook, enabling Touch ID for `sudo`, `polkit`, `hyprlock`, and `aurora-fido` WebAuthn passkeys once Stage 1 is provisioned to `aura`.

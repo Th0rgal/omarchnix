@@ -17,7 +17,10 @@ assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.conf
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.extraConfig == "";
 assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.kb_layout
-  == "fr";
+  == "us";
+assert
+  m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.kb_variant
+  == "intl";
 assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.touchpad.natural_scroll
   == true;
@@ -25,7 +28,8 @@ assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.touchpad.tap_to_click
   == true;
 assert m2airConfig.home-manager.users.thomas.programs.foot.enable == true;
-assert m2airConfig.home-manager.users.thomas.programs.waybar.enable == true;
+assert m2airConfig.home-manager.users.thomas.programs.waybar.enable == false;
+assert m2airConfig.home-manager.users.thomas.systemd.user.services ? omarchy-shell;
 assert m2airConfig.home-manager.users.thomas.programs.fuzzel.enable == true;
 assert m2airConfig.home-manager.users.thomas.programs.hyprlock.enable == true;
 assert m2airConfig.home-manager.users.thomas.services.hypridle.enable == true;
@@ -161,7 +165,12 @@ pkgs.testers.runNixOSTest {
         kb_layout = desktop.succeed(
             hypr("hyprctl getoption input:kb_layout -j | jq -r .str")
         ).strip()
-        assert kb_layout == "fr", f"expected fr keymap, got {kb_layout!r}"
+        assert kb_layout == "us", f"expected us keymap, got {kb_layout!r}"
+
+        kb_variant = desktop.succeed(
+            hypr("hyprctl getoption input:kb_variant -j | jq -r .str")
+        ).strip()
+        assert kb_variant == "intl", f"expected intl variant, got {kb_variant!r}"
 
         nat_scroll_data = json.loads(
             desktop.succeed(hypr("hyprctl getoption input:touchpad:natural_scroll -j"))

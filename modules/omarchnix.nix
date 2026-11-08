@@ -106,6 +106,20 @@ in
           default = "waybar";
           description = "Default desktop bar/panel backend passed into Home Manager (`omarchy-shell` or `waybar`).";
         };
+
+        keyboard = {
+          layout = lib.mkOption {
+            type = lib.types.str;
+            default = "us";
+            description = "Default XKB keyboard layout passed into Home Manager (`us`, `fr`, etc.).";
+          };
+
+          variant = lib.mkOption {
+            type = lib.types.str;
+            default = "intl";
+            description = "Default XKB keyboard variant passed into Home Manager (`intl` matches macOS `USInternational-PC`, `\"\"` for plain layout).";
+          };
+        };
       };
     };
   };
@@ -126,6 +140,10 @@ in
               programs.omarchnix = {
                 theme.name = lib.mkDefault cfg.desktop.theme;
                 shell.backend = lib.mkDefault cfg.desktop.shellBackend;
+                keyboard = {
+                  layout = lib.mkDefault cfg.desktop.keyboard.layout;
+                  variant = lib.mkDefault cfg.desktop.keyboard.variant;
+                };
               };
             };
         };
@@ -135,7 +153,7 @@ in
     (lib.mkIf cfg.enable {
       time.timeZone = lib.mkDefault "Europe/Paris";
       i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
-      console.keyMap = lib.mkDefault "fr";
+      console.keyMap = lib.mkDefault "us";
 
       services.openssh = {
         enable = lib.mkDefault true;

@@ -1,5 +1,5 @@
 # MacBook Air M2 — the primary Apple Silicon daily driver.
-{ inputs, ... }:
+{ inputs, pkgs, ... }:
 {
   imports = [
     inputs.disko.nixosModules.disko
@@ -20,9 +20,32 @@
     desktop = {
       enable = true;
       user = "thomas";
+      shellBackend = "omarchy-shell";
+      keyboard = {
+        layout = "us";
+        variant = "intl";
+      };
     };
-    hardware.m2air.enable = true;
+    hardware.m2air = {
+      enable = true;
+      touchId = {
+        enable = true;
+        requirePasswordAfterBoot = true;
+        fido.enable = true;
+      };
+    };
   };
+
+  environment.systemPackages = with pkgs; [
+    brave
+    firefox
+    bitwarden-desktop
+    bitwarden-cli
+    telegram-desktop
+    age
+    restic
+    rclone
+  ];
 
   users.users.thomas = {
     isNormalUser = true;

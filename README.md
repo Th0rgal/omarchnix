@@ -2,7 +2,7 @@
 
 Declarative Omarchy-compatible NixOS & Home Manager workstation stack across **`aarch64-linux`** (Apple Silicon M-series via Asahi Linux, NVIDIA Grace / DGX Spark) and **`x86_64-linux`** workstations and VMs.
 
-See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-14`) for recorded design decisions.
+See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-15`) for recorded design decisions.
 
 ---
 
@@ -92,7 +92,7 @@ Every cell is backed by a recorded gate (CI run or runbook log in `docs/logs/`).
 
 ## What Is Out of Scope on Apple Silicon
 
-- Touch ID (Omarchy kernel-fork work, not upstreamed to Asahi; tracked in `docs/decisions.md` as DR-2)
+- Touch ID / Secure Enclave on the stock `nixos-apple-silicon` kernel (opt-in integration path via `aurora-silicon/nixos-aurora` + `aura` Stage 1/2 documented in `docs/decisions.md` as DR-15)
 - Metal (does not exist on Linux; Mesa Honeykrisp Vulkan 1.4 / OpenGL 4.6 is what Asahi ships)
 - Apple's verified boot / SIP inside Linux (replaced by the Asahi `m1n1` + U-Boot boot chain + LUKS2 `cryptroot` + NixOS store reproducibility and AppArmor/container sandboxing)
 

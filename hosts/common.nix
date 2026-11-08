@@ -12,7 +12,7 @@
 
   time.timeZone = "Europe/Paris";
   i18n.defaultLocale = "en_US.UTF-8";
-  console.keyMap = "fr";
+  console.keyMap = "us";
 
   services.openssh = {
     enable = true;

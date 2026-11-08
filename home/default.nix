@@ -137,6 +137,20 @@ in
       };
     };
 
+    keyboard = {
+      layout = lib.mkOption {
+        type = lib.types.str;
+        default = "us";
+        description = "XKB keyboard layout configured in Hyprland (`us`, `fr`, etc.).";
+      };
+
+      variant = lib.mkOption {
+        type = lib.types.str;
+        default = "intl";
+        description = "XKB keyboard variant configured in Hyprland (`intl` matches macOS `USInternational-PC`, `\"\"` for plain layout).";
+      };
+    };
+
     plugins = {
       locked = lib.mkOption {
         default = { };

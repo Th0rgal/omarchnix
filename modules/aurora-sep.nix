@@ -525,6 +525,10 @@ in
     ))
 
     (lib.mkIf (cfg.enable && cfg.firmwareHandoff) {
+      # Keep the Apple Silicon / USB / NVMe / LUKS initrd module set explicit.
+      # NixOS's generic PC default initrd module list asks for legacy x86/SATA/HCD
+      # drivers (ata_piix, uhci_hcd, pata_marvell, etc.) that linux-aurora omits.
+      boot.initrd.includeDefaultModules = lib.mkDefault false;
       boot.kernelParams = [ "firmware_class.path=/run/aurora-firmware/vendorfw" ];
       boot.blacklistedKernelModules = [
         "aop"
@@ -533,15 +537,51 @@ in
         "dockchannel-hid"
       ];
       boot.initrd.availableKernelModules = [
-        "vfat"
-        "nvme_apple"
         "apple-mailbox"
+        "apple_nvmem_spmi"
+        "nvme_apple"
+        "pinctrl-apple-gpio"
+        "macsmc"
+        "macsmc-power"
+        "macsmc-input"
+        "macsmc-hwmon"
+        "macsmc-reboot"
+        "i2c-pasemi-platform"
+        "tps6598x"
+        "sn201202x"
+        "thunderbolt_apple"
+        "apple-dart"
+        "dwc3"
+        "dwc3-of-simple"
+        "xhci-pci"
+        "pcie-apple"
+        "gpio_macsmc"
+        "phy-apple-atc"
+        "nvmem_apple_efuses"
+        "spi-apple"
+        "spi-hid-apple"
+        "spi-hid-apple-of"
+        "rtc-macsmc"
+        "spmi-apple-controller"
+        "apple-dockchannel"
+        "dockchannel-hid"
+        "apple-rtkit-helper"
+        "usb-storage"
+        "xhci-plat-hcd"
+        "usbhid"
+        "hid_generic"
+        "nvme"
+        "virtio_blk"
+        "virtio_pci"
+        "uas"
+        "sd_mod"
+        "vfat"
+        "dm-crypt"
+        "btrfs"
+        "ext4"
         "aop"
         "mt7932-fullmac"
         "mt7932_bt_pcie"
-        "dockchannel-hid"
-        "tps6598x"
-        "thunderbolt_apple"
         "apple-pmp"
         "mux-apple-display-crossbar"
         "appledrm"

@@ -177,6 +177,7 @@ assert (m2airConfig.boot.kernelPackages.kernel.auroraCtxrExecmem or false) == tr
 assert builtins.elem "https://aurorasilicon.org/nixos-aurora/cache"
   m2airConfig.nix.settings.substituters;
 assert builtins.elem "apple_sep" m2airConfig.boot.blacklistedKernelModules;
+assert m2airConfig.boot.initrd.includeDefaultModules == false;
 assert builtins.elem "uhid" m2airConfig.boot.kernelModules;
 assert m2airConfig.system.build ? auroraStage2;
 assert fingerprintSufficientBeforeUnix m2airConfig "sudo";

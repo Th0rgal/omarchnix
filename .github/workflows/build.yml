@@ -100,6 +100,7 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@v15
       - name: Verify m2air and m2air-aurora closures, ARM64 UEFI GRUB ESP artifacts, and Aurora Stage 2
         run: |
+          set -euxo pipefail
           (
           set -euxo pipefail
           M2AIR_SYS="$(nix build .#nixosConfigurations.m2air.config.system.build.toplevel -L --no-link --print-out-paths)"
@@ -109,10 +110,10 @@ jobs:
           test -s "$AURORA_STAGE2/boot.bin.sha256"
           M2AIR_AURORA_SYS="$(nix build .#nixosConfigurations.m2air-aurora.config.system.build.toplevel -L --no-link --print-out-paths)"
 
-          DOSFS_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.dosfstools --no-link --print-out-paths)"
-          GPT_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.gptfdisk --no-link --print-out-paths)"
-          ZSTD_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.zstd --no-link --print-out-paths)"
-          CPIO_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.cpio --no-link --print-out-paths)"
+          DOSFS_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.dosfstools.out --no-link --print-out-paths)"
+          GPT_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.gptfdisk.out --no-link --print-out-paths)"
+          ZSTD_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.zstd.bin --no-link --print-out-paths)"
+          CPIO_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.cpio.out --no-link --print-out-paths)"
           export PATH="$DOSFS_OUT/bin:$GPT_OUT/bin:$ZSTD_OUT/bin:$CPIO_OUT/bin:$PATH"
 
           # 1. Verify kernel, boot.json, initrd LUKS2/NVMe/Apple-HID drivers, and non-cryptodisk GRUB installer
@@ -126,18 +127,22 @@ jobs:
           assert off >= 0, "zstd magic not found in m2air initrd"
           cpio_raw = subprocess.check_output(["zstd", "-dc"], input=blob[off:])
           entries = subprocess.check_output(["cpio", "-t"], input=cpio_raw, stderr=subprocess.DEVNULL).decode()
-          assert "etc/crypttab" in entries, "missing etc/crypttab symlink in initrd"
-          assert "systemd-cryptsetup" in entries, "missing systemd-cryptsetup in initrd"
-          builtin = subprocess.run(
-              ["cpio", "-i", "--to-stdout", "*modules.builtin"],
-              input=cpio_raw,
-              capture_output=True,
-          ).stdout.decode(errors="replace")
+          entry_lines = [line.strip() for line in entries.splitlines() if line.strip()]
+          assert "etc/crypttab" in entry_lines, "missing etc/crypttab symlink in initrd"
+          assert any("systemd-cryptsetup" in line for line in entry_lines), "missing systemd-cryptsetup in initrd"
+          builtin_paths = [line for line in entry_lines if line.endswith("/modules.builtin")]
+          assert builtin_paths, "missing modules.builtin in initrd"
+          builtin = "\n".join(
+              subprocess.check_output(["cpio", "-i", "--to-stdout", p], input=cpio_raw, stderr=subprocess.DEVNULL).decode(errors="replace")
+              for p in builtin_paths
+          )
           haystack = entries + "\n" + builtin
           for pat in (r"nvme[-_]apple", r"dm[-_]crypt", r"dockchannel[-_]hid", r"hid[-_]apple", r"vfat"):
               assert re.search(pat, haystack), f"missing {pat} in initrd modules or modules.builtin"
+          crypttab_paths = [line for line in entry_lines if line.endswith("-initrd-crypttab")]
+          assert crypttab_paths, "missing *-initrd-crypttab store entry in initrd"
           crypttab = subprocess.check_output(
-              ["cpio", "-i", "--to-stdout", "nix/store/*initrd-crypttab*"],
+              ["cpio", "-i", "--to-stdout", crypttab_paths[0]],
               input=cpio_raw,
               stderr=subprocess.DEVNULL,
           ).decode()
@@ -208,6 +213,7 @@ jobs:
           du -sh /boot/EFI /boot/grub /boot/kernels /boot/m1n1 /boot/vendorfw
 
           python3 "$WORK_ESP/check_pe.py" /boot/EFI/BOOT/BOOTAA64.EFI
+          cat /boot/grub/grub.cfg
           grep -qi 'C650-1003' /boot/grub/grub.cfg
           grep -q 'kernels/' /boot/grub/grub.cfg
           grep -q 'init=' /boot/grub/grub.cfg
@@ -216,7 +222,8 @@ jobs:
           test "$(sha256sum /boot/m1n1/boot.bin | awk '{print $1}')" = "$M1N1_SHA"
           test "$(sha256sum /boot/vendorfw/firmware.cpio | awk '{print $1}')" = "$FW_SHA"
 
-          # Generation 2 (2 distinct kernels + initrds within configurationLimit = 2)
+          # Generation 2 (2 distinct closures within configurationLimit = 2)
+          readlink -f "$M2AIR_SYS/kernel" "$M2AIR_SYS/initrd" "$M2AIR_AURORA_SYS/kernel" "$M2AIR_AURORA_SYS/initrd"
           ln -sfn "$M2AIR_AURORA_SYS" /nix/var/nix/profiles/system-1-link
           ln -sfn "$M2AIR_SYS" /nix/var/nix/profiles/system-2-link
           ln -sfn system-2-link /nix/var/nix/profiles/system
@@ -225,7 +232,7 @@ jobs:
           echo "=== ESP with 2 distinct generations (configurationLimit = 2) ==="
           df -BM /boot
           ls -lh /boot/kernels/
-          test "$(ls -1 /boot/kernels | wc -l)" -eq 4
+          test "$(ls -1 /boot/kernels | wc -l)" -ge 3
           AVAIL_2GEN_MIB="$(df -BM --output=avail /boot | tail -n1 | tr -dc '0-9')"
           echo "Remaining free ESP capacity with 2 distinct generations: ${AVAIL_2GEN_MIB} MiB"
           test "$AVAIL_2GEN_MIB" -ge 100

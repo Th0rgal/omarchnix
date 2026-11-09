@@ -7,11 +7,10 @@
 }:
 {
   imports = [
-    inputs.disko.nixosModules.disko
     inputs.home-manager.nixosModules.home-manager
     inputs.sops-nix.nixosModules.sops
     ../modules/omarchnix.nix
-    ../modules/disko-m2air.nix
+    ../modules/filesystems-m2air.nix
   ];
 
   networking.hostName = "m2air";

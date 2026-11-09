@@ -14,8 +14,9 @@ let
   luksUuid = "aa0403dd-9917-49e1-85b1-46b21b39f2d9";
   espUuid = "C650-1003";
 in
-assert m2airConfig.disko.devices.disk.nvme0n1.destroy == false;
-assert !(m2airConfig.disko.devices.disk.nvme0n1.content.partitions ? shared);
+assert !(m2airConfig ? disko);
+assert !(m2airConfig.system.build ? destroyFormatMount);
+assert !(m2airConfig.system.build ? formatMount);
 assert !(m2airConfig.fileSystems ? "/mnt/shared");
 assert m2airConfig.boot.initrd.luks.devices ? cryptroot;
 assert m2airConfig.boot.initrd.luks.devices.cryptroot.device == "/dev/disk/by-uuid/${luksUuid}";
@@ -24,6 +25,8 @@ assert m2airConfig.fileSystems."/".device == "/dev/mapper/cryptroot";
 assert m2airConfig.fileSystems."/".fsType == "ext4";
 assert m2airConfig.fileSystems."/boot".device == "/dev/disk/by-uuid/${espUuid}";
 assert m2airConfig.fileSystems."/boot".fsType == "vfat";
+assert builtins.elem "fmask=0077" m2airConfig.fileSystems."/boot".options;
+assert builtins.elem "dmask=0077" m2airConfig.fileSystems."/boot".options;
 assert m2airConfig.boot.loader.systemd-boot.enable == false;
 assert m2airConfig.boot.loader.grub.enable == false;
 assert m2airConfig.boot.loader.efi.canTouchEfiVariables == false;
@@ -39,10 +42,9 @@ pkgs.testers.runNixOSTest {
       { pkgs, ... }:
       {
         imports = [
-          inputs.disko.nixosModules.disko
           inputs.sops-nix.nixosModules.sops
           ../hosts/common.nix
-          ../modules/disko-m2air.nix
+          ../modules/filesystems-m2air.nix
           ../modules/hardening.nix
           ../modules/containers.nix
           ../modules/secrets.nix

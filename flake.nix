@@ -15,11 +15,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    disko = {
-      url = "github:nix-community/disko";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -225,8 +220,6 @@
         };
       };
 
-      diskoConfigurations.m2air = import ./modules/disko-m2air.nix;
-
       # Asahi/NixOS installer ISO (via nixos-apple-silicon's
       # mkInstallerBootstrapCustom; built natively on ubuntu-24.04-arm in CI
       # using the nixos-apple-silicon binary cache) + Omarchy compatibility packages.
@@ -237,33 +230,8 @@
             inherit system;
             overlays = [ omarchnixOverlay ];
           };
-          diskoSrc = inputs.disko;
         in
         rec {
-          disko =
-            let
-              libexec = pkgs.runCommand "disko-libexec" { } ''
-                mkdir -p "$out"
-                cp -r "${diskoSrc}"/{cli.nix,default.nix,disk-deactivate,lib} "$out/"
-                sed -e "s|libexec_dir=\".*\"|libexec_dir=\"$out\"|" "${diskoSrc}/disko" > "$out/disko"
-                chmod 755 "$out/disko"
-              '';
-            in
-            pkgs.writeShellApplication {
-              name = "disko";
-              runtimeInputs = [
-                pkgs.nix
-                pkgs.coreutils
-                pkgs.xcp
-                pkgs.nixos-install-tools
-                pkgs.exfatprogs
-              ];
-              text = ''
-                export DISKO_VERSION="${inputs.disko.shortRev or "pinned"}"
-                export NIX_PATH="nixpkgs=${nixpkgs}"
-                exec "${libexec}/disko" "$@"
-              '';
-            };
           omarchy-shell = pkgs.omarchnix.omarchy-shell;
           omarchnix = pkgs.omarchnix.cli;
           plugin-opencode-model-usage = pkgs.omarchnix.buildPlugin {
@@ -281,33 +249,8 @@
             inherit system;
             overlays = [ omarchnixOverlay ];
           };
-          diskoEval =
-            (nixpkgs.lib.nixosSystem {
-              inherit system;
-              modules = [
-                inputs.disko.nixosModules.disko
-                ./modules/disko-m2air.nix
-                { system.stateVersion = "25.05"; }
-              ];
-            }).config.system.build.destroyFormatMount;
         in
         {
-          disko-declare = pkgs.runCommand "disko-declare" { } ''
-            script="${diskoEval}/bin/disko-destroy-format-mount"
-            test -x "$script"
-            ${pkgs.bash}/bin/bash -n "$script"
-            ${pkgs.shellcheck}/bin/shellcheck -S warning -e SC2034,SC2054 "$script"
-            grep -q 'cryptsetup -q luksFormat' "$script"
-            grep -q 'mkfs.ext4' "$script"
-            grep -q 'mkfs.vfat' "$script"
-            grep -q 'cryptroot' "$script"
-            grep -q 'aa0403dd-9917-49e1-85b1-46b21b39f2d9' "$script"
-            grep -q 'C650-1003' "$script"
-            ! grep -q '/mnt/shared' "$script"
-            ! grep -q 'mkfs.exfat' "$script"
-            echo "$script" > "$out"
-          '';
-
           security = import ./tests/security.nix {
             inherit pkgs inputs;
             inherit (nixpkgs) lib;

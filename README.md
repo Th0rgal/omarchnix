@@ -2,7 +2,7 @@
 
 Declarative Omarchy-compatible NixOS & Home Manager workstation stack across **`aarch64-linux`** (Apple Silicon M-series via Asahi Linux, NVIDIA Grace / DGX Spark) and **`x86_64-linux`** workstations and VMs.
 
-See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-17`) for recorded design decisions.
+See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-18`) for recorded design decisions.
 
 ---
 
@@ -78,7 +78,7 @@ Every cell is backed by a recorded gate (CI run or runbook log in `docs/logs/`).
 | G4 — Asahi bootstrap on real BootROM | runbook log from the rehearsal box | `M2-L-ASAHI` cutover runbook + `rehearsal` power-guard ready; Orb Scaleway allowlist / `M2-M` `out_of_stock` logged ([`m5-m7-2026-11-06.md`](docs/logs/m5-m7-2026-11-06.md)) |
 | G5 — NixOS install + rebuild on rehearsal | `nixos-rebuild switch` log on the mini | `M2-L-ASAHI` cutover runbook + `rehearsal` power-guard ready; Orb Scaleway allowlist / `M2-M` `out_of_stock` logged ([`m5-m7-2026-11-06.md`](docs/logs/m5-m7-2026-11-06.md)) |
 | G6 — Air install, dual-boot macOS kept | runbook log from the Air | hardware polish + printed runbook ready ([`install-m2air.md`](docs/install-m2air.md), [`m5-m7-2026-11-06.md`](docs/logs/m5-m7-2026-11-06.md)) |
-| G7 — security & container invariants | `checks.x86_64-linux.{disko-declare,security}` in CI + secret sweep | passed ([`g7-2026-11-06.md`](docs/logs/g7-2026-11-06.md)) |
+| G7 — security & container invariants | `checks.x86_64-linux.security` in CI + secret sweep | passed ([`g7-2026-11-06.md`](docs/logs/g7-2026-11-06.md)) |
 | G8 — Hyprland desktop via Home Manager | `m2air` eval + `checks.x86_64-linux.desktop` screenshot in CI + `boat.dev` toplevel build | passed ([`g8-2026-11-06.md`](docs/logs/g8-2026-11-06.md), [`g3-2026-11-06.md`](docs/logs/g3-2026-11-06.md)) |
 
 ---

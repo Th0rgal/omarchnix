@@ -174,13 +174,16 @@ jobs:
           PY
 
           cat <<'SH' > "$WORK_ESP/verify_esp.sh"
-          set -euo pipefail
+          set -euxo pipefail
           ESP_PART="$1"
           WORK_ESP="$2"
           INSTALL_BL="$3"
           M2AIR_SYS="$4"
           M2AIR_AURORA_SYS="$5"
 
+          # Detach any pre-existing /boot (/boot/efi) mounts inside this private mount namespace
+          # so install-grub.pl GetFs("/boot") (strict length > comparison) resolves ESP_PART.
+          umount -R /boot 2>/dev/null || umount -l /boot 2>/dev/null || true
           mkdir -p /boot /nix/var/nix/profiles "$WORK_ESP/profiles"
           mount -t vfat -o fmask=0077,dmask=0077 "$ESP_PART" /boot
           mount --bind "$WORK_ESP/profiles" /nix/var/nix/profiles
@@ -262,7 +265,7 @@ jobs:
 
           cleanup_esp
           trap - EXIT
-          rm -f m2air-system m2air-install-bootloader m2air-aurora-system
+          rm -f m2air-system m2air-install-bootloader m2air-aurora-system aurora-stage2
       - name: Prepare and build Asahi kernel
         run: |
           nix build .#installer-bootstrap.config.system.build.kernel.src -j1 -L -o kernel-src

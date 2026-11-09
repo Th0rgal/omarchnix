@@ -120,9 +120,10 @@ jobs:
           test -s "$M2AIR_SYS/kernel"
           test -s "$M2AIR_SYS/initrd"
           test -s "$M2AIR_SYS/boot.json"
-          python3 - "$M2AIR_SYS/initrd" <<'PY'
-          import re, subprocess, sys
-          blob = open(sys.argv[1], "rb").read()
+          python3 - "$M2AIR_SYS" <<'PY'
+          import glob, os, pathlib, re, subprocess, sys
+          m2air_sys = sys.argv[1]
+          blob = open(os.path.join(m2air_sys, "initrd"), "rb").read()
           off = blob.find(b"\x28\xb5\x2f\xfd")
           assert off >= 0, "zstd magic not found in m2air initrd"
           cpio_raw = subprocess.check_output(["zstd", "-dc"], input=blob[off:])
@@ -130,15 +131,16 @@ jobs:
           entry_lines = [line.strip() for line in entries.splitlines() if line.strip()]
           assert "etc/crypttab" in entry_lines, "missing etc/crypttab symlink in initrd"
           assert any("systemd-cryptsetup" in line for line in entry_lines), "missing systemd-cryptsetup in initrd"
-          builtin_paths = [line for line in entry_lines if line.endswith("/modules.builtin")]
-          assert builtin_paths, "missing modules.builtin in initrd"
-          builtin = "\n".join(
-              subprocess.check_output(["cpio", "-i", "--to-stdout", p], input=cpio_raw, stderr=subprocess.DEVNULL).decode(errors="replace")
-              for p in builtin_paths
-          )
-          haystack = entries + "\n" + builtin
-          for pat in (r"nvme[-_]apple", r"dm[-_]crypt", r"dockchannel[-_]hid", r"hid[-_]apple", r"vfat"):
-              assert re.search(pat, haystack), f"missing {pat} in initrd modules or modules.builtin"
+          kernel_out = os.path.dirname(os.path.realpath(os.path.join(m2air_sys, "kernel")))
+          builtin_files = sorted(set(
+              glob.glob(os.path.join(kernel_out, "lib/modules/*/modules.builtin"))
+              + glob.glob(os.path.join(m2air_sys, "kernel-modules/lib/modules/*/modules.builtin"))
+          ))
+          assert builtin_files, f"missing modules.builtin under {kernel_out}"
+          builtin = "\n".join(pathlib.Path(p).read_text() for p in builtin_files)
+          for pat in (r"nvme[-_]apple", r"dm[-_]crypt", r"dockchannel[-_]hid", r"hid[-_]apple"):
+              assert re.search(pat, entries), f"missing {pat} module in m2air initrd"
+          assert re.search(r"vfat", entries + "\n" + builtin), "missing vfat in initrd or kernel modules.builtin"
           crypttab_paths = [line for line in entry_lines if line.endswith("-initrd-crypttab")]
           assert crypttab_paths, "missing *-initrd-crypttab store entry in initrd"
           crypttab = subprocess.check_output(

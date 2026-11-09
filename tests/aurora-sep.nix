@@ -3,6 +3,7 @@
   lib,
   inputs,
   m2airConfig,
+  m2airAuroraConfig,
   self,
 }:
 let
@@ -170,32 +171,33 @@ let
 
   testPkgs = pkgs.extend auroraMockOverlay;
 in
-assert m2airConfig.omarchnix.hardware.m2air.touchId.enable == true;
-assert m2airConfig.omarchnix.hardware.m2air.touchId.fido.enable == true;
-assert m2airConfig.boot.kernelPackages.kernel.version == "7.3.0";
-assert (m2airConfig.boot.kernelPackages.kernel.auroraCtxrExecmem or false) == true;
+assert m2airConfig.omarchnix.hardware.m2air.touchId.enable == false;
+assert m2airAuroraConfig.omarchnix.hardware.m2air.touchId.enable == true;
+assert m2airAuroraConfig.omarchnix.hardware.m2air.touchId.fido.enable == true;
+assert m2airAuroraConfig.boot.kernelPackages.kernel.version == "7.3.0";
+assert (m2airAuroraConfig.boot.kernelPackages.kernel.auroraCtxrExecmem or false) == true;
 assert builtins.elem "https://aurorasilicon.org/nixos-aurora/cache"
-  m2airConfig.nix.settings.substituters;
-assert builtins.elem "apple_sep" m2airConfig.boot.blacklistedKernelModules;
-assert m2airConfig.boot.initrd.includeDefaultModules == false;
-assert builtins.elem "uhid" m2airConfig.boot.kernelModules;
-assert m2airConfig.system.build ? auroraStage2;
-assert fingerprintSufficientBeforeUnix m2airConfig "sudo";
-assert fingerprintSufficientBeforeUnix m2airConfig "polkit-1";
-assert fingerprintSufficientBeforeUnix m2airConfig "hyprlock";
-assert offersFingerprint m2airConfig "omarchy-lock-fingerprint";
-assert !(offersFingerprint m2airConfig "omarchy-lock-password");
-assert !(offersFingerprint m2airConfig "login");
-assert !(offersFingerprint m2airConfig "su");
-assert !(offersFingerprint m2airConfig "sshd");
-assert hasRearmHook m2airConfig "sudo";
-assert hasRearmHook m2airConfig "polkit-1";
-assert hasRearmHook m2airConfig "login";
-assert hasRearmHook m2airConfig "hyprlock";
-assert hasRearmHook m2airConfig "omarchy-lock-password";
+  m2airAuroraConfig.nix.settings.substituters;
+assert builtins.elem "apple_sep" m2airAuroraConfig.boot.blacklistedKernelModules;
+assert m2airAuroraConfig.boot.initrd.includeDefaultModules == false;
+assert builtins.elem "uhid" m2airAuroraConfig.boot.kernelModules;
+assert m2airAuroraConfig.system.build ? auroraStage2;
+assert fingerprintSufficientBeforeUnix m2airAuroraConfig "sudo";
+assert fingerprintSufficientBeforeUnix m2airAuroraConfig "polkit-1";
+assert fingerprintSufficientBeforeUnix m2airAuroraConfig "hyprlock";
+assert offersFingerprint m2airAuroraConfig "omarchy-lock-fingerprint";
+assert !(offersFingerprint m2airAuroraConfig "omarchy-lock-password");
+assert !(offersFingerprint m2airAuroraConfig "login");
+assert !(offersFingerprint m2airAuroraConfig "su");
+assert !(offersFingerprint m2airAuroraConfig "sshd");
+assert hasRearmHook m2airAuroraConfig "sudo";
+assert hasRearmHook m2airAuroraConfig "polkit-1";
+assert hasRearmHook m2airAuroraConfig "login";
+assert hasRearmHook m2airAuroraConfig "hyprlock";
+assert hasRearmHook m2airAuroraConfig "omarchy-lock-password";
 assert
   let
-    conf = lib.splitString "\n" m2airConfig.environment.etc."modules-load.d/nixos.conf".source.text;
+    conf = lib.splitString "\n" m2airAuroraConfig.environment.etc."modules-load.d/nixos.conf".source.text;
   in
   !(builtins.elem "atkbd" conf) && !(builtins.elem "cpufreq_schedutil" conf);
 testPkgs.testers.runNixOSTest {

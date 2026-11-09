@@ -161,4 +161,17 @@ Direct inspection of `AsahiLinux/m1n1` (`src/main.c`, `src/asc.c`, `src/chainloa
    - `61-omarchnix-iboot-isc.rules` maps GPT partition type `69646961-6700-11AA-AA11-00306543ECAC` (`Apple_APFS_ISC`) to `/dev/disk/by-partlabel/iBootSystemContainer` even when factory macOS GPT tables leave `PartName` blank.
    - Touch ID (`pam_fprintd.so`) is enabled on `sudo`, `polkit-1` (with `omarchy-hw-laptop-closed` clamshell bypass), `hyprlock`, and `omarchy-lock-fingerprint` (for `omarchy-shell`'s native Quickshell lock screen), while `sshd`, `login`, and `su` remain strictly non-fingerprint.
    - `pam_aurora_touchid.so` re-arming is wired after `pam_unix.so` on `sudo`, `polkit-1`, `login`, `hyprlock`, and `omarchy-lock-password`, matching macOS's `require_password_after_boot = yes` policy.
-   - `aurora-fidod` (`/dev/uhid`) runs by default (`omarchnix.hardware.m2air.touchId.fido.enable = true`) so Brave, Firefox, Orb WebAuthn passkeys, and `ssh-keygen -t ecdsa-sk` authenticate via Touch ID + Secure Enclave.
+    - `aurora-fidod` (`/dev/uhid`) runs by default (`omarchnix.hardware.m2air.touchId.fido.enable = true`) so Brave, Firefox, Orb WebAuthn passkeys, and `ssh-keygen -t ecdsa-sk` authenticate via Touch ID + Secure Enclave.
+
+## DR-17 — UUID-based Asahi disk layout (no `shared` exFAT) and staged `m2air` -> `m2air-aurora` cutover
+
+Date: 2026-11-09. Status: accepted. Supersedes DR-4's `shared` exFAT partition/label assumptions and refines DR-16's first-boot staging.
+
+1. **Match the actual Apple/Asahi GPT layout by UUID, never GPT `PartName` or partition number (`modules/disko-m2air.nix`):**
+   - `alx.sh` on the target MacBook Air M2 leaves `nvme0n1p4` (EFI FAT32) and `nvme0n1p6` (Linux LUKS2) with empty GPT partition names (`PARTLABEL`), places `RecoveryOSContainer` (macOS Recovery) at `nvme0n1p5`, and has no `150 GiB` exFAT partition.
+   - The `shared` partition declaration and `/mnt/shared` mount are removed completely, along with the dangerous `mkfs.exfat ... /dev/nvme0n1p5` command in `docs/install-m2air.md`.
+   - `/boot` mounts `/dev/disk/by-uuid/C650-1003` (`vfat`, `fmask=0077,dmask=0077`) and `boot.initrd.luks.devices.cryptroot.device` targets `/dev/disk/by-uuid/aa0403dd-9917-49e1-85b1-46b21b39f2d9` -> `/dev/mapper/cryptroot` (`ext4` on `/`), keeping boot independent of GPT labels and partition numbering while `disko.devices.disk.nvme0n1.destroy = false` and `preCreateHook` refuse destructive `disko` formatting on live Apple Silicon disks.
+2. **Validate ordinary NixOS boot before applying Aurora Stage 2 (`m2air` vs `m2air-aurora`):**
+   - `nixosConfigurations.m2air` (`omarchnix.hardware.m2air.touchId.enable = false`) uses stock `nixos-apple-silicon` and boots directly from `alx.sh`'s untouched `/boot/m1n1/boot.bin` for initial `nixos-install` verification.
+   - `nixosConfigurations.m2air-aurora` enables the `nixos-aurora` overlay, `linux-aurora` `7.3.0`, SEP/Touch ID, and FIDO2 (`omarchnix.hardware.m2air.touchId.enable = true`), applied via `nixos-rebuild boot --flake .#m2air-aurora && omarchnix-install-stage2 /boot` once baseline NixOS boot is confirmed on the Air.
+

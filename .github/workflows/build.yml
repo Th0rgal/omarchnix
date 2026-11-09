@@ -26,6 +26,7 @@ jobs:
       - name: Evaluate all hosts
         run: |
           nix eval .#nixosConfigurations.m2air.config.system.build.toplevel.drvPath --raw
+          nix eval .#nixosConfigurations.m2air-aurora.config.system.build.toplevel.drvPath --raw
           nix eval .#nixosConfigurations.spark.config.system.build.toplevel.drvPath --raw
           nix eval .#nixosConfigurations.workstation.config.system.build.toplevel.drvPath --raw
           nix eval .#nixosConfigurations.rehearsal.config.system.build.toplevel.drvPath --raw
@@ -108,12 +109,13 @@ jobs:
             substituters = https://aurorasilicon.org/nixos-aurora/cache https://nixos-apple-silicon.cachix.org https://cache.nixos.org
             trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14= nixos-apple-silicon.cachix.org-1:8psDu5SA5dAD7qA0zMy5UT292TxeEPzIz8VVEr2Js20= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
       - uses: DeterminateSystems/magic-nix-cache-action@v15
-      - name: Verify m2air full system closure and Aurora Stage 2 on ARM64
+      - name: Verify m2air and m2air-aurora system closures and Aurora Stage 2 on ARM64
         run: |
-          nix build .#nixosConfigurations.m2air.config.system.build.auroraStage2 -L -o aurora-stage2
+          nix build .#nixosConfigurations.m2air.config.system.build.toplevel -L --no-link
+          nix build .#nixosConfigurations.m2air-aurora.config.system.build.auroraStage2 -L -o aurora-stage2
           cat aurora-stage2/manifest.json
           test -s aurora-stage2/boot.bin.sha256
-          nix build .#nixosConfigurations.m2air.config.system.build.toplevel -L --no-link
+          nix build .#nixosConfigurations.m2air-aurora.config.system.build.toplevel -L --no-link
       - name: Prepare and build Asahi kernel
         run: |
           nix build .#installer-bootstrap.config.system.build.kernel.src -j1 -L -o kernel-src

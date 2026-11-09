@@ -130,8 +130,14 @@ jobs:
           entries = subprocess.check_output(["cpio", "-t"], input=cpio_raw, stderr=subprocess.DEVNULL).decode()
           assert "etc/crypttab" in entries, "missing etc/crypttab symlink in initrd"
           assert "systemd-cryptsetup" in entries, "missing systemd-cryptsetup in initrd"
+          builtin = subprocess.run(
+              ["cpio", "-i", "--to-stdout", "*modules.builtin"],
+              input=cpio_raw,
+              capture_output=True,
+          ).stdout.decode(errors="replace")
+          haystack = entries + "\n" + builtin
           for pat in (r"nvme[-_]apple", r"dm[-_]crypt", r"dockchannel[-_]hid", r"hid[-_]apple", r"vfat"):
-              assert re.search(pat, entries), f"missing {pat} in initrd"
+              assert re.search(pat, haystack), f"missing {pat} in initrd modules or modules.builtin"
           crypttab = subprocess.check_output(
               ["cpio", "-i", "--to-stdout", "nix/store/*initrd-crypttab*"],
               input=cpio_raw,

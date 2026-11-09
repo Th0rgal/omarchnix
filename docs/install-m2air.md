@@ -1,6 +1,6 @@
 # Printed Runbook — MacBook Air M2 Cutover (Gate G6)
 
-> **Rule (`docs/decisions.md` DR-3 / DR-5 / DR-12):** Complete the Scaleway `M2-L-ASAHI` dress rehearsal (`docs/runbook-scaleway.md`, Gates G4 & G5) before touching internal partitions, or verify the `m1n1` -> U-Boot -> UEFI standalone stages below cleanly before writing the NixOS partition. Never enable `boot.loader.*` in NixOS on Apple Silicon; boot objects (`m1n1`, `U-Boot`, `vendorfw/firmware.cpio`) are owned exclusively by the Asahi installer on the Apple EFI System Partition.
+> **Rule (`docs/decisions.md` DR-3 / DR-5 / DR-12 / DR-19):** Complete the Scaleway `M2-L-ASAHI` dress rehearsal (`docs/runbook-scaleway.md`, Gates G4 & G5) before touching internal partitions, or verify the `m1n1` -> U-Boot -> UEFI standalone stages below cleanly before writing the NixOS partition. Apple BootROM/iBoot, Stage 1 `m1n1`, `/boot/m1n1/boot.bin` (Stage 2 `m1n1` + DTBs + `U-Boot`), and `/boot/vendorfw/firmware.cpio` on the Asahi ESP (`UUID=C650-1003`) are owned by `alx.sh` (and later explicit `omarchnix-install-stage2`), while `hosts/m2air.nix` installs removable ARM64 UEFI GRUB to `/boot/EFI/BOOT/BOOTAA64.EFI` (`device = "nodev"`, `efiSupport = true`, `efiInstallAsRemovable = true`, `enableCryptodisk = false`, `configurationLimit = 2`, `canTouchEfiVariables = false`, `extraFiles = lib.mkForce { }`) so U-Boot boots NixOS persistently without touching Apple NVRAM, `m1n1/boot.bin`, `vendorfw`, or Argon2id LUKS2 in GRUB.
 
 ---
 
@@ -64,14 +64,24 @@
    ```
 4. Verify `/mnt/boot/vendorfw/firmware.cpio` and `/mnt/boot/m1n1/boot.bin` are intact (`ls -lh /mnt/boot/vendorfw/firmware.cpio /mnt/boot/m1n1/boot.bin`).
 5. Copy the owner `sops-nix` age secret key (`0600`) to `/mnt/var/lib/sops-nix/key.txt` and provision `thomas`'s SSH authorized key.
-6. Install the baseline `m2air` system closure first (uses stock `nixos-apple-silicon` + existing `alx.sh` Stage 2 so ordinary NixOS boot is validated before touching `/boot/m1n1/boot.bin`):
+6. Install the baseline `m2air` system closure and removable ARM64 UEFI GRUB (`EFI/BOOT/BOOTAA64.EFI`, `grub/grub.cfg`, `kernels/*`, capped at `configurationLimit = 2` to fit within the ~353 MiB free ESP budget while leaving `/boot/m1n1/boot.bin` and `/boot/vendorfw/firmware.cpio` untouched; Aurora Stage 2 stays deferred until §4):
    ```console
-   nixos-install --flake github:Th0rgal/omarchnix#m2air --no-root-passwd
+   nixos-install --flake github:Th0rgal/omarchnix#m2air --no-root-passwd --option tarball-ttl 0
+   # Set thomas's password on initial install (skip if already set in /mnt/etc/shadow):
    nixos-enter --root /mnt -c 'passwd thomas'
+   ```
+7. Verify ESP bootloader artifacts, kernel/initrd copies, untouched `m1n1/boot.bin` + `vendorfw/firmware.cpio`, and free ESP space **before** unmounting and rebooting:
+   ```console
+   ls -lh /mnt/boot/EFI/BOOT/BOOTAA64.EFI /mnt/boot/grub/grub.cfg /mnt/boot/kernels/
+   ls -lh /mnt/boot/m1n1/boot.bin /mnt/boot/vendorfw/firmware.cpio
+   grep -E 'C650-1003|menuentry|linux |initrd ' /mnt/boot/grub/grub.cfg
+   df -h /mnt/boot
+   sync
    umount -R /mnt
    cryptsetup close cryptroot
    reboot
    ```
+   *(If `/mnt` and `/mnt/boot` are already mounted from an earlier install with `thomas`'s password and `/mnt/var/lib/sops-nix/key.txt` already configured, simply re-run `nixos-install --flake github:Th0rgal/omarchnix#m2air --no-root-passwd --option tarball-ttl 0` without reformatting or touching partitions, then run the step 7 checks above).*
 
 ---
 

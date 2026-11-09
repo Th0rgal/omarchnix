@@ -35,7 +35,7 @@ let
       ## Golden Rules for Agents
 
       1. **Never edit `/nix/store` or `$OMARCHY_PATH` directly.** Read `$OMARCHY_PATH` freely (`$OMARCHY_PATH/shell`, `$OMARCHY_PATH/themes`, `$OMARCHY_PATH/default/themed`) for reference.
-      2. **Respect Asahi BootROM safety (DR-5).** Never enable `boot.loader.systemd-boot`, `boot.loader.grub`, or `boot.loader.efi.canTouchEfiVariables` on `omarchnix.profile = "asahi"` hosts (`m2air`, `rehearsal`).
+      2. **Respect Asahi BootROM & ESP safety (DR-5 / DR-19).** Never enable `boot.loader.systemd-boot`, `boot.loader.efi.canTouchEfiVariables`, `boot.loader.grub.enableCryptodisk`, or `disko` on Apple Silicon hosts; `m2air` uses removable ARM64 UEFI GRUB (`device = "nodev"`, `efiInstallAsRemovable = true`, `configurationLimit = 2`, `extraFiles = lib.mkForce { }`) to preserve `m1n1/boot.bin`, `vendorfw`, and Apple partitions, while `rehearsal` keeps `boot.loader.*` disabled.
       3. **Validate before switching.** Run `omarchnix check` (and `nix fmt` + `nix flake check` when modifying a system flake) before running `sudo nixos-rebuild switch`.
       4. **Zero symlinks inside `~/.config/omarchy/plugins/<id>`.** Both `omarchy-plugin-validate` and `PluginRegistry.qml` reject symlinks inside plugin directories; use `lib.omarchy.buildPlugin` + `programs.omarchnix.plugins.locked` or `omarchnix plugin install <id> --yes`.
     '';

@@ -13,7 +13,7 @@
 
 | Profile / Host | Architecture | Target Class | Boot & Hardware Model |
 | --- | --- | --- | --- |
-| `m2air` / `m2air-aurora` | `aarch64-linux` | Apple Silicon MacBook Air M2 (`J413`/`J415`) | Manual `m1n1` + U-Boot + vendorfw (DR-5), pure `fileSystems` + `initrd.luks` UUID mounts (`C650-1003` + `aa0403dd-9917-49e1-85b1-46b21b39f2d9`, no `disko` GPT management, DR-18), PipeWire `asahi-audio` DSP + `speakersafetyd`, 1.6x HiDPI + notch geometry, staged Aurora SEP/Touch ID (`m2air-aurora`) |
+| `m2air` / `m2air-aurora` | `aarch64-linux` | Apple Silicon MacBook Air M2 (`J413`/`J415`) | Preserved `alx.sh` `m1n1` + U-Boot + `vendorfw` chain -> removable ARM64 UEFI GRUB (`EFI/BOOT/BOOTAA64.EFI`, `configurationLimit = 2`, DR-5 / DR-19), pure `fileSystems` + `initrd.luks` UUID mounts (`C650-1003` + `aa0403dd-9917-49e1-85b1-46b21b39f2d9`, no `disko` GPT management, DR-18), PipeWire `asahi-audio` DSP + `speakersafetyd`, 1.6x HiDPI + notch geometry, staged Aurora SEP/Touch ID (`m2air-aurora`) |
 | `spark` | `aarch64-linux` | NVIDIA Grace / DGX Spark ARM64 server & workstation | UEFI `systemd-boot`, hardened headless or desktop profile |
 | `workstation` | `x86_64-linux` | AMD / Intel Linux desktop & cloud workstation | UEFI `systemd-boot`, KVM + `nixos-container` sandboxing, full Hyprland + `omarchy-shell` desktop |
 | `rehearsal` / `vm` | `aarch64-linux` | Scaleway `M2-L-ASAHI` Mac mini & QEMU guests | Disposable BootROM dress rehearsal with poweroff->reboot guard (DR-3 / DR-12) and CI/QEMU iteration |

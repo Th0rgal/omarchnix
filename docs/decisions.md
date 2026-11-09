@@ -173,5 +173,15 @@ Date: 2026-11-09. Status: accepted. Supersedes DR-4's `shared` exFAT partition/l
    - `/boot` mounts `/dev/disk/by-uuid/C650-1003` (`vfat`, `fmask=0077,dmask=0077`) and `boot.initrd.luks.devices.cryptroot.device` targets `/dev/disk/by-uuid/aa0403dd-9917-49e1-85b1-46b21b39f2d9` -> `/dev/mapper/cryptroot` (`ext4` on `/`), keeping boot independent of GPT labels and partition numbering while `disko.devices.disk.nvme0n1.destroy = false` and `preCreateHook` refuse destructive `disko` formatting on live Apple Silicon disks.
 2. **Validate ordinary NixOS boot before applying Aurora Stage 2 (`m2air` vs `m2air-aurora`):**
    - `nixosConfigurations.m2air` (`omarchnix.hardware.m2air.touchId.enable = false`) uses stock `nixos-apple-silicon` and boots directly from `alx.sh`'s untouched `/boot/m1n1/boot.bin` for initial `nixos-install` verification.
-   - `nixosConfigurations.m2air-aurora` enables the `nixos-aurora` overlay, `linux-aurora` `7.3.0`, SEP/Touch ID, and FIDO2 (`omarchnix.hardware.m2air.touchId.enable = true`), applied via `nixos-rebuild boot --flake .#m2air-aurora && omarchnix-install-stage2 /boot` once baseline NixOS boot is confirmed on the Air.
+    - `nixosConfigurations.m2air-aurora` enables the `nixos-aurora` overlay, `linux-aurora` `7.3.0`, SEP/Touch ID, and FIDO2 (`omarchnix.hardware.m2air.touchId.enable = true`), applied via `nixos-rebuild boot --flake .#m2air-aurora && omarchnix-install-stage2 /boot` once baseline NixOS boot is confirmed on the Air.
+
+## DR-18 — Remove `disko` GPT declarations in favor of pure NixOS `fileSystems` + `initrd.luks` (`modules/filesystems-m2air.nix`)
+
+Date: 2026-11-09. Status: accepted. Refines DR-17 and retires `disko` on Apple Silicon dual-boot hardware.
+
+1. **Zero partition-table / formatting capability in NixOS (`modules/filesystems-m2air.nix`):**
+   - `disko`'s dual-boot GPT handling is unsafe on Apple Silicon (`iBootSystemContainer`, APFS containers, `alx.sh` stub, and `RecoveryOSContainer`). Even with `destroy = false`, carrying `disko` GPT `ESP` and `cryptroot` partition definitions generated `system.build.{destroyFormatMount,formatMount,diskoScript}` scripts capable of running `sgdisk`, `mkfs.vfat`, and `cryptsetup luksFormat` against `/dev/nvme0n1`.
+   - `disko` (`inputs.disko`, `diskoConfigurations.m2air`, `packages.*.disko`, `modules/disko-m2air.nix`) is removed completely and replaced with `modules/filesystems-m2air.nix`, declaring strictly `boot.initrd.luks.devices.cryptroot` (`/dev/disk/by-uuid/aa0403dd-9917-49e1-85b1-46b21b39f2d9` -> `/dev/mapper/cryptroot`) and `fileSystems` (`/` ext4, `/boot` `/dev/disk/by-uuid/C650-1003` vfat `fmask=0077,dmask=0077`). `tests/security.nix` asserts `!(m2airConfig ? disko)` and `!(m2airConfig.system.build ? destroyFormatMount)`.
+2. **Deferred GPT physical-order sorting (`p6` before `p5`):**
+   - Because free space lay physically before `nvme0n1p5` (`RecoveryOSContainer`), `nvme0n1p6` precedes `p5` on disk. Sorting GPT partition entries (`gdisk` `s`) renumbers `p5`/`p6` and is deferred to a separate post-install maintenance window with a verified backup (`docs/install-m2air.md` §5); UUID-only NixOS mounts remain unaffected by partition renumbering.
 

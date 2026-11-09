@@ -39,7 +39,7 @@
 
 ## 2. Partitioning Free Space & Installing `m2air` (in Live NixOS ISO)
 
-> **Safety Note:** Never run `disko`'s destructive or formatting modes (`destroy`, `format`, `destroy,format,mount`) on `/dev/nvme0n1` (`modules/disko-m2air.nix` sets `destroy = false` and carries a `preCreateHook` refusing whole-disk GPT formatting whenever Apple Silicon `iBootSystemContainer` / `RecoveryOSContainer` / `AF0A` partitions exist). On Apple Silicon, `nvme0n1p1` (`iBootSystemContainer`), `nvme0n1p2` (`macOS` APFS), `nvme0n1p3` (Asahi stub APFS), `nvme0n1p4` (Asahi EFI System Partition, FAT32 UUID `C650-1003`), and `nvme0n1p5` (`RecoveryOSContainer` — **macOS Recovery, NEVER touch or format `p5`!**) are owned by macOS and `alx.sh`. Create or unlock only the NixOS LUKS2 root partition (`nvme0n1p6`, LUKS UUID `aa0403dd-9917-49e1-85b1-46b21b39f2d9`), and mount by filesystem/LUKS UUID so boot is completely independent of GPT partition labels or numbering.
+> **Safety Note:** `modules/filesystems-m2air.nix` declares **only** existing NixOS `fileSystems` and `boot.initrd.luks.devices.cryptroot` by UUID — `disko` has been removed completely (`DR-18`) so NixOS carries zero GPT/partition creation or disk-formatting scripts for `/dev/nvme0n1`. On Apple Silicon, `nvme0n1p1` (`iBootSystemContainer`), `nvme0n1p2` (`macOS` APFS), `nvme0n1p3` (Asahi stub APFS), `nvme0n1p4` (Asahi EFI System Partition, FAT32 UUID `C650-1003`), and `nvme0n1p5` (`RecoveryOSContainer` — **macOS Recovery, NEVER touch or format `p5`!**) are owned by macOS and `alx.sh`. Unlock and mount only the existing NixOS LUKS2 root (`UUID=aa0403dd-9917-49e1-85b1-46b21b39f2d9`) and EFI (`UUID=C650-1003`) by UUID so boot remains completely independent of GPT partition labels or numbering (even if GPT entries are later sorted with `gdisk` `s` under a verified backup; see §5).
 
 1. Connect to Wi-Fi in the live environment (`impala` or `iwctl` / `nmcli device wifi connect <SSID> --ask`).
 2. Inspect exact partition UUIDs and types (`lsblk -o NAME,FSTYPE,UUID,PARTTYPE,PARTLABEL,SIZE /dev/nvme0n1`):
@@ -114,7 +114,8 @@ sudo reboot
 
 ---
 
-## 5. Ongoing Firmware Maintenance (DR-5)
+## 5. Ongoing Firmware & GPT Maintenance (DR-5 / DR-18)
 
 1. Boot macOS after Apple point updates and install macOS Software Update.
 2. In macOS Terminal, run `curl https://alx.sh | sh` and select **Rebuild vendor firmware package** so `/boot/vendorfw/firmware.cpio` stays synchronized with system firmware.
+3. **Deferred GPT Entry Sorting (`p6` physically before `p5`):** Inserting the Linux partition in free space between `nvme0n1p4` (Asahi ESP) and `nvme0n1p5` (`RecoveryOSContainer` at the end of the disk) leaves GPT table entries out of physical sector order (`p6` physically precedes `p5`), which some Apple `diskutil` / macOS upgrade checks dislike. Do **not** sort GPT entries during initial `nixos-install`. Handle GPT sorting (`gdisk /dev/nvme0n1` -> `s` -> `w`) as a separate maintenance step later only after a verified full backup; because `modules/filesystems-m2air.nix` mounts strictly by LUKS/FAT UUID (`aa0403dd-9917-49e1-85b1-46b21b39f2d9` and `C650-1003`), partition renumbering (`p5` <-> `p6`) requires zero NixOS configuration changes.

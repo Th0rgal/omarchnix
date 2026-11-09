@@ -100,22 +100,20 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@v15
       - name: Verify m2air and m2air-aurora closures, ARM64 UEFI GRUB ESP artifacts, and Aurora Stage 2
         run: |
-          nix build .#nixosConfigurations.m2air.config.system.build.toplevel -L -o m2air-system
-          nix build .#nixosConfigurations.m2air.config.system.build.installBootLoader -L -o m2air-install-bootloader
-          nix build .#nixosConfigurations.m2air-aurora.config.system.build.auroraStage2 -L -o aurora-stage2
-          cat aurora-stage2/manifest.json
-          test -s aurora-stage2/boot.bin.sha256
-          nix build .#nixosConfigurations.m2air-aurora.config.system.build.toplevel -L -o m2air-aurora-system
+          (
+          set -euxo pipefail
+          M2AIR_SYS="$(nix build .#nixosConfigurations.m2air.config.system.build.toplevel -L --no-link --print-out-paths)"
+          INSTALL_BL="$(nix build .#nixosConfigurations.m2air.config.system.build.installBootLoader -L --no-link --print-out-paths)"
+          AURORA_STAGE2="$(nix build .#nixosConfigurations.m2air-aurora.config.system.build.auroraStage2 -L --no-link --print-out-paths)"
+          cat "$AURORA_STAGE2/manifest.json"
+          test -s "$AURORA_STAGE2/boot.bin.sha256"
+          M2AIR_AURORA_SYS="$(nix build .#nixosConfigurations.m2air-aurora.config.system.build.toplevel -L --no-link --print-out-paths)"
 
           DOSFS_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.dosfstools --no-link --print-out-paths)"
           GPT_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.gptfdisk --no-link --print-out-paths)"
           ZSTD_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.zstd --no-link --print-out-paths)"
           CPIO_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.cpio --no-link --print-out-paths)"
           export PATH="$DOSFS_OUT/bin:$GPT_OUT/bin:$ZSTD_OUT/bin:$CPIO_OUT/bin:$PATH"
-
-          M2AIR_SYS="$(readlink -f m2air-system)"
-          M2AIR_AURORA_SYS="$(readlink -f m2air-aurora-system)"
-          INSTALL_BL="$(readlink -f m2air-install-bootloader)"
 
           # 1. Verify kernel, boot.json, initrd LUKS2/NVMe/Apple-HID drivers, and non-cryptodisk GRUB installer
           test -s "$M2AIR_SYS/kernel"
@@ -265,7 +263,13 @@ jobs:
 
           cleanup_esp
           trap - EXIT
-          rm -f m2air-system m2air-install-bootloader m2air-aurora-system aurora-stage2
+          ) 2>&1 | tee /tmp/esp-verify.log
+      - name: Upload ESP verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp-verify-log
+          path: /tmp/esp-verify.log
       - name: Prepare and build Asahi kernel
         run: |
           nix build .#installer-bootstrap.config.system.build.kernel.src -j1 -L -o kernel-src

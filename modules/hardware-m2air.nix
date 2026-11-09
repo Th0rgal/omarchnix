@@ -85,6 +85,10 @@ in
 
       hardware.graphics.enable = true;
 
+      # Ensure Apple SPI/DockChannel/USB keyboard HID support is always present in
+      # stage-1 initrd for LUKS2 passphrase entry, even when includeDefaultModules = false.
+      boot.initrd.availableKernelModules = [ "hid_apple" ];
+
       hardware.bluetooth = {
         enable = true;
         powerOnBoot = true;

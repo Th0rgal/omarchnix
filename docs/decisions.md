@@ -185,3 +185,17 @@ Date: 2026-11-09. Status: accepted. Refines DR-17 and retires `disko` on Apple S
 2. **Deferred GPT physical-order sorting (`p6` before `p5`):**
    - Because free space lay physically before `nvme0n1p5` (`RecoveryOSContainer`), `nvme0n1p6` precedes `p5` on disk. Sorting GPT partition entries (`gdisk` `s`) renumbers `p5`/`p6` and is deferred to a separate post-install maintenance window with a verified backup (`docs/install-m2air.md` §5); UUID-only NixOS mounts remain unaffected by partition renumbering.
 
+## DR-19 — Removable ARM64 UEFI GRUB on `m2air` ESP (`BOOTAA64.EFI`), preserving `m1n1/boot.bin` and initrd-only Argon2id LUKS2
+
+Date: 2026-11-09. Status: accepted. Refines DR-5, DR-17, and DR-18.
+
+1. **Root cause on live `m2air` cutover:**
+   - With `boot.loader.grub.enable = false` and `boot.loader.systemd-boot.enable = false` hardcoded in `hosts/common.nix` and `modules/omarchnix.nix` (`profile = "asahi"`), `nixos-install --flake .#m2air` wrote the NixOS system closure to `/dev/mapper/cryptroot` (`ext4`) but emitted `"do not know how to make this configuration bootable; please enable a boot loader"`, leaving `/mnt/boot` (`UUID=C650-1003`) with no `EFI/BOOT/BOOTAA64.EFI`, `grub/grub.cfg`, or `/boot/kernels/*` for U-Boot to chainload.
+2. **Two-stage boot ownership (`Apple iBoot -> m1n1 -> U-Boot -> UEFI GRUB -> Linux + initrd`):**
+   - `hosts/common.nix` and `modules/omarchnix.nix` (`profile = "asahi"`) relax `boot.loader.{systemd-boot,grub}.enable` and `boot.loader.efi.canTouchEfiVariables` to `lib.mkDefault false` so `rehearsal` and generic `asahi` consumers still keep `boot.loader.*` off by default.
+   - `hosts/m2air.nix` (inherited by `m2air-aurora`, with Aurora Stage 2 kept opt-in/deferred on `m2air`) enables removable ARM64 UEFI GRUB only: `boot.loader.grub = { enable = true; device = "nodev"; efiSupport = true; efiInstallAsRemovable = true; enableCryptodisk = false; configurationLimit = 2; extraFiles = lib.mkForce { }; };` with `boot.loader.efi = { canTouchEfiVariables = false; efiSysMountPoint = "/boot"; };` and `boot.loader.systemd-boot.enable = false;`.
+   - Clearing `boot.loader.grub.extraFiles = lib.mkForce { }` overrides `nixos-apple-silicon`'s `boot-m1n1` `extraFiles."m1n1/boot.bin"` copy so `nixos-install` and `nixos-rebuild` never overwrite `alx.sh`'s `/boot/m1n1/boot.bin` or `/boot/vendorfw/firmware.cpio` (leaving Aurora Stage 2 exclusively to explicit, backup-preserving `omarchnix-install-stage2 /boot` in §4).
+3. **Initrd-only Argon2id LUKS2 unlock & ESP capacity budget (~353 MiB free on 477 MiB FAT32 ESP):**
+   - `enableCryptodisk = false` ensures GRUB reads only unencrypted FAT32 `/boot` (`UUID=C650-1003`) and never attempts Argon2id LUKS2 decryption; Linux stage-1 `initrd` (`systemd-cryptsetup` + `dm_crypt` + `nvme_apple` + `dockchannel-hid` + `hid_apple`) unlocks `/dev/disk/by-uuid/aa0403dd-9917-49e1-85b1-46b21b39f2d9` -> `/dev/mapper/cryptroot`.
+   - `configurationLimit = 2` bounds `/boot/kernels/` to at most two generations and relies on `install-grub.pl` automatic pruning of older `/boot/kernels/*` entries on every rebuild so future `nixos-rebuild switch`/`boot` runs stay well inside the ~353 MiB free ESP budget.
+

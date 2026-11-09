@@ -58,7 +58,7 @@ in
         default = "workstation";
         description = ''
           Hardware/boot profile:
-          - `asahi`: Apple Silicon (M-series) external BootROM/m1n1/U-Boot boot chain (DR-5: boot.loader.* disabled).
+          - `asahi`: Apple Silicon (M-series) external BootROM/m1n1/U-Boot boot chain (defaults `boot.loader.*` and `canTouchEfiVariables` to `false`; standalone UEFI hosts like `m2air` opt into removable ARM64 UEFI GRUB while keeping `m1n1/boot.bin` untouched).
           - `spark`: ARM64 (`aarch64-linux`) UEFI server/workstation (e.g. NVIDIA Grace / DGX Spark) with systemd-boot.
           - `workstation`: Generic `x86_64-linux` or `aarch64-linux` UEFI workstation with systemd-boot.
           - `vm`: QEMU/KVM virtual machine target with systemd-boot.
@@ -186,9 +186,9 @@ in
     })
 
     (lib.mkIf (cfg.enable && cfg.profile == "asahi") {
-      boot.loader.systemd-boot.enable = false;
-      boot.loader.grub.enable = false;
-      boot.loader.efi.canTouchEfiVariables = false;
+      boot.loader.systemd-boot.enable = lib.mkDefault false;
+      boot.loader.grub.enable = lib.mkDefault false;
+      boot.loader.efi.canTouchEfiVariables = lib.mkDefault false;
 
       nix.settings = {
         substituters = [ "https://nixos-apple-silicon.cachix.org" ];

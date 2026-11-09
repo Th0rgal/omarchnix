@@ -255,6 +255,8 @@
             inherit pkgs inputs;
             inherit (nixpkgs) lib;
             m2airConfig = self.nixosConfigurations.m2air.config;
+            m2airAuroraConfig = self.nixosConfigurations.m2air-aurora.config;
+            rehearsalConfig = self.nixosConfigurations.rehearsal.config;
           };
 
           desktop = import ./tests/desktop.nix {

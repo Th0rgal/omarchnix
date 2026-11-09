@@ -1,14 +1,16 @@
 # Shared configuration for every host in this flake.
 # Keep this file hardware-agnostic: anything Apple-Silicon-specific
 # belongs in m2air.nix / rehearsal.nix, anything QEMU-specific in vm.nix.
-{ ... }:
+{ lib, ... }:
 {
-  # Don't touch the boot chain from inside NixOS on Asahi machines;
-  # m1n1/U-Boot updates are handled by the runbook, not nixos-rebuild.
-  # (vm.nix re-enables its own bootloader.)
-  boot.loader.systemd-boot.enable = false;
-  boot.loader.grub.enable = false;
-  boot.loader.efi.canTouchEfiVariables = false;
+  # Default bootloaders and EFI NVRAM writes off across shared hosts so
+  # m1n1/U-Boot/vendorfw and Apple NVRAM are never touched implicitly;
+  # m2air.nix explicitly enables removable ARM64 UEFI GRUB on /boot
+  # (with extraFiles cleared so m1n1/boot.bin stays untouched), and
+  # vm.nix enables systemd-boot for QEMU.
+  boot.loader.systemd-boot.enable = lib.mkDefault false;
+  boot.loader.grub.enable = lib.mkDefault false;
+  boot.loader.efi.canTouchEfiVariables = lib.mkDefault false;
 
   time.timeZone = "Europe/Paris";
   i18n.defaultLocale = "en_US.UTF-8";

@@ -2,7 +2,7 @@
 
 Declarative Omarchy-compatible NixOS & Home Manager workstation stack across **`aarch64-linux`** (Apple Silicon M-series via Asahi Linux, NVIDIA Grace / DGX Spark) and **`x86_64-linux`** workstations and VMs.
 
-See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-18`) for recorded design decisions.
+See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-19`) for recorded design decisions.
 
 ---
 
@@ -51,7 +51,7 @@ See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/deci
 
 | Host | Architecture | Target | Purpose |
 | --- | --- | --- | --- |
-| `m2air` | `aarch64-linux` | MacBook Air M2 (Asahi) | Primary Apple Silicon daily driver on stock `nixos-apple-silicon` + `alx.sh` Stage 2 (UUID-mounted ESP + LUKS2 `cryptroot`, `asahi-audio` DSP, 1.6x HiDPI, dual-boot macOS). |
+| `m2air` | `aarch64-linux` | MacBook Air M2 (Asahi) | Primary Apple Silicon daily driver on stock `nixos-apple-silicon` + `alx.sh` Stage 2 + removable ARM64 UEFI GRUB (`EFI/BOOT/BOOTAA64.EFI`, `configurationLimit = 2`, UUID-mounted ESP + LUKS2 `cryptroot`, `asahi-audio` DSP, 1.6x HiDPI, dual-boot macOS). |
 | `m2air-aurora` | `aarch64-linux` | MacBook Air M2 (Aurora SEP) | Stage-2 opt-in `m2air` variant adding `aurora-silicon/nixos-aurora` Secure Enclave, Touch ID (`fprintd`), and FIDO2 (`aurora-fido`) after baseline boot validation (`docs/install-m2air.md` §4). |
 | `spark` | `aarch64-linux` | NVIDIA Grace / DGX Spark | ARM64 UEFI server & workstation (`systemd-boot`, hardened + Hyprland desktop). |
 | `workstation` | `x86_64-linux` | AMD / Intel desktop & cloud | Generic `x86_64-linux` UEFI workstation (`systemd-boot`, hardened + Hyprland desktop). |

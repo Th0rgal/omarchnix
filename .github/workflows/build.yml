@@ -98,13 +98,187 @@ jobs:
             substituters = https://aurorasilicon.org/nixos-aurora/cache https://nixos-apple-silicon.cachix.org https://cache.nixos.org
             trusted-public-keys = aurora-nixos-1:ZxmPNEWsrzgXai+W+dlTE8cachb1xaatfXKK8X8go14= nixos-apple-silicon.cachix.org-1:8psDu5SA5dAD7qA0zMy5UT292TxeEPzIz8VVEr2Js20= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
       - uses: DeterminateSystems/magic-nix-cache-action@v15
-      - name: Verify m2air and m2air-aurora system closures and Aurora Stage 2 on ARM64
+      - name: Verify m2air and m2air-aurora closures, ARM64 UEFI GRUB ESP artifacts, and Aurora Stage 2
         run: |
-          nix build .#nixosConfigurations.m2air.config.system.build.toplevel -L --no-link
-          nix build .#nixosConfigurations.m2air-aurora.config.system.build.auroraStage2 -L -o aurora-stage2
-          cat aurora-stage2/manifest.json
-          test -s aurora-stage2/boot.bin.sha256
-          nix build .#nixosConfigurations.m2air-aurora.config.system.build.toplevel -L --no-link
+          set -euxo pipefail
+          (
+          set -euxo pipefail
+          M2AIR_SYS="$(nix build .#nixosConfigurations.m2air.config.system.build.toplevel -L --no-link --print-out-paths)"
+          INSTALL_BL="$(nix build .#nixosConfigurations.m2air.config.system.build.installBootLoader -L --no-link --print-out-paths)"
+          AURORA_STAGE2="$(nix build .#nixosConfigurations.m2air-aurora.config.system.build.auroraStage2 -L --no-link --print-out-paths)"
+          cat "$AURORA_STAGE2/manifest.json"
+          test -s "$AURORA_STAGE2/boot.bin.sha256"
+          M2AIR_AURORA_SYS="$(nix build .#nixosConfigurations.m2air-aurora.config.system.build.toplevel -L --no-link --print-out-paths)"
+
+          DOSFS_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.dosfstools.out --no-link --print-out-paths)"
+          GPT_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.gptfdisk.out --no-link --print-out-paths)"
+          ZSTD_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.zstd.bin --no-link --print-out-paths)"
+          CPIO_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.cpio.out --no-link --print-out-paths)"
+          export PATH="$DOSFS_OUT/bin:$GPT_OUT/bin:$ZSTD_OUT/bin:$CPIO_OUT/bin:$PATH"
+
+          # 1. Verify kernel, boot.json, initrd LUKS2/NVMe/Apple-HID drivers, and non-cryptodisk GRUB installer
+          test -s "$M2AIR_SYS/kernel"
+          test -s "$M2AIR_SYS/initrd"
+          test -s "$M2AIR_SYS/boot.json"
+          python3 - "$M2AIR_SYS" <<'PY'
+          import glob, os, pathlib, re, subprocess, sys
+          m2air_sys = sys.argv[1]
+          blob = open(os.path.join(m2air_sys, "initrd"), "rb").read()
+          off = blob.find(b"\x28\xb5\x2f\xfd")
+          assert off >= 0, "zstd magic not found in m2air initrd"
+          cpio_raw = subprocess.check_output(["zstd", "-dc"], input=blob[off:])
+          entries = subprocess.check_output(["cpio", "-t"], input=cpio_raw, stderr=subprocess.DEVNULL).decode()
+          entry_lines = [line.strip() for line in entries.splitlines() if line.strip()]
+          assert "etc/crypttab" in entry_lines, "missing etc/crypttab symlink in initrd"
+          assert any("systemd-cryptsetup" in line for line in entry_lines), "missing systemd-cryptsetup in initrd"
+          kernel_out = os.path.dirname(os.path.realpath(os.path.join(m2air_sys, "kernel")))
+          builtin_files = sorted(set(
+              glob.glob(os.path.join(kernel_out, "lib/modules/*/modules.builtin"))
+              + glob.glob(os.path.join(m2air_sys, "kernel-modules/lib/modules/*/modules.builtin"))
+          ))
+          assert builtin_files, f"missing modules.builtin under {kernel_out}"
+          builtin = "\n".join(pathlib.Path(p).read_text() for p in builtin_files)
+          for pat in (r"nvme[-_]apple", r"dm[-_]crypt", r"dockchannel[-_]hid", r"hid[-_]apple"):
+              assert re.search(pat, entries), f"missing {pat} module in m2air initrd"
+          assert re.search(r"vfat", entries + "\n" + builtin), "missing vfat in initrd or kernel modules.builtin"
+          crypttab_paths = [line for line in entry_lines if line.endswith("-initrd-crypttab")]
+          assert crypttab_paths, "missing *-initrd-crypttab store entry in initrd"
+          crypttab = subprocess.check_output(
+              ["cpio", "-i", "--to-stdout", crypttab_paths[0]],
+              input=cpio_raw,
+              stderr=subprocess.DEVNULL,
+          ).decode()
+          print("Initrd /etc/crypttab:", crypttab.strip())
+          assert "cryptroot /dev/disk/by-uuid/aa0403dd-9917-49e1-85b1-46b21b39f2d9 - discard" in crypttab, crypttab
+          PY
+          ! grep -q 'GRUB_ENABLE_CRYPTODISK' "$INSTALL_BL"
+          ! grep -q 'm1n1/boot.bin' "$INSTALL_BL"
+
+          # 2. Loop-mounted GPT p4 FAT32 ESP check (477 MiB, UUID C650-1003, ~353 MiB free before GRUB)
+          #    Validates NixOS ARM64 UEFI GRUB installation & ESP capacity budget (not physical BootROM/U-Boot).
+          WORK_ESP="$(mktemp -d)"
+          LOOP_DEV=""
+          cleanup_esp() {
+            if [ -n "$LOOP_DEV" ]; then
+              sudo losetup -d "$LOOP_DEV" 2>/dev/null || true
+            fi
+            sudo rm -rf "$WORK_ESP"
+          }
+          trap cleanup_esp EXIT
+
+          cat <<'PY' > "$WORK_ESP/check_pe.py"
+          import struct, sys
+          path = sys.argv[1]
+          blob = open(path, "rb").read()
+          assert blob[:2] == b"MZ", "missing MZ DOS header"
+          pe_off = struct.unpack_from("<I", blob, 0x3C)[0]
+          assert blob[pe_off:pe_off + 4] == b"PE\x00\x00", "missing PE signature"
+          machine = struct.unpack_from("<H", blob, pe_off + 4)[0]
+          assert machine == 0xAA64, f"expected ARM64 PE32+ (0xaa64), got {hex(machine)}"
+          print(f"Verified ARM64 PE32+ UEFI binary {path}: {len(blob)} bytes, machine={hex(machine)}")
+          PY
+
+          cat <<'SH' > "$WORK_ESP/verify_esp.sh"
+          set -euxo pipefail
+          ESP_PART="$1"
+          WORK_ESP="$2"
+          INSTALL_BL="$3"
+          M2AIR_SYS="$4"
+          M2AIR_AURORA_SYS="$5"
+
+          # Detach any pre-existing /boot (/boot/efi) mounts inside this private mount namespace
+          # so install-grub.pl GetFs("/boot") (strict length > comparison) resolves ESP_PART.
+          umount -R /boot 2>/dev/null || umount -l /boot 2>/dev/null || true
+          mkdir -p /boot /nix/var/nix/profiles "$WORK_ESP/profiles"
+          mount -t vfat -o fmask=0077,dmask=0077 "$ESP_PART" /boot
+          mount --bind "$WORK_ESP/profiles" /nix/var/nix/profiles
+
+          mkdir -p /boot/m1n1 /boot/vendorfw
+          printf 'asahi-alx-stage2-m1n1-uboot-sentinel\n' > /boot/m1n1/boot.bin
+          dd if=/dev/zero bs=1M count=24 >> /boot/m1n1/boot.bin status=none
+          printf 'asahi-alx-vendorfw-cpio-sentinel\n' > /boot/vendorfw/firmware.cpio
+          dd if=/dev/zero bs=1M count=99 >> /boot/vendorfw/firmware.cpio status=none
+          M1N1_SHA="$(sha256sum /boot/m1n1/boot.bin | awk '{print $1}')"
+          FW_SHA="$(sha256sum /boot/vendorfw/firmware.cpio | awk '{print $1}')"
+
+          echo "=== ESP before NixOS GRUB install (~353 MiB free target) ==="
+          df -BM /boot
+
+          # Generation 1 (initial nixos-install)
+          ln -sfn "$M2AIR_SYS" /nix/var/nix/profiles/system-1-link
+          ln -sfn system-1-link /nix/var/nix/profiles/system
+          NIXOS_INSTALL_BOOTLOADER=1 "$INSTALL_BL" "$M2AIR_SYS"
+
+          echo "=== ESP after 1-generation m2air GRUB install ==="
+          df -BM /boot
+          ls -lh /boot/EFI/BOOT/BOOTAA64.EFI /boot/grub/grub.cfg /boot/kernels/
+          du -sh /boot/EFI /boot/grub /boot/kernels /boot/m1n1 /boot/vendorfw
+
+          python3 "$WORK_ESP/check_pe.py" /boot/EFI/BOOT/BOOTAA64.EFI
+          cat /boot/grub/grub.cfg
+          grep -qi 'C650-1003' /boot/grub/grub.cfg
+          grep -q 'kernels/' /boot/grub/grub.cfg
+          grep -q 'init=' /boot/grub/grub.cfg
+          ! grep -qi 'cryptomount' /boot/grub/grub.cfg
+          test "$(ls -1 /boot/kernels | wc -l)" -eq 2
+          test "$(sha256sum /boot/m1n1/boot.bin | awk '{print $1}')" = "$M1N1_SHA"
+          test "$(sha256sum /boot/vendorfw/firmware.cpio | awk '{print $1}')" = "$FW_SHA"
+
+          # Generation 2 (2 distinct closures within configurationLimit = 2)
+          readlink -f "$M2AIR_SYS/kernel" "$M2AIR_SYS/initrd" "$M2AIR_AURORA_SYS/kernel" "$M2AIR_AURORA_SYS/initrd"
+          ln -sfn "$M2AIR_AURORA_SYS" /nix/var/nix/profiles/system-1-link
+          ln -sfn "$M2AIR_SYS" /nix/var/nix/profiles/system-2-link
+          ln -sfn system-2-link /nix/var/nix/profiles/system
+          "$INSTALL_BL" "$M2AIR_SYS"
+
+          echo "=== ESP with 2 distinct generations (configurationLimit = 2) ==="
+          df -BM /boot
+          ls -lh /boot/kernels/
+          test "$(ls -1 /boot/kernels | wc -l)" -ge 3
+          AVAIL_2GEN_MIB="$(df -BM --output=avail /boot | tail -n1 | tr -dc '0-9')"
+          echo "Remaining free ESP capacity with 2 distinct generations: ${AVAIL_2GEN_MIB} MiB"
+          test "$AVAIL_2GEN_MIB" -ge 100
+
+          # Generation 3 (advancing past configurationLimit = 2 prunes generation 1 automatically)
+          ln -sfn "$M2AIR_SYS" /nix/var/nix/profiles/system-3-link
+          ln -sfn system-3-link /nix/var/nix/profiles/system
+          "$INSTALL_BL" "$M2AIR_SYS"
+
+          echo "=== ESP after generation 3 rebuild (generation 1 pruned) ==="
+          df -BM /boot
+          ls -lh /boot/kernels/
+          test "$(ls -1 /boot/kernels | wc -l)" -eq 2
+          ! grep -q 'Configuration 1 ' /boot/grub/grub.cfg
+          grep -q 'Configuration 3 ' /boot/grub/grub.cfg
+          grep -q 'Configuration 2 ' /boot/grub/grub.cfg
+          test "$(sha256sum /boot/m1n1/boot.bin | awk '{print $1}')" = "$M1N1_SHA"
+          test "$(sha256sum /boot/vendorfw/firmware.cpio | awk '{print $1}')" = "$FW_SHA"
+          SH
+
+          truncate -s 480M "$WORK_ESP/esp.img"
+          sgdisk --zap-all "$WORK_ESP/esp.img"
+          sgdisk -n 4:1M:+477M -t 4:EF00 -c 4:"" "$WORK_ESP/esp.img"
+          LOOP_DEV="$(sudo losetup --find --partscan --show "$WORK_ESP/esp.img")"
+          for _ in $(seq 1 30); do
+            [ -b "${LOOP_DEV}p4" ] && break
+            sleep 0.1
+          done
+          sudo "$DOSFS_OUT/bin/mkfs.vfat" -F 32 -i C6501003 "${LOOP_DEV}p4"
+          sudo udevadm settle 2>/dev/null || true
+          sudo blkid "${LOOP_DEV}p4"
+
+          sudo unshare -m --propagation private bash "$WORK_ESP/verify_esp.sh" \
+            "${LOOP_DEV}p4" "$WORK_ESP" "$INSTALL_BL" "$M2AIR_SYS" "$M2AIR_AURORA_SYS"
+
+          cleanup_esp
+          trap - EXIT
+          ) 2>&1 | tee /tmp/esp-verify.log
+      - name: Upload ESP verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp-verify-log
+          path: /tmp/esp-verify.log
       - name: Prepare and build Asahi kernel
         run: |
           nix build .#installer-bootstrap.config.system.build.kernel.src -j1 -L -o kernel-src

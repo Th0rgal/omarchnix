@@ -3,6 +3,8 @@
   lib,
   inputs,
   m2airConfig,
+  m2airAuroraConfig,
+  rehearsalConfig,
 }:
 let
   inherit (import "${inputs.nixpkgs}/nixos/tests/ssh-keys.nix" pkgs)
@@ -13,11 +15,53 @@ let
   vmLuksKeyfile = pkgs.writeText "vm-luks-keyfile" "asahi-nixos-ci-test-luks-key";
   luksUuid = "aa0403dd-9917-49e1-85b1-46b21b39f2d9";
   espUuid = "C650-1003";
+
+  hasInitrdMod =
+    c: mod:
+    let
+      altUnderscore = builtins.replaceStrings [ "-" ] [ "_" ] mod;
+      altDash = builtins.replaceStrings [ "_" ] [ "-" ] mod;
+      mods = c.boot.initrd.availableKernelModules;
+    in
+    builtins.elem mod mods || builtins.elem altUnderscore mods || builtins.elem altDash mods;
+
+  requiredM2AirInitrdMods = [
+    "nvme_apple"
+    "apple-dart"
+    "apple-mailbox"
+    "macsmc"
+    "apple-dockchannel"
+    "dockchannel-hid"
+    "spi-hid-apple-of"
+    "hid_apple"
+    "usbhid"
+    "xhci-pci"
+    "dm_crypt"
+    "ext4"
+    "vfat"
+  ];
+
+  hasM2AirGrubBootloader =
+    c:
+    c.boot.loader.systemd-boot.enable == false
+    && c.boot.loader.grub.enable == true
+    && c.boot.loader.grub.device == "nodev"
+    && c.boot.loader.grub.devices == [ "nodev" ]
+    && c.boot.loader.grub.efiSupport == true
+    && c.boot.loader.grub.efiInstallAsRemovable == true
+    && c.boot.loader.grub.enableCryptodisk == false
+    && c.boot.loader.grub.configurationLimit == 2
+    && c.boot.loader.grub.extraFiles == { }
+    && c.boot.loader.efi.canTouchEfiVariables == false
+    && c.boot.loader.efi.efiSysMountPoint == "/boot"
+    && c.system.boot.loader.id == "grub"
+    && c.boot.initrd.secrets == { };
 in
 assert !(m2airConfig ? disko);
 assert !(m2airConfig.system.build ? destroyFormatMount);
 assert !(m2airConfig.system.build ? formatMount);
 assert !(m2airConfig.fileSystems ? "/mnt/shared");
+assert m2airConfig.omarchnix.hardware.m2air.touchId.enable == false;
 assert m2airConfig.boot.initrd.luks.devices ? cryptroot;
 assert m2airConfig.boot.initrd.luks.devices.cryptroot.device == "/dev/disk/by-uuid/${luksUuid}";
 assert m2airConfig.boot.initrd.luks.devices.cryptroot.allowDiscards == true;
@@ -27,9 +71,13 @@ assert m2airConfig.fileSystems."/boot".device == "/dev/disk/by-uuid/${espUuid}";
 assert m2airConfig.fileSystems."/boot".fsType == "vfat";
 assert builtins.elem "fmask=0077" m2airConfig.fileSystems."/boot".options;
 assert builtins.elem "dmask=0077" m2airConfig.fileSystems."/boot".options;
-assert m2airConfig.boot.loader.systemd-boot.enable == false;
-assert m2airConfig.boot.loader.grub.enable == false;
-assert m2airConfig.boot.loader.efi.canTouchEfiVariables == false;
+assert hasM2AirGrubBootloader m2airConfig;
+assert hasM2AirGrubBootloader m2airAuroraConfig;
+assert builtins.all (hasInitrdMod m2airConfig) requiredM2AirInitrdMods;
+assert builtins.all (hasInitrdMod m2airAuroraConfig) requiredM2AirInitrdMods;
+assert rehearsalConfig.boot.loader.systemd-boot.enable == false;
+assert rehearsalConfig.boot.loader.grub.enable == false;
+assert rehearsalConfig.boot.loader.efi.canTouchEfiVariables == false;
 pkgs.testers.runNixOSTest {
   name = "asahi-nixos-security";
 

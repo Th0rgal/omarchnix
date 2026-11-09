@@ -2,7 +2,7 @@
 
 Declarative Omarchy-compatible NixOS & Home Manager workstation stack across **`aarch64-linux`** (Apple Silicon M-series via Asahi Linux, NVIDIA Grace / DGX Spark) and **`x86_64-linux`** workstations and VMs.
 
-See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-15`) for recorded design decisions.
+See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-17`) for recorded design decisions.
 
 ---
 
@@ -51,7 +51,8 @@ See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/deci
 
 | Host | Architecture | Target | Purpose |
 | --- | --- | --- | --- |
-| `m2air` | `aarch64-linux` | MacBook Air M2 (Asahi) | Primary Apple Silicon daily driver (LUKS2, `asahi-audio` DSP, 1.6x HiDPI, dual-boot macOS). |
+| `m2air` | `aarch64-linux` | MacBook Air M2 (Asahi) | Primary Apple Silicon daily driver on stock `nixos-apple-silicon` + `alx.sh` Stage 2 (UUID-mounted ESP + LUKS2 `cryptroot`, `asahi-audio` DSP, 1.6x HiDPI, dual-boot macOS). |
+| `m2air-aurora` | `aarch64-linux` | MacBook Air M2 (Aurora SEP) | Stage-2 opt-in `m2air` variant adding `aurora-silicon/nixos-aurora` Secure Enclave, Touch ID (`fprintd`), and FIDO2 (`aurora-fido`) after baseline boot validation (`docs/install-m2air.md` §4). |
 | `spark` | `aarch64-linux` | NVIDIA Grace / DGX Spark | ARM64 UEFI server & workstation (`systemd-boot`, hardened + Hyprland desktop). |
 | `workstation` | `x86_64-linux` | AMD / Intel desktop & cloud | Generic `x86_64-linux` UEFI workstation (`systemd-boot`, hardened + Hyprland desktop). |
 | `rehearsal` | `aarch64-linux` | Scaleway Mac mini M2 Pro (`M2-L-ASAHI`) | Disposable BootROM dress rehearsal target with poweroff->reboot guard (`docs/runbook-scaleway.md`). |
@@ -92,7 +93,7 @@ Every cell is backed by a recorded gate (CI run or runbook log in `docs/logs/`).
 
 ## What Is Out of Scope on Apple Silicon
 
-- Touch ID / Secure Enclave on the stock `nixos-apple-silicon` kernel (opt-in integration path via `aurora-silicon/nixos-aurora` + `aura` Stage 1/2 documented in `docs/decisions.md` as DR-15)
+- Touch ID / Secure Enclave on the baseline `m2air` stock `nixos-apple-silicon` kernel (staged as `nixosConfigurations.m2air-aurora` via `aurora-silicon/nixos-aurora` + `omarchnix-install-stage2 /boot` once ordinary NixOS boot is verified on hardware; see `docs/install-m2air.md` §4 and `DR-17`)
 - Metal (does not exist on Linux; Mesa Honeykrisp Vulkan 1.4 / OpenGL 4.6 is what Asahi ships)
 - Apple's verified boot / SIP inside Linux (replaced by the Asahi `m1n1` + U-Boot boot chain + LUKS2 `cryptroot` + NixOS store reproducibility and AppArmor/container sandboxing)
 

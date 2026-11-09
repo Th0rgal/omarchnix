@@ -11,15 +11,19 @@ let
     ;
 
   vmLuksKeyfile = pkgs.writeText "vm-luks-keyfile" "asahi-nixos-ci-test-luks-key";
+  luksUuid = "aa0403dd-9917-49e1-85b1-46b21b39f2d9";
+  espUuid = "C650-1003";
 in
+assert m2airConfig.disko.devices.disk.nvme0n1.destroy == false;
+assert !(m2airConfig.disko.devices.disk.nvme0n1.content.partitions ? shared);
+assert !(m2airConfig.fileSystems ? "/mnt/shared");
 assert m2airConfig.boot.initrd.luks.devices ? cryptroot;
-assert m2airConfig.boot.initrd.luks.devices.cryptroot.device == "/dev/disk/by-partlabel/cryptroot";
+assert m2airConfig.boot.initrd.luks.devices.cryptroot.device == "/dev/disk/by-uuid/${luksUuid}";
 assert m2airConfig.boot.initrd.luks.devices.cryptroot.allowDiscards == true;
 assert m2airConfig.fileSystems."/".device == "/dev/mapper/cryptroot";
 assert m2airConfig.fileSystems."/".fsType == "ext4";
-assert m2airConfig.fileSystems."/boot".device == "/dev/disk/by-partlabel/ESP";
-assert m2airConfig.fileSystems."/mnt/shared".device == "/dev/disk/by-partlabel/shared";
-assert m2airConfig.fileSystems."/mnt/shared".fsType == "exfat";
+assert m2airConfig.fileSystems."/boot".device == "/dev/disk/by-uuid/${espUuid}";
+assert m2airConfig.fileSystems."/boot".fsType == "vfat";
 assert m2airConfig.boot.loader.systemd-boot.enable == false;
 assert m2airConfig.boot.loader.grub.enable == false;
 assert m2airConfig.boot.loader.efi.canTouchEfiVariables == false;
@@ -60,12 +64,13 @@ pkgs.testers.runNixOSTest {
           systemd = {
             initrdBin = [
               pkgs.cryptsetup
+              pkgs.dosfstools
               pkgs.gptfdisk
               pkgs.util-linux
             ];
             contents."/etc/vm-cryptroot.key".source = vmLuksKeyfile;
             services.prepare-vm-cryptroot = {
-              description = "Format virtual GPT cryptroot partition for CI LUKS2 test";
+              description = "Format virtual GPT unnamed ESP/LUKS2 partitions by UUID for CI test";
               wantedBy = [ "initrd.target" ];
               before = [
                 "systemd-cryptsetup@cryptroot.service"
@@ -85,18 +90,25 @@ pkgs.testers.runNixOSTest {
                 for cand in /dev/vdb /dev/vdc; do
                   if [ -b "$cand" ] && ! blkid "$cand" >/dev/null 2>&1; then
                     sgdisk --zap-all "$cand"
-                    sgdisk -n 1:1M:65M -t 1:EF00 -c 1:ESP "$cand"
-                    sgdisk -n 2:66M:130M -t 2:0700 -c 2:shared "$cand"
-                    sgdisk -n 3:131M:0 -t 3:8309 -c 3:cryptroot "$cand"
+                    sgdisk -n 4:1M:65M -t 4:EF00 -c 4:"" "$cand"
+                    sgdisk -n 6:66M:0 -t 6:8309 -c 6:"" "$cand"
                     partprobe "$cand" 2>/dev/null || true
-                    udevadm trigger --action=change "$cand"
+                    udevadm trigger --action=change "$cand" "''${cand}4" "''${cand}6"
                     udevadm settle
                     for _ in $(seq 1 50); do
-                      [ -b /dev/disk/by-partlabel/cryptroot ] && break
+                      [ -b "''${cand}4" ] && [ -b "''${cand}6" ] && break
                       sleep 0.1
                     done
+                    mkfs.vfat -F 32 -i C6501003 "''${cand}4"
                     cryptsetup luksFormat -q --type luks2 --pbkdf pbkdf2 --pbkdf-force-iterations 1000 \
-                      --key-file /etc/vm-cryptroot.key /dev/disk/by-partlabel/cryptroot
+                      --uuid ${luksUuid} \
+                      --key-file /etc/vm-cryptroot.key "''${cand}6"
+                    udevadm trigger --action=change "''${cand}4" "''${cand}6"
+                    udevadm settle
+                    for _ in $(seq 1 50); do
+                      [ -b /dev/disk/by-uuid/${luksUuid} ] && [ -b /dev/disk/by-uuid/${espUuid} ] && break
+                      sleep 0.1
+                    done
                     break
                   fi
                 done
@@ -106,7 +118,7 @@ pkgs.testers.runNixOSTest {
 
           luks.devices = lib.mkVMOverride {
             cryptroot = {
-              device = "/dev/disk/by-partlabel/cryptroot";
+              device = "/dev/disk/by-uuid/${luksUuid}";
               keyFile = "/etc/vm-cryptroot.key";
               allowDiscards = true;
             };
@@ -214,7 +226,10 @@ pkgs.testers.runNixOSTest {
         assert host.succeed("sysctl -n fs.suid_dumpable").strip() == "0"
         assert host.succeed("sysctl -n net.ipv4.ip_forward").strip() == "0"
 
-    with subtest("LUKS2 cryptroot device is wired into initrd and unlocked at boot"):
+    with subtest("LUKS2 cryptroot device is wired into initrd and unlocked at boot by UUID"):
+        host.succeed("test -b /dev/disk/by-uuid/${luksUuid}")
+        host.succeed("test -b /dev/disk/by-uuid/${espUuid}")
+        host.succeed("test ! -e /mnt/shared")
         host.succeed("test -b /dev/mapper/cryptroot")
         status = host.succeed("cryptsetup status cryptroot")
         assert "LUKS2" in status, f"expected LUKS2 status, got {status!r}"

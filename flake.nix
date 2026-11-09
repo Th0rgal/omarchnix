@@ -156,12 +156,31 @@
 
       nixosConfigurations = {
         # Target machine: MacBook Air M2 (daily driver after cutover).
+        # Initial cutover boots on stock nixos-apple-silicon + alx.sh Stage 2;
+        # use m2air-aurora once ordinary NixOS boot is verified.
         m2air = mkNixos {
+          modules = [
+            apple-silicon-support.nixosModules.apple-silicon-support
+            ./hosts/common.nix
+            ./hosts/m2air.nix
+          ];
+        };
+
+        # Stage-2 Aurora SEP / Touch ID / FIDO2 configuration for MacBook Air M2
+        # (apply after validating ordinary m2air NixOS boot).
+        m2air-aurora = mkNixos {
           withAuroraOverlay = true;
           modules = [
             nixos-aurora.inputs.apple-silicon.nixosModules.default
             ./hosts/common.nix
             ./hosts/m2air.nix
+            {
+              omarchnix.hardware.m2air.touchId = {
+                enable = true;
+                requirePasswordAfterBoot = true;
+                fido.enable = true;
+              };
+            }
           ];
         };
 
@@ -280,10 +299,12 @@
             ${pkgs.shellcheck}/bin/shellcheck -S warning -e SC2034,SC2054 "$script"
             grep -q 'cryptsetup -q luksFormat' "$script"
             grep -q 'mkfs.ext4' "$script"
-            grep -q 'mkfs.exfat' "$script"
             grep -q 'mkfs.vfat' "$script"
             grep -q 'cryptroot' "$script"
-            grep -q '/mnt/shared' "$script"
+            grep -q 'aa0403dd-9917-49e1-85b1-46b21b39f2d9' "$script"
+            grep -q 'C650-1003' "$script"
+            ! grep -q '/mnt/shared' "$script"
+            ! grep -q 'mkfs.exfat' "$script"
             echo "$script" > "$out"
           '';
 
@@ -311,6 +332,7 @@
             inherit pkgs inputs self;
             inherit (nixpkgs) lib;
             m2airConfig = self.nixosConfigurations.m2air.config;
+            m2airAuroraConfig = self.nixosConfigurations.m2air-aurora.config;
           };
 
           modules-eval =

@@ -197,7 +197,9 @@ assert hasRearmHook m2airAuroraConfig "hyprlock";
 assert hasRearmHook m2airAuroraConfig "omarchy-lock-password";
 assert
   let
-    conf = lib.splitString "\n" m2airAuroraConfig.environment.etc."modules-load.d/nixos.conf".source.text;
+    conf =
+      lib.splitString "\n"
+        m2airAuroraConfig.environment.etc."modules-load.d/nixos.conf".source.text;
   in
   !(builtins.elem "atkbd" conf) && !(builtins.elem "cpufreq_schedutil" conf);
 testPkgs.testers.runNixOSTest {

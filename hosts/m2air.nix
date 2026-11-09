@@ -1,5 +1,10 @@
 # MacBook Air M2 — the primary Apple Silicon daily driver.
-{ inputs, pkgs, ... }:
+{
+  inputs,
+  lib,
+  pkgs,
+  ...
+}:
 {
   imports = [
     inputs.disko.nixosModules.disko
@@ -32,7 +37,7 @@
       # Stage 2 first; switch to .#m2air-aurora (or enable touchId with the
       # Aurora overlay) before running omarchnix-install-stage2 /boot.
       touchId = {
-        enable = false;
+        enable = lib.mkDefault false;
         requirePasswordAfterBoot = true;
         fido.enable = true;
       };

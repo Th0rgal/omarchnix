@@ -276,6 +276,7 @@ let
 
   macosUsIntlXCompose = pkgs.writeText "omarchnix-macos-us-intl-XCompose" (
     "# macOS \"U.S. International - PC\" dead-key compose table (managed by omarchnix)\n"
+    + "include \"%L\"\n"
     + lib.concatMapStrings (
       spec:
       "\n# ${spec.dead} (${spec.ascii})\n"
@@ -417,6 +418,7 @@ in
       Service = {
         Type = "dbus";
         BusName = "org.fcitx.Fcitx5";
+        ExecStartPre = "-${pkgs.systemd}/bin/systemctl --user stop omarchy-fcitx5-live.service";
         ExecStart = "${fcitx5Pkg}/bin/fcitx5 --replace --disable notificationitem";
         Restart = "always";
         RestartSec = 2;

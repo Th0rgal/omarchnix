@@ -287,6 +287,7 @@ in
         theme.fonts.icon.package
         pkgs.noto-fonts
         pkgs.brightnessctl
+        pkgs.hyprsunset
         pkgs.playerctl
         pkgs.grim
         pkgs.slurp

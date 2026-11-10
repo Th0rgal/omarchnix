@@ -19,6 +19,7 @@ let
     pkgs.gnused
     pkgs.gum
     pkgs.hyprland
+    pkgs.hyprsunset
     pkgs.imagemagick
     pkgs.inotify-tools
     pkgs.jq
@@ -32,6 +33,7 @@ let
     pkgs.socat
     pkgs.systemd
     pkgs.util-linux
+    pkgs.uwsm
     pkgs.vips
     pkgs.wl-clipboard
   ];
@@ -97,6 +99,12 @@ let
 
         substituteInPlace "$out/bin/omarchy-theme-set-foot" \
           --replace-fail '"$foot_ini" 2>/dev/null | tail -n 1)' '"$HOME/.config/foot/foot.ini" "$foot_ini" 2>/dev/null | tail -n 1)'
+
+        substituteInPlace "$out/shell/plugins/services/nightlight/Service.qml" \
+          --replace-fail 'uwsm-app -- hyprsunset' 'uwsm-app -- ${pkgs.hyprsunset}/bin/hyprsunset'
+
+        substituteInPlace "$out/bin/omarchy-toggle-nightlight" \
+          --replace-fail 'uwsm-app -- hyprsunset' 'uwsm-app -- ${pkgs.hyprsunset}/bin/hyprsunset'
 
         chmod -R u+w "$out"
         for f in "$out"/bin/* "$out/default/input-methods/typing_setup.py"; do

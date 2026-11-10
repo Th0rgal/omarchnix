@@ -100,6 +100,7 @@
                   }
               );
             themes = omarchyLib.allBundledThemes final;
+            buildTheme = args: omarchyLib.buildThemePkg ({ pkgs = final; } // args);
             buildPlugin = args: omarchyLib.buildPlugin ({ pkgs = final; } // args);
           };
           orb-desktop = final.callPackage ./pkgs/orb-desktop.nix {

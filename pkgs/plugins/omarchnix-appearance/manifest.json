@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchnix.appearance",
+  "name": "Appearance Toggle",
+  "version": "1.0.0",
+  "author": "Omarchnix",
+  "license": "MIT",
+  "description": "macOS-style Dark / Light system theme toggle in the top status bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Appearance",
+    "description": "Toggle system Dark / Light theme across all apps (Right-click for Theme Picker).",
+    "defaultSection": "right"
+  }
+}

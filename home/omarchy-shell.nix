@@ -16,6 +16,42 @@ let
     src = ../pkgs/plugins/omarchnix-clipboard;
   };
 
+  appearanceBarPlugin = omarchyLib.buildPlugin {
+    inherit pkgs;
+    src = ../pkgs/plugins/omarchnix-appearance;
+  };
+
+  effectiveDarkTheme = omarchyLib.normalizeThemeName (
+    if cfg.theme.darkName != null then
+      cfg.theme.darkName
+    else if (theme.mode or "dark") == "dark" then
+      cfg.theme.name
+    else
+      "tokyo-night"
+  );
+
+  effectiveLightTheme = omarchyLib.normalizeThemeName (
+    if cfg.theme.lightName != null then
+      cfg.theme.lightName
+    else if (theme.mode or "dark") == "light" then
+      cfg.theme.name
+    else
+      "white"
+  );
+
+  themePairJson = pkgs.writeText "omarchnix-theme-pair.json" (
+    builtins.toJSON {
+      dark = effectiveDarkTheme;
+      light = effectiveLightTheme;
+    }
+    + "\n"
+  );
+
+  customThemeEntries = lib.mapAttrsToList (slug: drv: {
+    slug = omarchyLib.normalizeThemeName slug;
+    inherit drv;
+  }) cfg.theme.customThemes;
+
   lockedPluginEntries = lib.mapAttrsToList (
     id: pluginCfg:
     let
@@ -192,10 +228,17 @@ let
 in
 {
   config = lib.mkIf (cfg.enable && omarchyShellPkg != null) {
-    programs.omarchnix.plugins.locked."omarchnix.clipboard" = {
-      package = lib.mkDefault clipboardBarPlugin;
-      enable = lib.mkDefault true;
-      section = lib.mkDefault "right";
+    programs.omarchnix.plugins.locked = {
+      "omarchnix.appearance" = {
+        package = lib.mkDefault appearanceBarPlugin;
+        enable = lib.mkDefault true;
+        section = lib.mkDefault "right";
+      };
+      "omarchnix.clipboard" = {
+        package = lib.mkDefault clipboardBarPlugin;
+        enable = lib.mkDefault true;
+        section = lib.mkDefault "right";
+      };
     };
 
     home.sessionVariables = {
@@ -208,8 +251,24 @@ in
     ]
     ++ lib.optional (cfg.cliPackage != null) cfg.cliPackage;
 
-    home.activation.omarchnixStateAndPlugins = hmLib.entryAfter [ "writeBoundary" ] ''
-      mkdir -p "$HOME/.config/omarchy/plugins" "$HOME/.local/state/omarchy/current"
+    home.activation.omarchnixStateAndPlugins = hmLib.entryAfter [ "writeBoundary" "dconfSettings" ] ''
+      mkdir -p "$HOME/.config/omarchy/plugins" "$HOME/.config/omarchy/themes" "$HOME/.local/state/omarchy/current"
+
+      ${lib.concatMapStringsSep "\n" (entry: ''
+        target_theme_dir="$HOME/.config/omarchy/themes/${lib.escapeShellArg entry.slug}"
+        rm -rf "$target_theme_dir"
+        mkdir -p "$target_theme_dir"
+        cp -r --no-preserve=mode "${entry.drv}/." "$target_theme_dir/"
+        chmod -R u+w "$target_theme_dir"
+      '') customThemeEntries}
+
+      cp --remove-destination --no-preserve=mode "${themePairJson}" "$HOME/.config/omarchy/theme-pair.json"
+      chmod 0644 "$HOME/.config/omarchy/theme-pair.json"
+      if ! cmp -s "$HOME/.config/omarchy/theme-pair.json" "$HOME/.local/state/omarchy/configured-theme-pair.json" 2>/dev/null; then
+        printf '%s\n' ${lib.escapeShellArg effectiveDarkTheme} > "$HOME/.local/state/omarchy/last-dark-theme"
+        printf '%s\n' ${lib.escapeShellArg effectiveLightTheme} > "$HOME/.local/state/omarchy/last-light-theme"
+        cp --remove-destination --no-preserve=mode "${themePairJson}" "$HOME/.local/state/omarchy/configured-theme-pair.json"
+      fi
 
       ${lib.concatMapStringsSep "\n" (entry: ''
         target_plugin_dir="$HOME/.config/omarchy/plugins/${lib.escapeShellArg entry.id}"
@@ -278,8 +337,13 @@ in
         ) lockedPluginEntries}
       fi
 
-      if [ ! -e "$HOME/.local/state/omarchy/current/background" ] || [ -L "$HOME/.local/state/omarchy/current/background" ]; then
-        ln -sfn "${wallpaperPng}" "$HOME/.local/state/omarchy/current/background"
+      if [ ! -e "$HOME/.local/state/omarchy/current/background" ]; then
+        custom_bg="$(find "$HOME/.config/omarchy/themes/${theme.name}/backgrounds" -maxdepth 1 -type f 2>/dev/null | sort | head -n 1 || true)"
+        if [ -n "$custom_bg" ]; then
+          ln -sfn "$custom_bg" "$HOME/.local/state/omarchy/current/background"
+        else
+          ln -sfn "${wallpaperPng}" "$HOME/.local/state/omarchy/current/background"
+        fi
       fi
 
       if [ ! -f "$HOME/.local/state/omarchy/current/theme/colors.toml" ]; then
@@ -287,8 +351,46 @@ in
         OMARCHY_THEME_OFFLINE=1 \
         OMARCHY_THEME_SKIP_BACKGROUND=1 \
           "${omarchyShellPkg}/bin/omarchy-theme-set" ${lib.escapeShellArg theme.name} >/dev/null 2>&1 || true
+      else
+        cur_slug="$(tr -d '\n' < "$HOME/.local/state/omarchy/current/theme.name" 2>/dev/null || true)"
+        if [ -n "$cur_slug" ] && [ -d "$HOME/.config/omarchy/themes/$cur_slug" ]; then
+          OMARCHY_PATH="${omarchyShellPkg.sharePath}" \
+          OMARCHY_THEME_OFFLINE=1 \
+          OMARCHY_THEME_SKIP_BACKGROUND=1 \
+            "${omarchyShellPkg}/bin/omarchy-theme-set" "$cur_slug" >/dev/null 2>&1 || true
+        fi
       fi
+
+      ${lib.optionalString (cfg.cliPackage != null) ''
+        "${cfg.cliPackage}/bin/omarchnix" theme sync-mode >/dev/null 2>&1 || true
+      ''}
     '';
+
+    systemd.user.services.omarchnix-portal-theme-sync =
+      lib.mkIf (cfg.shell.backend == "omarchy-shell" && cfg.cliPackage != null)
+        {
+          Unit = {
+            Description = "Eagerly start GTK Settings portal and sync active Omarchy Dark/Light mode";
+            PartOf = [ "graphical-session.target" ];
+            Wants = [
+              "xdg-desktop-portal.service"
+              "xdg-desktop-portal-gtk.service"
+            ];
+            After = [
+              "graphical-session.target"
+              "xdg-desktop-portal.service"
+              "xdg-desktop-portal-gtk.service"
+            ];
+            ConditionEnvironment = "WAYLAND_DISPLAY";
+          };
+          Service = {
+            Type = "oneshot";
+            ExecStart = "${cfg.cliPackage}/bin/omarchnix theme sync-mode";
+          };
+          Install = {
+            WantedBy = [ "graphical-session.target" ];
+          };
+        };
 
     systemd.user.services.omarchy-shell = lib.mkIf (cfg.shell.backend == "omarchy-shell") {
       Unit = {
@@ -301,6 +403,7 @@ in
         Type = "simple";
         Environment = [
           "OMARCHY_PATH=${omarchyShellPkg.sharePath}"
+          "QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins"
         ];
         ExecStart = "${omarchyShellPkg}/bin/omarchy-launch-shell";
         Restart = "on-failure";

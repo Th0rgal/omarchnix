@@ -9,6 +9,7 @@ let
     pkgs.bash
     pkgs.coreutils
     pkgs.curl
+    pkgs.dconf
     pkgs.findutils
     pkgs.gawk
     pkgs.git
@@ -94,6 +95,9 @@ let
           --replace-fail 'policy_pid=$!' ':' \
           --replace-fail 'wait "$policy_pid" || failed=1' 'if [ -n "$policy_pid" ]; then wait "$policy_pid" || failed=1; fi'
 
+        substituteInPlace "$out/bin/omarchy-theme-set-foot" \
+          --replace-fail '"$foot_ini" 2>/dev/null | tail -n 1)' '"$HOME/.config/foot/foot.ini" "$foot_ini" 2>/dev/null | tail -n 1)'
+
         chmod -R u+w "$out"
         for f in "$out"/bin/* "$out/default/input-methods/typing_setup.py"; do
           [ -f "$f" ] || continue
@@ -133,14 +137,18 @@ pkgs.runCommand "omarchy-shell"
       makeWrapper "$script" "$out/bin/$script_name" \
         --set-default OMARCHY_PATH "${omarchyShare}" \
         --prefix PATH : "$out/bin:${omarchyRuntimePath}" \
+        --prefix QT_PLUGIN_PATH : "${pkgs.qt6.qtimageformats}/lib/qt-6/plugins" \
         --set-default GSETTINGS_SCHEMA_DIR "$gsettings_schema_dir" \
+        --prefix GIO_EXTRA_MODULES : "${pkgs.dconf.lib}/lib/gio/modules" \
         --prefix XDG_DATA_DIRS : "${pkgs.gsettings-desktop-schemas}/share"
     done
 
-    ln -s "${pkgs.quickshell}/bin/quickshell" "$out/bin/quickshell"
+    makeWrapper "${pkgs.quickshell}/bin/quickshell" "$out/bin/quickshell" \
+      --prefix QT_PLUGIN_PATH : "${pkgs.qt6.qtimageformats}/lib/qt-6/plugins"
     if [ -x "${pkgs.quickshell}/bin/qs" ]; then
-      ln -s "${pkgs.quickshell}/bin/qs" "$out/bin/qs"
+      makeWrapper "${pkgs.quickshell}/bin/qs" "$out/bin/qs" \
+        --prefix QT_PLUGIN_PATH : "${pkgs.qt6.qtimageformats}/lib/qt-6/plugins"
     else
-      ln -s "${pkgs.quickshell}/bin/quickshell" "$out/bin/qs"
+      ln -s "$out/bin/quickshell" "$out/bin/qs"
     fi
   ''

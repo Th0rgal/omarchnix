@@ -311,9 +311,27 @@ in
             pkgs.omarchnix.michelangelus-font
           else
             pkgs.callPackage ../pkgs/michelangelus-font.nix { };
+
+        chromiumRecommendedPolicyDir = pkgs.runCommand "omarchnix-chromium-recommended-policies" { } ''
+          mkdir -p "$out"
+          cat > "$out/10-omarchnix-performance.json" <<'EOF'
+          {
+            "HighEfficiencyModeEnabled": true,
+            "MemorySaverModeSavings": 1
+          }
+          EOF
+        '';
       in
       {
         hardware.graphics.enable = lib.mkDefault true;
+
+        # Enable Balanced Memory Saver by default via `recommended` policies so
+        # background tabs free inactive heap while keeping the UI toggle unlocked
+        # in `brave://settings/performance` and `chrome://settings/performance`.
+        environment.etc = {
+          "brave/policies/recommended".source = lib.mkDefault chromiumRecommendedPolicyDir;
+          "chromium/policies/recommended".source = lib.mkDefault chromiumRecommendedPolicyDir;
+        };
 
         fonts = {
           enableDefaultPackages = lib.mkForce false;

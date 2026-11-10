@@ -273,6 +273,7 @@ in
         pkgs.slurp
         pkgs.wl-clipboard
         pkgs.libnotify
+        pkgs.fastfetch
       ];
     };
 
@@ -290,7 +291,15 @@ in
       };
     };
 
-    programs.zsh.enable = true;
+    programs.fastfetch.enable = lib.mkDefault true;
+
+    programs.zsh = {
+      enable = true;
+      shellAliases = {
+        neofetch = "fastfetch";
+        screenfetch = "fastfetch";
+      };
+    };
 
     gtk =
       let

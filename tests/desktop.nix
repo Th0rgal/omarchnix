@@ -34,6 +34,15 @@ assert m2airConfig.home-manager.users.thomas.programs.fuzzel.enable == true;
 assert m2airConfig.home-manager.users.thomas.programs.hyprlock.enable == true;
 assert m2airConfig.home-manager.users.thomas.services.hypridle.enable == true;
 assert m2airConfig.home-manager.users.thomas.services.hyprpaper.enable == true;
+# The internal panel must not pin an absolute timing: appledrm only exposes the
+# modes the Apple DCP reports (e.g. 2560x1600 on J413 / Linux Asahi 7.2.15), and
+# requesting a non-existent mode breaks the atomic commit and page-flip path.
+assert
+  let
+    panel = builtins.head m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.monitor;
+  in
+  panel.output == "eDP-1" && panel.mode == "preferred" && panel.scale == "1.6";
+
 pkgs.testers.runNixOSTest {
   name = "asahi-nixos-desktop";
 

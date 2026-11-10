@@ -92,7 +92,7 @@ Record all outputs verbatim into `docs/logs/g6-<YYYY-MM-DD>.md`:
 - [ ] **Dual-Boot Picker & Startup Disk:** Hold power button -> both `Macintosh HD` and `omarchnix` boot cleanly; `sudo asahi-bless --list-volumes` enumerates both volumes from Linux.
 - [ ] **LUKS2 Initrd Unlock & Mounts:** Unlock `cryptroot` (`UUID=aa0403dd-9917-49e1-85b1-46b21b39f2d9`) at boot; verify `findmnt / /boot` shows `/dev/mapper/cryptroot` (`ext4`) on `/` and `/dev/nvme0n1p4` (`vfat`, `UUID=C650-1003`) on `/boot` (no `/mnt/shared`).
 - [ ] **Display, HiDPI (1.6x) & Notch Geometry:**
-  - `hyprctl monitors -j` shows `eDP-1` at `2560x1664@60Hz`, scale `1.60` (`1600x1040` logical), `xwayland.force_zero_scaling = true`.
+  - `hyprctl monitors -j` shows `eDP-1` at the DCP-advertised mode (`2560x1600@60Hz` on Linux Asahi 7.2.15, which reports only that mode on `J413`), scale `1.60` (`1600x1000` logical), `xwayland.force_zero_scaling = true`. The Hyprland rule uses `mode = "preferred"` on purpose: pinning `2560x1664@60` does not exist in the DRM mode list and breaks the atomic commit.
   - `/usr/share/omarchy-platform/display-cutouts.json` present (`300x64` notch reserve for `omarchy-shell` / top bar).
   - `brightnessctl` adjusts Apple DCP backlight (`XF86MonBrightnessUp/Down`) and keyboard backlight (`*::kbd_backlight`).
 - [ ] **Audio DSP & Speaker Protection (`asahi-audio` 4.1 + `speakersafetyd` 3.0):**

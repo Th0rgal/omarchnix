@@ -72,9 +72,15 @@ in
       };
 
       monitor = [
+        # Never pin an absolute panel timing here: appledrm only advertises the
+        # modes the DCP reports (Linux Asahi 7.2.15 exposes 2560x1600 on J413,
+        # not the 2560x1664 native panel geometry). Asking for a mode that does
+        # not exist makes the atomic TEST_ONLY commit fail with EINVAL and forces
+        # a live re-modeset while a page-flip is pending, which surfaces as
+        # "Cannot commit when a page-flip is awaiting" and kills the session.
         {
           output = "eDP-1";
-          mode = "2560x1664@60";
+          mode = "preferred";
           position = "0x0";
           scale = "1.6";
         }

@@ -154,6 +154,10 @@ in
         home-manager = {
           useGlobalPkgs = lib.mkDefault true;
           useUserPackages = lib.mkDefault true;
+          # Keep pre-existing (hand-written) dotfiles instead of aborting
+          # activation: a machine that already has ~/.config/hypr or ~/.zshrc
+          # otherwise fails with "Existing file ... would be clobbered".
+          backupFileExtension = lib.mkDefault "hm-backup";
           extraSpecialArgs = lib.optionalAttrs (inputs != { }) {
             inherit inputs;
           };

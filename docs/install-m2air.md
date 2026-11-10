@@ -100,7 +100,7 @@ Record all outputs verbatim into `docs/logs/g6-<YYYY-MM-DD>.md`:
   - `wpctl status` shows `MacBook Air J413` / `J415` DSP graph (`bankstown-lv2`, `lsp-plugins`, `triforce-lv2` via PipeWire filter-chain) + internal mic array.
 - [ ] **Power, Battery Thresholds & `s2idle` Sleep:**
   - `systemctl status upower power-profiles-daemon macsmc-battery-thresholds` active; `cat /sys/class/power_supply/macsmc-battery/charge_control_end_threshold` returns `80`.
-  - Close lid for 60s -> `journalctl -b -u systemd-suspend` confirms clean `s2idle` entry/resume, `hyprlock` locked before sleep, DPMS restored on wake, Wi-Fi (`brcmfmac` firmware supplicant) reconnects automatically.
+  - Close lid for 60s -> `journalctl -b -u systemd-suspend` confirms clean `s2idle` entry/resume, the session locked via `omarchy-shell` before sleep, DPMS restored on wake, Wi-Fi (`brcmfmac` firmware supplicant) reconnects automatically.
 - [ ] **Omarchnix Shell & System Health:**
   - `omarchnix status --json` and `omarchnix check --json` report `omarchy-shell` active, current theme staged cleanly, and all 4 coding-agent skill directories provisioned.
 
@@ -119,7 +119,7 @@ sudo reboot
 - [ ] **Secure Enclave, Touch ID & FIDO2 Passkeys (`modules/aurora-sep.nix`):**
   - Wait ~45s after boot for initial SEP keybag bring-up, then run `omarchnix-touchid-status` (verifies `linux-aurora` `7.3.0`, `/dev/disk/by-partlabel/iBootSystemContainer`, `/dev/sep-bio`, `aurora-sep-ready.service`, `fprintd.service`, and `aurora-fido.service`).
   - Enroll fingerprint: `sudo fprintd-enroll thomas` and test `fprintd-verify`.
-  - Verify Touch ID prompts on `sudo -k true`, Polkit GUI dialogs, `omarchy-system-lock`, and `hyprlock` (`SUPER + ESCAPE`), plus WebAuthn passkeys in Brave/Firefox (`aurora-fido status`).
+  - Verify Touch ID prompts on `sudo -k true`, Polkit GUI dialogs, the `omarchy-shell` lock screen (`SUPER + ESCAPE`), plus WebAuthn passkeys in Brave/Firefox (`aurora-fido status`).
   - *(Rollback note: if ever needed from macOS or live USB, copying `/boot/m1n1/boot.bin.pre-aurora` back to `/boot/m1n1/boot.bin` and selecting the previous NixOS generation restores the stock `alx.sh` Stage 2 + `m2air` boot chain).*
 
 ---

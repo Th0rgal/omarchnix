@@ -83,6 +83,28 @@ Build the Asahi/NixOS installer ISO:
 $ nix build .#installer-bootstrap
 ```
 
+### Adopting an existing machine
+
+Home Manager activation never overwrites files you already have: the module sets
+`home-manager.backupFileExtension = "hm-backup"`, so a hand-written
+`~/.config/hypr/hyprland.lua` or `~/.zshrc` is renamed to `<file>.hm-backup`
+instead of aborting activation.
+
+### Deploying to another machine
+
+`nix copy --to ssh-ng://host` requires the remote `nix.settings.trusted-users` to
+contain your account (or a signature by a trusted key), which most hosts do not
+allow. Use the bundled helper instead; it builds locally, transfers only the
+missing store paths and switches the remote profile:
+
+```console
+$ scripts/remote-switch.sh m2air thomas@192.168.1.165
+```
+
+Known failure modes (crashed lock screen, repeated password prompts, clobbered
+dotfiles, `gsettings` schema lookup) are collected in
+[`docs/troubleshooting.md`](docs/troubleshooting.md).
+
 ---
 
 ## Status Matrix

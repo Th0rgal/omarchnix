@@ -157,7 +157,10 @@
           };
           orb-desktop = final.callPackage ./pkgs/orb-desktop.nix {
             orbSrc = inputs.orb;
-            sandboxed-sh = prev.sandboxed-sh or inputs.orb.packages.${final.stdenv.hostPlatform.system}.default;
+            sandboxed-sh =
+              prev.sandboxed-sh or (final.callPackage "${inputs.orb}/nix/package.nix" {
+                inherit (final) turbo-lean;
+              });
           };
           sandboxed-sh = final.orb-desktop.passthru.sandboxed-sh;
           notion-calendar = final.callPackage ./pkgs/notion-calendar.nix { };

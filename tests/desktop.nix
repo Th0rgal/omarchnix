@@ -21,6 +21,18 @@ assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.syst
 assert builtins.any (p: (p.pname or "") == "orb-desktop") m2airConfig.environment.systemPackages;
 assert
   (m2airConfig.xdg.portal.config.hyprland."org.freedesktop.impl.portal.Settings" or null) == "gtk";
+assert m2airConfig.fonts.enableDefaultPackages == false;
+assert m2airConfig.home-manager.users.thomas.gtk.font.name == "IBM Plex Sans";
+assert m2airConfig.home-manager.users.thomas.gtk.font.size == 9;
+assert
+  m2airConfig.home-manager.users.thomas.dconf.settings."org/gnome/desktop/interface".font-name
+  == "IBM Plex Sans 9";
+assert
+  m2airConfig.home-manager.users.thomas.dconf.settings."org/gnome/desktop/interface".document-font-name
+  == "Michelangelus 10";
+assert
+  m2airConfig.home-manager.users.thomas.dconf.settings."org/gnome/desktop/interface".monospace-font-name
+  == "Lilex Nerd Font 11";
 assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.kb_layout
   == "us";

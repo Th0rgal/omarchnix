@@ -186,6 +186,27 @@ assert builtins.elem "https://aurorasilicon.org/nixos-aurora/cache"
   m2airAuroraConfig.nix.settings.substituters;
 assert builtins.elem "apple_sep" m2airAuroraConfig.boot.blacklistedKernelModules;
 assert m2airAuroraConfig.boot.initrd.includeDefaultModules == false;
+assert
+  let
+    fwUnit = m2airAuroraConfig.boot.initrd.systemd.services.aurora-vendor-firmware;
+    rtFwUnit = m2airAuroraConfig.systemd.services.aurora-vendor-firmware;
+    fwAct = m2airAuroraConfig.system.activationScripts.auroraFirmwareHandoff;
+  in
+  (fwUnit.unitConfig.DefaultDependencies or true) == false
+  && builtins.elem "sysinit.target" fwUnit.wantedBy
+  && builtins.elem "cryptsetup-pre.target" fwUnit.wants
+  && builtins.elem "cryptsetup.target" fwUnit.before
+  && builtins.elem "systemd-ask-password-console.service" fwUnit.before
+  && (rtFwUnit.unitConfig.DefaultDependencies or true) == false
+  && builtins.elem "sysinit.target" rtFwUnit.wantedBy
+  && builtins.elem "systemd-udev-trigger.service" rtFwUnit.before
+  && builtins.elem "udevd" fwAct.deps;
+assert m2airAuroraConfig.systemd.services ? aurora-speaker-tuning-setup;
+assert m2airAuroraConfig.systemd.services ? speakerguardd-v2;
+assert
+  (m2airAuroraConfig.systemd.services.speakerguardd-v2-provision.environment.SGV2_GATE or "") != "";
+assert m2airAuroraConfig.services.pipewire.extraLv2Packages != [ ];
+assert m2airAuroraConfig.services.pipewire.wireplumber.extraLv2Packages != [ ];
 assert builtins.elem "uhid" m2airAuroraConfig.boot.kernelModules;
 assert m2airAuroraConfig.system.build ? auroraStage2;
 assert fingerprintSufficientBeforeUnix m2airAuroraConfig "sudo";

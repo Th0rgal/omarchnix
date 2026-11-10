@@ -67,6 +67,7 @@ let
       destination=/run/aurora-firmware
       mkdir -p "$destination"
       if [ ! -s "$destination/vendorfw/.vendorfw.manifest" ]; then
+        modprobe nvme_apple 2>/dev/null || true
         udevadm wait --timeout=60 "$device"
         esp=$(findmnt --noheadings --first-only --output TARGET --source "$device" || true)
         if [ -z "$esp" ]; then
@@ -101,8 +102,10 @@ let
       export AURORA_FIRMWARE_ROOT="$destination/vendorfw"
       export AURORA_ADMIT_BLUETOOTH=0
       if [[ "''${1:-initrd}" == runtime ]]; then
-        if [[ ! -e /lib/firmware && ! -L /lib/firmware ]]; then
-          ln -s /run/current-system/firmware /lib/firmware
+        if [[ ! -d /lib/firmware ]]; then
+          mkdir -p /lib
+          ln -sfn /run/current-system/firmware /lib/.firmware.tmp
+          mv -Tf /lib/.firmware.tmp /lib/firmware
         fi
         [[ -d /lib/firmware ]] || {
           echo 'System firmware fallback is unavailable' >&2
@@ -110,8 +113,24 @@ let
         }
         printf '%s' "$destination/vendorfw" > /sys/module/firmware_class/parameters/path
         export AURORA_ADMIT_BLUETOOTH=1
+      else
+        # Preload Apple HID drivers so they bind synchronously as soon as
+        # dockchannel-hid finishes uploading MTP firmware.
+        modprobe hid_apple 2>/dev/null || true
+        modprobe hid_magicmouse 2>/dev/null || true
       fi
       ${admission}/bin/aurora-peripheral-admission
+      if [[ "''${1:-initrd}" != runtime ]]; then
+        # Wait up to 5s for dockchannel-hid MTP firmware load to register the
+        # built-in Apple MTP keyboard input device before LUKS passphrase prompt.
+        for _ in $(seq 1 50); do
+          if grep -qi "keyboard" /sys/class/input/input*/name 2>/dev/null; then
+            break
+          fi
+          sleep 0.1
+        done
+        udevadm settle --timeout=5 || true
+      fi
       exit "$status"
     '';
   };
@@ -570,6 +589,7 @@ in
         "xhci-plat-hcd"
         "usbhid"
         "hid_apple"
+        "hid_magicmouse"
         "hid_generic"
         "nvme"
         "virtio_blk"
@@ -589,17 +609,39 @@ in
         "appledrm"
         "snd-seq"
       ];
+      # Early Stage-1 unit: must set DefaultDependencies = false so systemd does not
+      # add implicit After=sysinit.target (which creates a cycle with cryptsetup-pre.target
+      # and blocks dockchannel-hid keyboard admission behind the LUKS passphrase prompt).
       boot.initrd.systemd.services.aurora-vendor-firmware = {
         description = "Extract this Mac's vendor firmware before peripheral admission";
-        wantedBy = [ "initrd.target" ];
-        after = [ "systemd-udev-settle.service" ];
-        wants = [ "systemd-udev-settle.service" ];
-        before = [
-          "sysroot.mount"
+        unitConfig.DefaultDependencies = false;
+        wantedBy = [
+          "sysinit.target"
+          "initrd.target"
+        ];
+        after = [
+          "systemd-udevd.service"
+          "systemd-udev-trigger.service"
+          "systemd-udev-settle.service"
+        ];
+        wants = [
+          "systemd-udevd.service"
+          "systemd-udev-settle.service"
           "cryptsetup-pre.target"
+        ];
+        conflicts = [ "shutdown.target" ];
+        before = [
+          "cryptsetup-pre.target"
+          "cryptsetup.target"
+          "systemd-ask-password-console.path"
+          "systemd-ask-password-console.service"
+          "sysinit.target"
+          "sysroot.mount"
+          "shutdown.target"
         ];
         serviceConfig = {
           Type = "oneshot";
+          RemainAfterExit = true;
           ExecStart = "${loadFirmware}/bin/aurora-load-vendor-firmware";
         };
       };
@@ -610,11 +652,48 @@ in
       ]
       ++ map lib.getBin firmwareTools;
 
+      # NixOS's built-in `udevd` activation snippet writes `/nix/store/...-firmware/lib/firmware`
+      # into `/sys/module/firmware_class/parameters/path` during Stage-2 `/activate`, wiping out
+      # Stage 1's `/run/aurora-firmware/vendorfw` right before `systemd-udev-trigger.service`
+      # coldplugs Broadcom Wi-Fi (`brcmfmac`) and Bluetooth (`hci_bcm4377`). Immediately link
+      # `/lib/firmware` to the active system store firmware (standard kernel fallback) and
+      # restore `/run/aurora-firmware/vendorfw` inside `/activate` itself.
+      system.activationScripts.auroraFirmwareHandoff = lib.stringAfter [ "udevd" "specialfs" ] ''
+        mkdir -p /lib
+        if [ -d /lib/firmware ] && [ ! -L /lib/firmware ]; then
+          rmdir /lib/firmware/vendor/apple /lib/firmware/vendor /lib/firmware 2>/dev/null || true
+          if [ -d /lib/firmware ] && [ ! -L /lib/firmware ]; then
+            rm -rf /lib/.firmware.pre-aurora
+            mv /lib/firmware /lib/.firmware.pre-aurora
+          fi
+        fi
+        ln -sfn "$(readlink -f "$systemConfig")/firmware" /lib/.firmware.tmp
+        mv -Tf /lib/.firmware.tmp /lib/firmware
+        if [ -e /sys/module/firmware_class/parameters/path ] && [ -d /run/aurora-firmware/vendorfw ]; then
+          printf '%s' "/run/aurora-firmware/vendorfw" > /sys/module/firmware_class/parameters/path
+        fi
+      '';
+
+      # Also run Stage-2 `aurora-vendor-firmware` early in `sysinit.target` strictly before
+      # `systemd-udev-trigger.service` so coldplugged PCI/platform devices (`brcmfmac`,
+      # `hci_bcm4377`, `iio_aop_als`, `ane_t6021`) always see `/run/aurora-firmware/vendorfw`
+      # even if Stage 1 had to defer extraction.
       systemd.services.aurora-vendor-firmware = {
         description = "Maintain Aurora per-device firmware handoff";
-        wantedBy = [ "multi-user.target" ];
-        after = [ "local-fs.target" ];
-        before = [ "bluetooth.service" ];
+        unitConfig.DefaultDependencies = false;
+        wantedBy = [
+          "sysinit.target"
+          "multi-user.target"
+        ];
+        conflicts = [ "shutdown.target" ];
+        after = [ "systemd-udevd.service" ];
+        before = [
+          "systemd-udev-trigger.service"
+          "sysinit.target"
+          "network-pre.target"
+          "bluetooth.service"
+          "shutdown.target"
+        ];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
@@ -638,7 +717,10 @@ in
         pkgs.aurora-xart
         pkgs.libfprint
       ]
-      ++ lib.optional (pkgs ? aurora-userpages) pkgs.aurora-userpages;
+      ++ lib.optional (pkgs ? aurora-userpages) pkgs.aurora-userpages
+      ++ lib.optional (pkgs ? aurora-alsa-utils) pkgs.aurora-alsa-utils;
+
+      hardware.firmware = lib.optional (pkgs ? aurora-avd-firmware) pkgs.aurora-avd-firmware;
 
       services.pipewire.package = lib.mkIf (pkgs ? aurora-pipewire) (lib.mkDefault pkgs.aurora-pipewire);
 
@@ -931,5 +1013,164 @@ in
         restartTriggers = [ fidoConf ];
       };
     })
+
+    # Aurora kernel v2 speaker protection (`speakerguardd-v2` + legacy `speakersafetyd` gate)
+    # so `linux-aurora` speaker amp controls (`Amp Gain Volume`) are managed by `speakerguardd-v2`
+    # instead of panicking legacy `speakersafetyd` with EPERM.
+    (lib.mkIf
+      (
+        cfg.enable
+        && (pkgs ? speakerguardd)
+        && (pkgs ? speakerguardd-v2)
+        && (pkgs.asahi-audio.keepsBuiltinProfile or false)
+      )
+      (
+        let
+          sgPkg = pkgs.speakerguardd-v2;
+          sgGate = "${sgPkg}/libexec/speakerguardd-v2/speakerguardd-gate";
+          sgBundleDir = "/var/lib/speakerguardd/audio-tuning";
+          sgTools = [
+            (pkgs.aurora-alsa-utils or pkgs.alsa-utils)
+            config.services.pipewire.package
+            pkgs.systemd
+            pkgs.util-linux
+            pkgs.coreutils
+            sgPkg
+          ];
+          auroraAudioTuningLink =
+            pkgs.runCommand "aurora-audio-tuning-link"
+              {
+                passthru.compressFirmware = false;
+              }
+              ''
+                mkdir -p "$out/lib/firmware/vendor/apple"
+                ln -s "${sgBundleDir}" "$out/lib/firmware/vendor/apple/audio-tuning"
+              '';
+          auroraSpeakerTuningSetup = pkgs.writeShellApplication {
+            name = "aurora-speaker-tuning-setup";
+            runtimeInputs = [
+              pkgs.python3
+              pkgs.apfs-fuse
+              pkgs.fuse3
+              pkgs.fuse
+              pkgs.util-linux
+              pkgs.coreutils
+              sgPkg
+            ];
+            text = ''
+              exec python3 -I ${../pkgs/aurora-speaker-tuning-setup.py} \
+                --output "${sgBundleDir}" \
+                --cli "${sgPkg}/bin/aurora-speaker-tuning" \
+                --lzfse-lib "${pkgs.lzfse}/lib/liblzfse.so" \
+                "$@"
+            '';
+          };
+        in
+        {
+          environment.systemPackages = [
+            sgPkg
+            auroraSpeakerTuningSetup
+          ];
+          environment.pathsToLink = [ "/lib/lv2" ];
+          hardware.firmware = [ auroraAudioTuningLink ];
+          environment.etc."speakerguardd/provision.conf".text = lib.mkDefault ''
+            SGV2_BUNDLE=${sgBundleDir}
+          '';
+          services.pipewire = {
+            extraLv2Packages = [ sgPkg ];
+            wireplumber.extraLv2Packages = [ sgPkg ];
+          };
+          systemd.packages = [
+            pkgs.speakerguardd
+            sgPkg
+          ];
+          services.udev.packages = [ pkgs.speakerguardd ];
+          systemd.services.aurora-speaker-tuning-setup = {
+            description = "Extract and verify this Mac's speaker tuning bundle when missing";
+            wantedBy = [ "multi-user.target" ];
+            after = [
+              "local-fs.target"
+              "systemd-udev-settle.service"
+            ]
+            ++ lib.optional cfg.firmwareHandoff "aurora-vendor-firmware.service";
+            before = [
+              "speakerguardd-v2-provision.service"
+              "speakerguardd-v2-selfcheck.service"
+              "speakerguardd-v2.service"
+              "speakerguardd.service"
+              "speakersafetyd.service"
+            ];
+            unitConfig = {
+              RequiresMountsFor = "/var/lib";
+              ConditionPathExists = "/proc/device-tree/compatible";
+            };
+            serviceConfig = {
+              Type = "oneshot";
+              ExecCondition = "${auroraSpeakerTuningSetup}/bin/aurora-speaker-tuning-setup --check-needed";
+              ExecStart = "${auroraSpeakerTuningSetup}/bin/aurora-speaker-tuning-setup";
+              StateDirectory = "speakerguardd";
+              StateDirectoryMode = "0755";
+              TimeoutStartSec = 180;
+            };
+          };
+          systemd.services.speakerguardd-v2 = {
+            wantedBy = [ "multi-user.target" ];
+            path = sgTools;
+            environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
+            # Replace upstream hard Requires= with Wants= so boards gated to legacy
+            # speakersafetyd skip cleanly instead of failing with 'dependency' during
+            # nixos-rebuild switch.
+            unitConfig.Requires = "";
+            wants = [
+              "aurora-speaker-tuning-setup.service"
+              "speakerguardd-v2-provision.service"
+              "speakerguardd-v2-selfcheck.service"
+              "speakerguardd-v2-switchtest.service"
+            ];
+          };
+          systemd.services.speakerguardd-v2-provision = {
+            path = sgTools;
+            environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
+          };
+          systemd.services.speakerguardd-v2-selfcheck = {
+            path = sgTools;
+            environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
+          };
+          systemd.services.speakerguardd-v2-switchtest = {
+            path = sgTools;
+            environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
+          };
+          systemd.services.speakerguardd-v2-seat = {
+            path = sgTools;
+            environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
+          };
+          systemd.services.speakerguardd-v2-sleep = {
+            wantedBy = [ "sleep.target" ];
+            path = sgTools;
+            environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
+          };
+          systemd.paths.speakerguardd-v2-seat.wantedBy = [ "multi-user.target" ];
+          systemd.user.services.speakerguardd-v2-graph = {
+            wantedBy = [ "pipewire.service" ];
+            path = sgTools;
+            environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
+          };
+          systemd.user.services.speakerguardd-v2-session = {
+            wantedBy = [ "pipewire.service" ];
+            path = sgTools;
+            environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
+          };
+          systemd.services.speakerguardd.serviceConfig.ExecCondition = [ "${sgGate} legacy" ];
+          systemd.services.speakersafetyd.serviceConfig = {
+            ExecCondition = [
+              "${pkgs.speakerguardd}/libexec/speakerguardd/use-feedback-guard"
+              "${sgGate} legacy"
+            ];
+            ExecStartPre = "+${pkgs.runtimeShell} -c 'if [ -e /run/speakersafetyd.started ]; then : > /run/speakersafetyd/speakersafetyd.flag; fi'";
+            ExecStopPost = "+${pkgs.coreutils}/bin/touch /run/speakersafetyd.started";
+          };
+        }
+      )
+    )
   ];
 }

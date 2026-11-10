@@ -1,10 +1,17 @@
-{ pkgs, ... }:
+{ config, pkgs, ... }:
 let
+  cfg = config.programs.omarchnix;
   hyprctl = "${pkgs.hyprland}/bin/hyprctl";
-  hyprlock = "${pkgs.hyprlock}/bin/hyprlock";
+  # hyprlock 0.9.x exits on this host as soon as its PAM conversation runs,
+  # which leaves Hyprland's "lockscreen app died" banner over the whole
+  # session. The omarchy-shell lock service owns the ext-session-lock surface
+  # in a long-lived process and recovers stranded locks, so use it instead.
+  # Its idle service already locks the screen, so hypridle must not send a
+  # second lock request: two requesters kept re-locking the session a few
+  # seconds after every unlock and prompted for the password each time.
+  shellPkg = if (cfg.shell.package or null) != null then cfg.shell.package else pkgs.omarchy-shell;
+  lockCmd = "${shellPkg}/bin/omarchy-shell lock lock";
   brightnessctl = "${pkgs.brightnessctl}/bin/brightnessctl";
-  pidof = "${pkgs.procps}/bin/pidof";
-  loginctl = "${pkgs.systemd}/bin/loginctl";
   systemctl = "${pkgs.systemd}/bin/systemctl";
 in
 {
@@ -12,8 +19,7 @@ in
     enable = true;
     settings = {
       general = {
-        lock_cmd = "${pidof} hyprlock || ${hyprlock}";
-        before_sleep_cmd = "${loginctl} lock-session";
+        lock_cmd = "${lockCmd}";
         after_sleep_cmd = "${hyprctl} dispatch dpms on";
         ignore_dbus_inhibit = false;
       };
@@ -23,10 +29,6 @@ in
           timeout = 180;
           on-timeout = "${brightnessctl} -s set 10%";
           on-resume = "${brightnessctl} -r";
-        }
-        {
-          timeout = 300;
-          on-timeout = "${loginctl} lock-session";
         }
         {
           timeout = 360;

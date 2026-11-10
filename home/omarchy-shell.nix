@@ -11,61 +11,9 @@ let
   omarchyShellPkg = cfg.shell.package;
   omarchyLib = import ../lib/omarchy.nix { inherit lib; };
 
-  clipboardBarPluginSrc = pkgs.runCommand "omarchnix-clipboard-bar-src" { } ''
-    mkdir -p "$out"
-    cat > "$out/manifest.json" <<'EOF'
-    {
-      "schemaVersion": 1,
-      "id": "omarchnix.clipboard",
-      "name": "Clipboard History",
-      "version": "1.0.0",
-      "author": "Omarchnix",
-      "license": "MIT",
-      "description": "Top status bar button for Omarchy clipboard history (Maccy equivalent).",
-      "kinds": [
-        "bar-widget"
-      ],
-      "entryPoints": {
-        "barWidget": "Widget.qml"
-      },
-      "barWidget": {
-        "displayName": "Clipboard",
-        "description": "Open clipboard history (Cmd+Shift+V / Cmd+Ctrl+V).",
-        "defaultSection": "right"
-      }
-    }
-    EOF
-    cat > "$out/Widget.qml" <<'EOF'
-    import QtQuick
-    import Quickshell
-    import qs.Commons
-    import qs.Ui
-
-    BarWidget {
-      id: root
-      moduleName: "omarchnix.clipboard"
-
-      implicitWidth: button.implicitWidth
-      implicitHeight: button.implicitHeight
-
-      BarIconButton {
-        id: button
-        anchors.fill: parent
-        bar: root.bar
-        text: "󰅌"
-        slotSize: Style.bar.statusSlot
-        tooltipText: "Clipboard History (Cmd+Shift+V)"
-        onPressed: function() {
-          if (root.bar) root.bar.run("omarchy-shell shell toggle omarchy.clipboard")
-        }
-      }
-    }
-    EOF
-  '';
-
   clipboardBarPlugin = omarchyLib.buildPlugin {
     inherit pkgs;
-    src = clipboardBarPluginSrc;
+    src = ../pkgs/plugins/omarchnix-clipboard;
   };
 
   lockedPluginEntries = lib.mapAttrsToList (
@@ -126,7 +74,7 @@ let
         builtins.elem "bar" (entry.manifest.kinds or [ ])
         || builtins.elem "bar-widget" (entry.manifest.kinds or [ ]);
     in
-    if entry.enable && !isBarOrWidget then [ entry.id ] else [ ]
+    if entry.enable && !isBarOrWidget then [ { id = entry.id; } ] else [ ]
   ) lockedPluginEntries;
 
   selectedBarOverride =
@@ -203,7 +151,7 @@ let
     // lib.optionalAttrs (selectedBarOverride != null) {
       id = selectedBarOverride;
     };
-    plugins = lib.unique enabledNonBarPlugins;
+    plugins = appendUniqueById [ ] enabledNonBarPlugins;
   }
   // cfg.shell.extraSettings;
 
@@ -320,7 +268,10 @@ in
                 tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
                 ${pkgs.jq}/bin/jq --arg id ${lib.escapeShellArg entry.id} '
                   .version = 1
-                  | .plugins = ((.plugins // []) | if index($id) then . else . + [$id] end)
+                  | .plugins = (
+                      [(.plugins // [])[] | if type == "string" then { id: . } else . end]
+                      | if any(.[]; .id == $id) then . else . + [{ id: $id }] end
+                    )
                 ' "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
               ''
           )

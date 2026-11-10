@@ -46,7 +46,7 @@
     };
 
     turbo-lean = {
-      url = "github:Th0rgal/turbo-lean/82a940653812ad7552ae7087f2c5a3164e56e7ff";
+      url = "github:Th0rgal/turbo-lean/f240450af444a302a0e02d5a5f8af00351089386";
       flake = false;
     };
 

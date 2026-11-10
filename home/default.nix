@@ -99,13 +99,31 @@ in
       name = lib.mkOption {
         type = lib.types.str;
         default = "tokyo-night";
-        description = "Active Omarchy theme name (all 23+ upstream palettes supported).";
+        description = "Active Omarchy theme name (all 23+ upstream palettes and custom themes supported).";
+      };
+
+      darkName = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Preferred dark theme slug used by `omarchnix theme toggle` and the status bar Appearance button (defaults to `theme.name` when dark, else `tokyo-night`).";
+      };
+
+      lightName = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Preferred light theme slug used by `omarchnix theme toggle` and the status bar Appearance button (defaults to `theme.name` when light, else `white`).";
       };
 
       attrset = lib.mkOption {
         type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
         default = null;
         description = "Optional custom theme attrset override (e.g. from lib.omarchy.importTheme).";
+      };
+
+      customThemes = lib.mkOption {
+        type = lib.types.attrsOf lib.types.package;
+        default = { };
+        description = "Declarative custom Omarchy theme packages materialized into `~/.config/omarchy/themes/<slug>`.";
       };
     };
 
@@ -233,6 +251,7 @@ in
     ./waybar.nix
     ./omarchy-shell.nix
     ./agents.nix
+    ./fcitx5.nix
     ./foot.nix
     ./fuzzel.nix
     ./hyprlock.nix
@@ -317,12 +336,6 @@ in
         gtk4.extraConfig.gtk-xft-dpi = 98304;
         gtk3.extraConfig.gtk-application-prefer-dark-theme = !isLight;
         gtk4.extraConfig.gtk-application-prefer-dark-theme = !isLight;
-        gtk3.extraCss = ''
-          window { backdrop-filter: blur(20px); }
-        '';
-        gtk4.extraCss = ''
-          window { backdrop-filter: blur(20px); }
-        '';
       };
 
     dconf.settings."org/gnome/desktop/interface" =

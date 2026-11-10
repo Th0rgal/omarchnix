@@ -52,6 +52,24 @@ in
       description = "Apple SMC battery charge start threshold (%) written to macsmc-battery when present.";
     };
 
+    isoLayout = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.enum [
+          (-1)
+          0
+          1
+        ]
+      );
+      default = 0;
+      description = ''
+        Value written to `/sys/module/hid_apple/parameters/iso_layout` in Stage-2.
+        Apple Silicon International English ISO keyboards (`apple_layout_id = 4`, HID `country = 0x0d`)
+        already map the physical `` ` ``/`~` key next to Left Shift to `<TLDE>` in MTP firmware;
+        setting `0` prevents `hid_apple` from swapping `<TLDE>` and `<LSGT>`, while leaving Stage-1
+        initrd LUKS passphrase entry untouched.
+      '';
+    };
+
     bootloader = {
       enable = lib.mkEnableOption "removable ARM64 UEFI GRUB on the Asahi ESP (/boot/EFI/BOOT/BOOTAA64.EFI) without touching Apple NVRAM, m1n1/boot.bin, or vendorfw";
 
@@ -194,7 +212,10 @@ in
       systemd.tmpfiles.rules = [
         "d /usr/share/omarchy-platform 0755 root root - -"
         "L+ /usr/share/omarchy-platform/display-cutouts.json - - - - ${displayCutoutsJson}"
-      ];
+      ]
+      ++ lib.optional (
+        cfg.isoLayout != null
+      ) "w /sys/module/hid_apple/parameters/iso_layout - - - - ${toString cfg.isoLayout}";
 
       services.udev.extraRules = ''
         SUBSYSTEM=="power_supply", KERNEL=="macsmc-battery", RUN+="${pkgs.coreutils}/bin/chgrp wheel /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold", RUN+="${pkgs.coreutils}/bin/chmod 0664 /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold"

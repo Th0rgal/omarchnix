@@ -299,6 +299,12 @@ in
     (lib.mkIf (cfg.enable && cfg.desktop.enable) {
       hardware.graphics.enable = lib.mkDefault true;
 
+      i18n.inputMethod = {
+        enable = lib.mkDefault true;
+        type = lib.mkDefault "fcitx5";
+        fcitx5.waylandFrontend = lib.mkDefault true;
+      };
+
       programs.hyprland = {
         enable = true;
         withUWSM = true;

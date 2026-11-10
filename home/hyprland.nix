@@ -20,9 +20,19 @@ let
   brightnessctl = "${pkgs.brightnessctl}/bin/brightnessctl";
   playerctl = "${pkgs.playerctl}/bin/playerctl";
   wpctl = "${pkgs.wireplumber}/bin/wpctl";
+  flock = "${pkgs.util-linux}/bin/flock";
   grim = "${pkgs.grim}/bin/grim";
   slurp = "${pkgs.slurp}/bin/slurp";
   wlCopy = "${pkgs.wl-clipboard}/bin/wl-copy";
+  regionScreenshot = pkgs.writeShellScript "omarchnix-region-screenshot" ''
+    lockfile="''${XDG_RUNTIME_DIR:-/tmp}/omarchnix-screenshot.lock"
+    exec 9>"$lockfile"
+    ${flock} -n 9 || exit 0
+    region="$(${slurp} 9>&-)" || exit 0
+    exec 9>&-
+    [ -n "$region" ] || exit 0
+    ${grim} -g "$region" - | ${wlCopy} --type image/png
+  '';
   omarchnixCli = if cfg.cliPackage != null then "${cfg.cliPackage}/bin/omarchnix" else "omarchnix";
   omarchyShellBin = if cfg.shell.package != null then "${cfg.shell.package}/bin" else "";
   themePickerCmd =
@@ -101,9 +111,11 @@ let
     in
     [
       (mkBind "SUPER + ${code}" "hl.dsp.focus({ workspace = ${toString ws} })")
-      (mkBind "SUPER + SHIFT + ${code}" "hl.dsp.window.move({ workspace = ${toString ws} })")
       (mkBind "SUPER + CTRL + ${code}" ''hl.dsp.window.move({ workspace = "${toString ws} silent" })'')
     ]
+    ++ lib.optional (ws != 4) (
+      mkBind "SUPER + SHIFT + ${code}" "hl.dsp.window.move({ workspace = ${toString ws} })"
+    )
   ) workspaceIndices;
 in
 {
@@ -439,6 +451,14 @@ in
           blur = true;
           ignore_alpha = 0.15;
         }
+        {
+          name = "selection-layer";
+          match = {
+            namespace = "^selection$";
+          };
+          no_anim = true;
+          animation = "none";
+        }
       ];
 
       bind = [
@@ -489,11 +509,9 @@ in
 
         (mkBind "SUPER + S" ''hl.dsp.workspace.toggle_special("scratchpad")'')
         (mkBind "SUPER + SHIFT + S" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
-        (mkBind "SUPER + SHIFT + P" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
-        (mkBind "CTRL + SUPER + SHIFT + 4" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
-        (mkBind "CTRL + SUPER + SHIFT + code:13" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
-        (mkBind "SUPER + SHIFT + 4" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
-        (mkBind "SUPER + SHIFT + code:13" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "SUPER + SHIFT + P" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
+        (mkBind "CTRL + SUPER + SHIFT + code:13" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
+        (mkBind "SUPER + SHIFT + code:13" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
         (mkBind "SUPER + SHIFT + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
         (mkBind "SUPER + CTRL + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
         (mkBind "SUPER + SHIFT + I" "hl.dsp.exec_cmd(${builtins.toJSON idleToggleCmd})")

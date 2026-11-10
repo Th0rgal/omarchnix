@@ -110,12 +110,10 @@ let
       code = "code:${toString (ws + 9)}";
     in
     [
-      (mkBind "SUPER + ${code}" "hl.dsp.focus({ workspace = ${toString ws} })")
-      (mkBind "SUPER + CTRL + ${code}" ''hl.dsp.window.move({ workspace = "${toString ws} silent" })'')
+      (mkBind "CTRL + ${code}" "hl.dsp.focus({ workspace = ${toString ws} })")
+      (mkBind "CTRL + SHIFT + ${code}" "hl.dsp.window.move({ workspace = ${toString ws} })")
+      (mkBind "CTRL + SUPER + ${code}" ''hl.dsp.window.move({ workspace = "${toString ws} silent" })'')
     ]
-    ++ lib.optional (ws != 4) (
-      mkBind "SUPER + SHIFT + ${code}" "hl.dsp.window.move({ workspace = ${toString ws} })"
-    )
   ) workspaceIndices;
 in
 {
@@ -463,9 +461,10 @@ in
 
       bind = [
         (mkBind "SUPER + Return" "hl.dsp.exec_cmd(terminal)")
-        (mkBind "SUPER + O" ''hl.dsp.exec_cmd("${orb}")'')
+        (mkBind "CTRL + SUPER + O" ''hl.dsp.exec_cmd("${orb}")'')
         (mkBind "SUPER + SPACE" "hl.dsp.exec_cmd(launcher)")
-        (mkBind "SUPER + D" "hl.dsp.exec_cmd(launcher)")
+        (mkBind "CTRL + SUPER + SPACE" "hl.dsp.exec_cmd(launcher)")
+        (mkBind "SUPER + ALT + SPACE" "hl.dsp.exec_cmd(launcher)")
         (mkBind "SUPER + Q" "hl.dsp.window.close()")
         (mkBind "SUPER + W" "hl.dsp.window.close()")
         (mkBind "SUPER + SHIFT + Q" "hl.dsp.window.kill()")
@@ -478,44 +477,47 @@ in
         (mkBind "SUPER + Z" (mkSendShortcutOnce "CTRL" "Z"))
         (mkBind "SUPER + SHIFT + Z" (mkSendShortcutOnce "CTRL SHIFT" "Z"))
 
-        # Toggle window floating (rebound from SUPER + V to SUPER + SHIFT + F and SUPER + ALT + V)
-        (mkBind "SUPER + SHIFT + F" ''hl.dsp.window.float({ action = "toggle" })'')
+        # Window management uses CTRL + SUPER (Ctrl + Cmd) so bare Cmd+<letter> stays free for apps
+        (mkBind "CTRL + SUPER + SHIFT + F" ''hl.dsp.window.float({ action = "toggle" })'')
         (mkBind "SUPER + ALT + V" ''hl.dsp.window.float({ action = "toggle" })'')
-        (mkBind "SUPER + F" ''hl.dsp.window.fullscreen({ mode = "fullscreen" })'')
+        (mkBind "CTRL + SUPER + F" ''hl.dsp.window.fullscreen({ mode = "fullscreen" })'')
         (mkBind "SUPER + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')
-        (mkBind "SUPER + P" "hl.dsp.window.pseudo()")
-        (mkBind "SUPER + E" ''hl.dsp.layout("togglesplit")'')
+        (mkBind "CTRL + SUPER + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')
+        (mkBind "CTRL + SUPER + P" "hl.dsp.window.pseudo()")
+        (mkBind "CTRL + SUPER + E" ''hl.dsp.layout("togglesplit")'')
         (mkBind "SUPER + ESCAPE" "hl.dsp.exec_cmd(${builtins.toJSON shellLock})")
-        (mkBind "SUPER + SHIFT + E" "hl.dsp.exit()")
-        (mkBind "SUPER + SHIFT + R" "hl.dsp.reload_config()")
+        (mkBind "CTRL + ALT + SUPER + Q" "hl.dsp.exit()")
+        (mkBind "CTRL + SUPER + R" "hl.dsp.reload_config()")
 
-        (mkBind "SUPER + left" ''hl.dsp.focus({ direction = "left" })'')
-        (mkBind "SUPER + right" ''hl.dsp.focus({ direction = "right" })'')
-        (mkBind "SUPER + up" ''hl.dsp.focus({ direction = "up" })'')
-        (mkBind "SUPER + down" ''hl.dsp.focus({ direction = "down" })'')
-        (mkBind "SUPER + H" ''hl.dsp.focus({ direction = "left" })'')
-        (mkBind "SUPER + L" ''hl.dsp.focus({ direction = "right" })'')
-        (mkBind "SUPER + K" ''hl.dsp.focus({ direction = "up" })'')
-        (mkBind "SUPER + J" ''hl.dsp.focus({ direction = "down" })'')
+        (mkBind "CTRL + SUPER + left" ''hl.dsp.focus({ direction = "left" })'')
+        (mkBind "CTRL + SUPER + right" ''hl.dsp.focus({ direction = "right" })'')
+        (mkBind "CTRL + SUPER + up" ''hl.dsp.focus({ direction = "up" })'')
+        (mkBind "CTRL + SUPER + down" ''hl.dsp.focus({ direction = "down" })'')
+        (mkBind "CTRL + SUPER + H" ''hl.dsp.focus({ direction = "left" })'')
+        (mkBind "CTRL + SUPER + L" ''hl.dsp.focus({ direction = "right" })'')
+        (mkBind "CTRL + SUPER + K" ''hl.dsp.focus({ direction = "up" })'')
+        (mkBind "CTRL + SUPER + J" ''hl.dsp.focus({ direction = "down" })'')
 
-        (mkBind "SUPER + SHIFT + left" ''hl.dsp.window.move({ direction = "left" })'')
-        (mkBind "SUPER + SHIFT + right" ''hl.dsp.window.move({ direction = "right" })'')
-        (mkBind "SUPER + SHIFT + up" ''hl.dsp.window.move({ direction = "up" })'')
-        (mkBind "SUPER + SHIFT + down" ''hl.dsp.window.move({ direction = "down" })'')
-        (mkBind "SUPER + SHIFT + H" ''hl.dsp.window.move({ direction = "left" })'')
-        (mkBind "SUPER + SHIFT + L" ''hl.dsp.window.move({ direction = "right" })'')
-        (mkBind "SUPER + SHIFT + K" ''hl.dsp.window.move({ direction = "up" })'')
-        (mkBind "SUPER + SHIFT + J" ''hl.dsp.window.move({ direction = "down" })'')
+        (mkBind "CTRL + SUPER + SHIFT + left" ''hl.dsp.window.move({ direction = "left" })'')
+        (mkBind "CTRL + SUPER + SHIFT + right" ''hl.dsp.window.move({ direction = "right" })'')
+        (mkBind "CTRL + SUPER + SHIFT + up" ''hl.dsp.window.move({ direction = "up" })'')
+        (mkBind "CTRL + SUPER + SHIFT + down" ''hl.dsp.window.move({ direction = "down" })'')
+        (mkBind "CTRL + SUPER + SHIFT + H" ''hl.dsp.window.move({ direction = "left" })'')
+        (mkBind "CTRL + SUPER + SHIFT + L" ''hl.dsp.window.move({ direction = "right" })'')
+        (mkBind "CTRL + SUPER + SHIFT + K" ''hl.dsp.window.move({ direction = "up" })'')
+        (mkBind "CTRL + SUPER + SHIFT + J" ''hl.dsp.window.move({ direction = "down" })'')
 
-        (mkBind "SUPER + S" ''hl.dsp.workspace.toggle_special("scratchpad")'')
-        (mkBind "SUPER + SHIFT + S" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
-        (mkBind "SUPER + SHIFT + P" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
+        (mkBind "SUPER + grave" ''hl.dsp.workspace.toggle_special("scratchpad")'')
+        (mkBind "CTRL + SUPER + S" ''hl.dsp.workspace.toggle_special("scratchpad")'')
+        (mkBind "SUPER + SHIFT + grave" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
+        (mkBind "CTRL + SUPER + SHIFT + S" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
+        (mkBind "CTRL + SUPER + SHIFT + P" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
         (mkBind "CTRL + SUPER + SHIFT + code:13" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
         (mkBind "SUPER + SHIFT + code:13" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
         (mkBind "SUPER + SHIFT + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
         (mkBind "SUPER + CTRL + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
         (mkBind "SUPER + SHIFT + I" "hl.dsp.exec_cmd(${builtins.toJSON idleToggleCmd})")
-        (mkBind "SUPER + SHIFT + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
+        (mkBind "CTRL + SUPER + SHIFT + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
         (mkBind "SUPER + CTRL + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
         (mkBind "SUPER + ALT + T" ''hl.dsp.exec_cmd("${omarchnixCli} theme toggle")'')
 

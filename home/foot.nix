@@ -7,7 +7,7 @@
         include = "~/.local/state/omarchy/current/theme/foot.ini";
         term = "xterm-256color";
         font = "${theme.fonts.mono.name}:size=${toString theme.fonts.mono.size}";
-        dpi-aware = "auto";
+        dpi-aware = "no";
         pad = "12x12 center";
       };
 
@@ -20,7 +20,8 @@
       };
 
       colors-dark = {
-        alpha = "0.94";
+        alpha = "0.82";
+        blur = "yes";
         background = theme.colors.bg;
         foreground = theme.colors.fg;
         regular0 = theme.colors.bgAlt;

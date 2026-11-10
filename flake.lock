@@ -199,6 +199,26 @@
         "type": "github"
       }
     },
+    "orb": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794254365,
+        "narHash": "sha256-kTMBA7AK5s6gdHT+2EJXWjCTp1FAov8VkwH5Rd+9jwM=",
+        "owner": "Th0rgal",
+        "repo": "orb",
+        "rev": "17a5c5f98a46dea938a4c4cf03393240c72a4b2a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "orb",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "apple-silicon-support": "apple-silicon-support",
@@ -209,6 +229,7 @@
         "omarchy": "omarchy",
         "omarchy-plugin-marketplace": "omarchy-plugin-marketplace",
         "omarchy-plugin-opencode-usage": "omarchy-plugin-opencode-usage",
+        "orb": "orb",
         "sops-nix": "sops-nix"
       }
     },

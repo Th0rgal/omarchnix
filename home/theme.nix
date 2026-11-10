@@ -1,5 +1,7 @@
 { pkgs }:
 {
+  mode = "dark";
+
   fonts = {
     sans = {
       name = "Inter";

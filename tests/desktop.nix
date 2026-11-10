@@ -15,6 +15,12 @@ assert m2airConfig.home-manager.users ? thomas;
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.enable == true;
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.configType == "lua";
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.extraConfig == "";
+# UWSM owns graphical-session.target; HM's hyprland-session.target must stay off
+# or the generated startup exec stops the compositor a few seconds after login.
+assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.systemd.enable == false;
+assert builtins.any (p: (p.pname or "") == "orb-desktop") m2airConfig.environment.systemPackages;
+assert
+  (m2airConfig.xdg.portal.config.hyprland."org.freedesktop.impl.portal.Settings" or null) == "gtk";
 assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.kb_layout
   == "us";
@@ -52,14 +58,16 @@ pkgs.testers.runNixOSTest {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postBuild = ''
       for bin in qemu-kvm qemu-system-x86_64; do
-        wrapProgram "$out/bin/$bin" \
-          --set SDL_VIDEODRIVER offscreen \
-          --set LIBGL_ALWAYS_SOFTWARE 1 \
-          --set __EGL_VENDOR_LIBRARY_DIRS "${pkgs.mesa}/share/glvnd/egl_vendor.d" \
-          --set LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
-          --set GBM_BACKENDS_PATH "${pkgs.mesa}/lib/gbm" \
-          --prefix LD_LIBRARY_PATH : "${pkgs.libglvnd}/lib:${pkgs.mesa}/lib" \
-          --append-flags "-display sdl,gl=on"
+        if [ -e "$out/bin/$bin" ]; then
+          wrapProgram "$out/bin/$bin" \
+            --set SDL_VIDEODRIVER offscreen \
+            --set LIBGL_ALWAYS_SOFTWARE 1 \
+            --set __EGL_VENDOR_LIBRARY_DIRS "${pkgs.mesa}/share/glvnd/egl_vendor.d" \
+            --set LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
+            --set GBM_BACKENDS_PATH "${pkgs.mesa}/lib/gbm" \
+            --prefix LD_LIBRARY_PATH : "${pkgs.libglvnd}/lib:${pkgs.mesa}/lib" \
+            --append-flags "-display sdl,gl=on"
+        fi
       done
     '';
   };
@@ -133,6 +141,7 @@ pkgs.testers.runNixOSTest {
         pkgs.jq
         pkgs.netpbm
         pkgs.procps
+        pkgs.orb-desktop
       ];
     };
 
@@ -234,6 +243,7 @@ pkgs.testers.runNixOSTest {
             ).strip()
         )
         assert unique_colors >= 16, f"screenshot looks blank ({unique_colors} unique colors)"
+        desktop.succeed("orb --self-test")
         desktop.copy_from_machine("/tmp/desktop-shot.png", "")
   '';
 }

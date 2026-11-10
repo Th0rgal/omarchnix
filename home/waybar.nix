@@ -43,6 +43,8 @@ in
           format = "{name}";
           all-outputs = true;
           show-special = false;
+          on-scroll-up = "hyprctl dispatch workspace e+1";
+          on-scroll-down = "hyprctl dispatch workspace e-1";
         };
 
         "hyprland/submap" = {

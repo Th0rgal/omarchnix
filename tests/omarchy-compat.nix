@@ -122,6 +122,7 @@ pkgs.testers.runNixOSTest {
       };
 
       environment.systemPackages = [
+        pkgs.dconf
         pkgs.jq
         pkgs.procps
       ];
@@ -134,6 +135,7 @@ pkgs.testers.runNixOSTest {
         return (
             "su - thomas -c '"
             "export XDG_RUNTIME_DIR=/run/user/1000; "
+            "export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus; "
             "export WAYLAND_DISPLAY=wayland-1; "
             "export HYPRLAND_INSTANCE_SIGNATURE=$(ls -1 /run/user/1000/hypr 2>/dev/null | head -n1); "
             f"{cmd}'"
@@ -198,6 +200,18 @@ pkgs.testers.runNixOSTest {
         workstation.succeed(as_thomas("omarchnix theme set \"Catppuccin Latte\""))
         switched_light = workstation.succeed(as_thomas("omarchnix theme current")).strip()
         assert switched_light == "Catppuccin Latte", f"expected Catppuccin Latte, got {switched_light!r}"
+        color_scheme_light = workstation.succeed(as_thomas("dconf read /org/gnome/desktop/interface/color-scheme")).strip()
+        assert color_scheme_light == "'prefer-light'", f"expected prefer-light in dconf, got {color_scheme_light!r}"
+
+        workstation.succeed(as_thomas("omarchnix theme toggle"))
+        toggled_dark = workstation.succeed(as_thomas("omarchnix theme current")).strip()
+        assert toggled_dark == "Tokyo Night", f"expected Tokyo Night after toggle from light, got {toggled_dark!r}"
+        color_scheme_dark = workstation.succeed(as_thomas("dconf read /org/gnome/desktop/interface/color-scheme")).strip()
+        assert color_scheme_dark == "'prefer-dark'", f"expected prefer-dark in dconf, got {color_scheme_dark!r}"
+
+        workstation.succeed(as_thomas("omarchnix theme toggle"))
+        toggled_back_light = workstation.succeed(as_thomas("omarchnix theme current")).strip()
+        assert toggled_back_light == "Catppuccin Latte", f"expected remembered Catppuccin Latte after toggle, got {toggled_back_light!r}"
 
     with subtest("Agent skills for opencode, claude, codex, and hermes + omarchnix check pass"):
         for skill_dir in [

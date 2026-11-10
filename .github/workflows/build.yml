@@ -108,6 +108,9 @@ jobs:
           AURORA_STAGE2="$(nix build .#nixosConfigurations.m2air-aurora.config.system.build.auroraStage2 -L --no-link --print-out-paths)"
           cat "$AURORA_STAGE2/manifest.json"
           test -s "$AURORA_STAGE2/boot.bin.sha256"
+          # Build power-profiles-daemon without multi-derivation CPU contention so its
+          # 5s D-Bus/umockdev integration tests do not time out on 4-vCPU runners.
+          nix build .#nixosConfigurations.m2air-aurora.pkgs.power-profiles-daemon -j1 -L --no-link
           M2AIR_AURORA_SYS="$(nix build .#nixosConfigurations.m2air-aurora.config.system.build.toplevel -L --no-link --print-out-paths)"
 
           DOSFS_OUT="$(nix build .#nixosConfigurations.m2air.pkgs.dosfstools.out --no-link --print-out-paths)"

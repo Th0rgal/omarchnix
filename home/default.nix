@@ -259,6 +259,7 @@ in
 
       sessionVariables = {
         NIXOS_OZONE_WL = "1";
+        BROWSER = "brave";
       };
 
       packages = [
@@ -276,6 +277,18 @@ in
     };
 
     fonts.fontconfig.enable = true;
+
+    xdg.mimeApps = {
+      enable = lib.mkDefault true;
+      defaultApplications = {
+        "text/html" = lib.mkDefault [ "brave-browser.desktop" ];
+        "x-scheme-handler/http" = lib.mkDefault [ "brave-browser.desktop" ];
+        "x-scheme-handler/https" = lib.mkDefault [ "brave-browser.desktop" ];
+        "x-scheme-handler/about" = lib.mkDefault [ "brave-browser.desktop" ];
+        "x-scheme-handler/unknown" = lib.mkDefault [ "brave-browser.desktop" ];
+        "application/xhtml+xml" = lib.mkDefault [ "brave-browser.desktop" ];
+      };
+    };
 
     programs.zsh.enable = true;
 

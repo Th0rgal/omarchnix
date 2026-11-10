@@ -14,7 +14,7 @@ in
       general = {
         lock_cmd = "${pidof} hyprlock || ${hyprlock}";
         before_sleep_cmd = "${loginctl} lock-session";
-        after_sleep_cmd = "${hyprctl} dispatch dpms on";
+        after_sleep_cmd = "${hyprctl} dispatch 'hl.dsp.dpms(\"on\")'";
         ignore_dbus_inhibit = false;
       };
 
@@ -30,8 +30,8 @@ in
         }
         {
           timeout = 360;
-          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${hyprctl} dispatch dpms off";
-          on-resume = "${hyprctl} dispatch dpms on";
+          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${hyprctl} dispatch 'hl.dsp.dpms(\"off\")'";
+          on-resume = "${hyprctl} dispatch 'hl.dsp.dpms(\"on\")'";
         }
         {
           timeout = 900;

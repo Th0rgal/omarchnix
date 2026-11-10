@@ -9,6 +9,12 @@ let
   cfg = config.programs.omarchnix;
   hmLib = config.lib.dag;
   omarchyShellPkg = cfg.shell.package;
+  omarchyLib = import ../lib/omarchy.nix { inherit lib; };
+
+  clipboardBarPlugin = omarchyLib.buildPlugin {
+    inherit pkgs;
+    src = ../pkgs/plugins/omarchnix-clipboard;
+  };
 
   lockedPluginEntries = lib.mapAttrsToList (
     id: pluginCfg:
@@ -68,7 +74,7 @@ let
         builtins.elem "bar" (entry.manifest.kinds or [ ])
         || builtins.elem "bar-widget" (entry.manifest.kinds or [ ]);
     in
-    if entry.enable && !isBarOrWidget then [ entry.id ] else [ ]
+    if entry.enable && !isBarOrWidget then [ { id = entry.id; } ] else [ ]
   ) lockedPluginEntries;
 
   selectedBarOverride =
@@ -109,6 +115,11 @@ let
     tray = [ ];
     right = [
       { id = "omarchy.tray"; }
+      {
+        id = "omarchy.indicators";
+        items = [ "StayAwake" ];
+        alwaysShow = true;
+      }
       { id = "omarchy.keyboard-layout"; }
       { id = "omarchy.agents"; }
       { id = "omarchy.bluetooth"; }
@@ -140,7 +151,7 @@ let
     // lib.optionalAttrs (selectedBarOverride != null) {
       id = selectedBarOverride;
     };
-    plugins = lib.unique enabledNonBarPlugins;
+    plugins = appendUniqueById [ ] enabledNonBarPlugins;
   }
   // cfg.shell.extraSettings;
 
@@ -181,6 +192,12 @@ let
 in
 {
   config = lib.mkIf (cfg.enable && omarchyShellPkg != null) {
+    programs.omarchnix.plugins.locked."omarchnix.clipboard" = {
+      package = lib.mkDefault clipboardBarPlugin;
+      enable = lib.mkDefault true;
+      section = lib.mkDefault "right";
+    };
+
     home.sessionVariables = {
       OMARCHY_PATH = "${omarchyShellPkg.sharePath}";
     };
@@ -251,7 +268,10 @@ in
                 tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
                 ${pkgs.jq}/bin/jq --arg id ${lib.escapeShellArg entry.id} '
                   .version = 1
-                  | .plugins = ((.plugins // []) | if index($id) then . else . + [$id] end)
+                  | .plugins = (
+                      [(.plugins // [])[] | if type == "string" then { id: . } else . end]
+                      | if any(.[]; .id == $id) then . else . + [{ id: $id }] end
+                    )
                 ' "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
               ''
           )

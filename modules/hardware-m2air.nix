@@ -42,14 +42,48 @@ in
 
     chargeControlEndThreshold = lib.mkOption {
       type = lib.types.nullOr (lib.types.ints.between 50 100);
-      default = 80;
-      description = "Apple SMC battery charge upper threshold (%) written to macsmc-battery when present; null leaves at 100%.";
+      default = 100;
+      description = "Apple SMC battery charge upper threshold (%) written to macsmc-battery when present (100 charges to full, 80 caps at 80%).";
     };
 
     chargeControlStartThreshold = lib.mkOption {
-      type = lib.types.nullOr (lib.types.ints.between 40 95);
-      default = 75;
+      type = lib.types.nullOr (lib.types.ints.between 40 100);
+      default = null;
       description = "Apple SMC battery charge start threshold (%) written to macsmc-battery when present.";
+    };
+
+    bootloader = {
+      enable = lib.mkEnableOption "removable ARM64 UEFI GRUB on the Asahi ESP (/boot/EFI/BOOT/BOOTAA64.EFI) without touching Apple NVRAM, m1n1/boot.bin, or vendorfw";
+
+      efiSysMountPoint = lib.mkOption {
+        type = lib.types.str;
+        default = "/boot";
+        description = "Mount point of the Asahi EFI System Partition.";
+      };
+
+      configurationLimit = lib.mkOption {
+        type = lib.types.int;
+        default = 2;
+        description = "Maximum GRUB generations kept on the ~500 MB Asahi ESP.";
+      };
+    };
+
+    fileSystems = {
+      enable = lib.mkEnableOption "UUID-mounted LUKS2 cryptroot (/) and FAT32 Asahi ESP (/boot) for MacBook Air M2";
+
+      luksUuid = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "aa0403dd-9917-49e1-85b1-46b21b39f2d9";
+        description = "UUID of the LUKS2 root partition (/dev/disk/by-uuid/<luksUuid>).";
+      };
+
+      espUuid = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "C650-1003";
+        description = "UUID of the FAT32 Asahi EFI System Partition (/dev/disk/by-uuid/<espUuid>).";
+      };
     };
   };
 
@@ -162,7 +196,11 @@ in
         "L+ /usr/share/omarchy-platform/display-cutouts.json - - - - ${displayCutoutsJson}"
       ];
 
-      systemd.services.macsmc-battery-thresholds = lib.mkIf (cfg.chargeControlEndThreshold != null) {
+      services.udev.extraRules = ''
+        SUBSYSTEM=="power_supply", KERNEL=="macsmc-battery", RUN+="${pkgs.coreutils}/bin/chgrp wheel /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold", RUN+="${pkgs.coreutils}/bin/chmod 0664 /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold"
+      '';
+
+      systemd.services.macsmc-battery-thresholds = {
         description = "Configure Apple SMC battery charge thresholds on MacBook Air M2";
         wantedBy = [ "multi-user.target" ];
         after = [ "multi-user.target" ];
@@ -171,17 +209,69 @@ in
           Type = "oneshot";
           RemainAfterExit = true;
         };
-        script = ''
-          bat="/sys/class/power_supply/macsmc-battery"
-          if [ -w "$bat/charge_control_end_threshold" ]; then
-            echo ${toString cfg.chargeControlEndThreshold} > "$bat/charge_control_end_threshold"
-          fi
-          ${lib.optionalString (cfg.chargeControlStartThreshold != null) ''
-            if [ -w "$bat/charge_control_start_threshold" ]; then
-              echo ${toString cfg.chargeControlStartThreshold} > "$bat/charge_control_start_threshold"
+        script =
+          let
+            endThreshold = if cfg.chargeControlEndThreshold != null then cfg.chargeControlEndThreshold else 100;
+          in
+          ''
+            bat="/sys/class/power_supply/macsmc-battery"
+            if [ -w "$bat/charge_control_end_threshold" ]; then
+              echo ${toString endThreshold} > "$bat/charge_control_end_threshold" || true
             fi
-          ''}
-        '';
+            ${lib.optionalString (cfg.chargeControlStartThreshold != null && endThreshold < 100) ''
+              if [ -w "$bat/charge_control_start_threshold" ]; then
+                echo ${toString cfg.chargeControlStartThreshold} > "$bat/charge_control_start_threshold" || true
+              fi
+            ''}
+          '';
+      };
+    })
+
+    (lib.mkIf (cfg.enable && cfg.bootloader.enable) {
+      boot.loader = {
+        systemd-boot.enable = false;
+        efi = {
+          canTouchEfiVariables = false;
+          efiSysMountPoint = cfg.bootloader.efiSysMountPoint;
+        };
+        grub = {
+          enable = true;
+          device = "nodev";
+          efiSupport = true;
+          efiInstallAsRemovable = true;
+          enableCryptodisk = false;
+          configurationLimit = cfg.bootloader.configurationLimit;
+          extraFiles = lib.mkForce { };
+        };
+      };
+    })
+
+    (lib.mkIf (cfg.enable && cfg.fileSystems.enable) {
+      assertions = [
+        {
+          assertion = cfg.fileSystems.luksUuid != null && cfg.fileSystems.espUuid != null;
+          message = "omarchnix.hardware.m2air.fileSystems.enable requires both luksUuid and espUuid to be set.";
+        }
+      ];
+
+      boot.initrd.luks.devices.cryptroot = {
+        device = "/dev/disk/by-uuid/${cfg.fileSystems.luksUuid}";
+        allowDiscards = true;
+      };
+
+      fileSystems."/" = {
+        device = "/dev/mapper/cryptroot";
+        fsType = "ext4";
+        options = [ "defaults" ];
+      };
+
+      fileSystems."/boot" = {
+        device = "/dev/disk/by-uuid/${cfg.fileSystems.espUuid}";
+        fsType = "vfat";
+        options = [
+          "fmask=0077"
+          "dmask=0077"
+        ];
       };
     })
   ];

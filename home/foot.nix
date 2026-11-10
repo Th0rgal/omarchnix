@@ -19,6 +19,11 @@
         lines = 10000;
       };
 
+      key-bindings = {
+        clipboard-copy = "Control+Shift+c Mod4+c XF86Copy";
+        clipboard-paste = "Control+Shift+v Mod4+v XF86Paste";
+      };
+
       colors-dark = {
         alpha = "0.82";
         blur = "yes";

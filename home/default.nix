@@ -151,6 +151,20 @@ in
       };
     };
 
+    touchpad = {
+      naturalScroll = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Whether touchpad scrolling is natural (`true`) or traditional/inverted (`false`, so content moves up when fingers move up).";
+      };
+
+      scrollFactor = lib.mkOption {
+        type = lib.types.float;
+        default = 0.5;
+        description = "Touchpad scroll speed factor in Hyprland (`0.5` smooths Apple MTP trackpad scrolling to match macOS inertia feel).";
+      };
+    };
+
     plugins = {
       locked = lib.mkOption {
         default = { };
@@ -245,6 +259,7 @@ in
 
       sessionVariables = {
         NIXOS_OZONE_WL = "1";
+        BROWSER = "brave";
       };
 
       packages = [
@@ -258,12 +273,33 @@ in
         pkgs.slurp
         pkgs.wl-clipboard
         pkgs.libnotify
+        pkgs.fastfetch
       ];
     };
 
     fonts.fontconfig.enable = true;
 
-    programs.zsh.enable = true;
+    xdg.mimeApps = {
+      enable = lib.mkDefault true;
+      defaultApplications = {
+        "text/html" = lib.mkDefault [ "brave-browser.desktop" ];
+        "x-scheme-handler/http" = lib.mkDefault [ "brave-browser.desktop" ];
+        "x-scheme-handler/https" = lib.mkDefault [ "brave-browser.desktop" ];
+        "x-scheme-handler/about" = lib.mkDefault [ "brave-browser.desktop" ];
+        "x-scheme-handler/unknown" = lib.mkDefault [ "brave-browser.desktop" ];
+        "application/xhtml+xml" = lib.mkDefault [ "brave-browser.desktop" ];
+      };
+    };
+
+    programs.fastfetch.enable = lib.mkDefault true;
+
+    programs.zsh = {
+      enable = true;
+      shellAliases = {
+        neofetch = "fastfetch";
+        screenfetch = "fastfetch";
+      };
+    };
 
     gtk =
       let

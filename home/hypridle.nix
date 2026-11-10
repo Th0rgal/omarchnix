@@ -20,24 +20,24 @@ in
     settings = {
       general = {
         lock_cmd = "${lockCmd}";
-        after_sleep_cmd = "${hyprctl} dispatch dpms on";
+        after_sleep_cmd = "${hyprctl} dispatch 'hl.dsp.dpms(\"on\")'";
         ignore_dbus_inhibit = false;
       };
 
       listener = [
         {
           timeout = 180;
-          on-timeout = "${brightnessctl} -s set 10%";
-          on-resume = "${brightnessctl} -r";
+          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${brightnessctl} -s set 10%";
+          on-resume = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${brightnessctl} -r";
         }
         {
           timeout = 360;
-          on-timeout = "${hyprctl} dispatch dpms off";
-          on-resume = "${hyprctl} dispatch dpms on";
+          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${hyprctl} dispatch 'hl.dsp.dpms(\"off\")'";
+          on-resume = "${hyprctl} dispatch 'hl.dsp.dpms(\"on\")'";
         }
         {
           timeout = 900;
-          on-timeout = "${systemctl} suspend";
+          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${systemctl} suspend";
         }
       ];
     };

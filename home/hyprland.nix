@@ -30,6 +30,16 @@ let
       "${omarchyShellBin}/omarchy-shell shell summon omarchy.image-picker '{\"source\":\"themes\"}'"
     else
       "choice=\"$(${omarchnixCli} theme list | ${fuzzel} --dmenu -p 'Theme: ')\"; [ -n \"$choice\" ] && ${omarchnixCli} theme set \"$choice\"";
+  clipboardCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-shell shell toggle omarchy.clipboard"
+    else
+      "${omarchnixCli} status";
+  idleToggleCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-shell idle toggle"
+    else
+      "mkdir -p \"$HOME/.local/state/omarchy/indicators\"; if [ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ]; then rm -f \"$HOME/.local/state/omarchy/indicators/stay-awake\"; else touch \"$HOME/.local/state/omarchy/indicators/stay-awake\"; fi";
 
   mkBind = keys: dsp: {
     _args = [
@@ -45,6 +55,42 @@ let
       opts
     ];
   };
+
+  mkSendShortcutOnce = mods: key: ''
+    function()
+      hl.dispatch(hl.dsp.send_key_state({ mods = ${builtins.toJSON mods}, key = ${builtins.toJSON key}, state = "down" }))
+      hl.timer(function()
+        hl.dispatch(hl.dsp.send_key_state({ mods = ${builtins.toJSON mods}, key = ${builtins.toJSON key}, state = "up" }))
+      end, { timeout = 50, type = "oneshot" })
+    end
+  '';
+
+  mkUniversalClipboardBind = defaultMods: defaultKey: terminalMods: terminalKey: ''
+    function()
+      local w = hl.get_active_window()
+      local is_term = false
+      if w then
+        for _, tag in ipairs(w.tags or {}) do
+          if tag:gsub("%*$", "") == "terminal" then
+            is_term = true
+            break
+          end
+        end
+        if not is_term then
+          local cls = (w.class or w.initial_class or ""):lower()
+          if cls:match("^(foot|foot%-scratchpad|alacritty|kitty|wezterm|.*ghostty.*|org%.omarchy%..*|tui%..*)$") then
+            is_term = true
+          end
+        end
+      end
+      local mods = is_term and ${builtins.toJSON terminalMods} or ${builtins.toJSON defaultMods}
+      local key = is_term and ${builtins.toJSON terminalKey} or ${builtins.toJSON defaultKey}
+      hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = "down" }))
+      hl.timer(function()
+        hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = "up" }))
+      end, { timeout = 50, type = "oneshot" })
+    end
+  '';
 
   workspaceIndices = lib.range 1 10;
 
@@ -196,7 +242,8 @@ in
           follow_mouse = 1;
           sensitivity = 0;
           touchpad = {
-            natural_scroll = true;
+            natural_scroll = cfg.touchpad.naturalScroll;
+            scroll_factor = cfg.touchpad.scrollFactor;
             tap_to_click = true;
             tap_and_drag = true;
             disable_while_typing = true;
@@ -205,7 +252,12 @@ in
         };
 
         gestures = {
-          workspace_swipe_distance = 300;
+          workspace_swipe_distance = 180;
+          workspace_swipe_cancel_ratio = 0.15;
+          workspace_swipe_min_speed_to_force = 5;
+          workspace_swipe_direction_lock = true;
+          workspace_swipe_direction_lock_threshold = 10;
+          workspace_swipe_forever = true;
           workspace_swipe_invert = false;
           workspace_swipe_create_new = true;
         };
@@ -216,6 +268,7 @@ in
           force_default_wallpaper = 0;
           font_family = theme.fonts.sans.name;
           background_color = "rgba(${theme.colors.bg}ff)";
+          focus_on_activate = true;
           key_press_enables_dpms = true;
           mouse_move_enables_dpms = true;
         };
@@ -334,6 +387,13 @@ in
           suppress_event = "maximize";
         }
         {
+          name = "terminal-tag";
+          match = {
+            class = "^(Alacritty|kitty|com\\.mitchellh\\.ghostty|foot|foot-scratchpad|org\\.codeberg\\.dnkl\\.foot|wezterm|org\\.omarchy\\..*|TUI\\..*)$";
+          };
+          tag = "+terminal";
+        }
+        {
           name = "scratchpad-terminal";
           match = {
             class = "^foot-scratchpad$";
@@ -387,7 +447,20 @@ in
         (mkBind "SUPER + SPACE" "hl.dsp.exec_cmd(launcher)")
         (mkBind "SUPER + D" "hl.dsp.exec_cmd(launcher)")
         (mkBind "SUPER + Q" "hl.dsp.window.close()")
-        (mkBind "SUPER + V" ''hl.dsp.window.float({ action = "toggle" })'')
+        (mkBind "SUPER + W" "hl.dsp.window.close()")
+        (mkBind "SUPER + SHIFT + Q" "hl.dsp.window.kill()")
+
+        # macOS-style universal Copy / Paste / Cut / Select All / Undo / Redo
+        (mkBind "SUPER + C" (mkUniversalClipboardBind "CTRL" "C" "CTRL SHIFT" "C"))
+        (mkBind "SUPER + V" (mkUniversalClipboardBind "CTRL" "V" "CTRL SHIFT" "V"))
+        (mkBind "SUPER + X" (mkSendShortcutOnce "CTRL" "X"))
+        (mkBind "SUPER + A" (mkSendShortcutOnce "CTRL" "A"))
+        (mkBind "SUPER + Z" (mkSendShortcutOnce "CTRL" "Z"))
+        (mkBind "SUPER + SHIFT + Z" (mkSendShortcutOnce "CTRL SHIFT" "Z"))
+
+        # Toggle window floating (rebound from SUPER + V to SUPER + SHIFT + F and SUPER + ALT + V)
+        (mkBind "SUPER + SHIFT + F" ''hl.dsp.window.float({ action = "toggle" })'')
+        (mkBind "SUPER + ALT + V" ''hl.dsp.window.float({ action = "toggle" })'')
         (mkBind "SUPER + F" ''hl.dsp.window.fullscreen({ mode = "fullscreen" })'')
         (mkBind "SUPER + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')
         (mkBind "SUPER + P" "hl.dsp.window.pseudo()")
@@ -417,6 +490,13 @@ in
         (mkBind "SUPER + S" ''hl.dsp.workspace.toggle_special("scratchpad")'')
         (mkBind "SUPER + SHIFT + S" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
         (mkBind "SUPER + SHIFT + P" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "CTRL + SUPER + SHIFT + 4" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "CTRL + SUPER + SHIFT + code:13" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "SUPER + SHIFT + 4" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "SUPER + SHIFT + code:13" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "SUPER + SHIFT + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
+        (mkBind "SUPER + CTRL + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
+        (mkBind "SUPER + SHIFT + I" "hl.dsp.exec_cmd(${builtins.toJSON idleToggleCmd})")
         (mkBind "SUPER + SHIFT + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
         (mkBind "SUPER + CTRL + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
         (mkBind "SUPER + ALT + T" ''hl.dsp.exec_cmd("${omarchnixCli} theme toggle")'')

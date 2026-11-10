@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchnix.clipboard",
+  "name": "Clipboard History",
+  "version": "1.0.0",
+  "author": "Omarchnix",
+  "license": "MIT",
+  "description": "Top status bar button for Omarchy clipboard history (Maccy equivalent).",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Clipboard",
+    "description": "Open clipboard history (Cmd+Shift+V / Cmd+Ctrl+V).",
+    "defaultSection": "right"
+  }
+}

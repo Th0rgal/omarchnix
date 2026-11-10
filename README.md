@@ -8,30 +8,49 @@ See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/deci
 
 ## Reusable Flake Outputs
 
+`omarchnix` is designed to be consumed as a reusable flake input by your own personal NixOS & Home Manager configuration repo (for example, see [`Th0rgal/nixos-config`](https://github.com/Th0rgal/nixos-config) for a full personal MacBook Air M2 + DGX Spark setup):
+
 ```nix
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    home-manager.url = "github:nix-community/home-manager";
     omarchnix.url = "github:Th0rgal/omarchnix";
+    nixpkgs.follows = "omarchnix/nixpkgs";
+    apple-silicon-support.follows = "omarchnix/apple-silicon-support";
+    home-manager.follows = "omarchnix/home-manager";
   };
 
-  outputs = { nixpkgs, home-manager, omarchnix, ... }: {
-    nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux"; # or "aarch64-linux"
+  outputs = { nixpkgs, apple-silicon-support, home-manager, omarchnix, ... }: {
+    nixosConfigurations.my-m2air = nixpkgs.lib.nixosSystem {
+      system = "aarch64-linux";
       modules = [
-        { nixpkgs.overlays = [ omarchnix.overlays.default ]; }
+        apple-silicon-support.nixosModules.apple-silicon-support
+        {
+          nixpkgs.overlays = [
+            apple-silicon-support.overlays.default
+            omarchnix.overlays.default
+          ];
+        }
         omarchnix.nixosModules.omarchnix
         home-manager.nixosModules.home-manager
         {
           omarchnix = {
             enable = true;
-            profile = "workstation"; # "asahi" | "spark" | "workstation" | "vm"
+            profile = "asahi"; # "asahi" | "spark" | "workstation" | "vm"
             desktop = {
               enable = true;
-              user = "thomas";
+              user = "alice";
               theme = "tokyo-night"; # any of the 23+ Omarchy themes
               shellBackend = "omarchy-shell"; # "omarchy-shell" (Quickshell QML) or "waybar"
+              autostartTty.enable = true;
+            };
+            hardware.m2air = {
+              enable = true;
+              bootloader.enable = true; # removable ARM64 UEFI GRUB on /boot
+              fileSystems = {
+                enable = true;
+                luksUuid = "YOUR-LUKS2-UUID";
+                espUuid = "YOUR-ESP-UUID";
+              };
             };
           };
         }

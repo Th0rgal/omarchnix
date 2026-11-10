@@ -29,7 +29,10 @@ assert
   == "intl";
 assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.touchpad.natural_scroll
-  == true;
+  == false;
+assert
+  m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.touchpad.scroll_factor
+  == 0.5;
 assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.touchpad.tap_to_click
   == true;

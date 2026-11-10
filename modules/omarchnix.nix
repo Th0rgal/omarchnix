@@ -121,6 +121,20 @@ in
           };
         };
 
+        touchpad = {
+          naturalScroll = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Default touchpad scroll direction passed into Home Manager (`false` inverts scroll so content goes up when fingers go up).";
+          };
+
+          scrollFactor = lib.mkOption {
+            type = lib.types.float;
+            default = 0.5;
+            description = "Default touchpad scroll speed factor passed into Home Manager (`0.5` smooths Apple MTP trackpad scrolling).";
+          };
+        };
+
         autostartTty = {
           enable = lib.mkEnableOption "autostart the Hyprland session on a bare TTY (no display manager)";
 
@@ -153,6 +167,10 @@ in
                 keyboard = {
                   layout = lib.mkDefault cfg.desktop.keyboard.layout;
                   variant = lib.mkDefault cfg.desktop.keyboard.variant;
+                };
+                touchpad = {
+                  naturalScroll = lib.mkDefault cfg.desktop.touchpad.naturalScroll;
+                  scrollFactor = lib.mkDefault cfg.desktop.touchpad.scrollFactor;
                 };
               };
             };

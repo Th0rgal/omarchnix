@@ -102,7 +102,9 @@
             themes = omarchyLib.allBundledThemes final;
             buildTheme = args: omarchyLib.buildThemePkg ({ pkgs = final; } // args);
             buildPlugin = args: omarchyLib.buildPlugin ({ pkgs = final; } // args);
+            michelangelus-font = final.michelangelus-font;
           };
+          michelangelus-font = final.callPackage ./pkgs/michelangelus-font.nix { };
           orb-desktop = final.callPackage ./pkgs/orb-desktop.nix {
             orbSrc = inputs.orb;
             sandboxed-sh = prev.sandboxed-sh or inputs.orb.packages.${final.stdenv.hostPlatform.system}.default;

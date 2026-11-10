@@ -57,7 +57,9 @@ let
     else
       null;
 
-  theme =
+  defaultThemeFonts = (import ./theme.nix { inherit pkgs; }).fonts;
+
+  rawTheme =
     if cfg.theme.attrset != null then
       cfg.theme.attrset
     else if omarchySrc != null then
@@ -67,6 +69,10 @@ let
       }
     else
       (import ./theme.nix { inherit pkgs; }) // { name = cfg.theme.name; };
+
+  theme = rawTheme // {
+    fonts = lib.recursiveUpdate defaultThemeFonts (rawTheme.fonts or { });
+  };
 in
 {
   options.programs.omarchnix = {
@@ -278,26 +284,160 @@ in
 
       sessionVariables = {
         NIXOS_OZONE_WL = "1";
+        GTK_USE_PORTAL = "1";
+        QT_QPA_PLATFORMTHEME = lib.mkDefault "xdgdesktopportal";
+        QT_WAYLAND_DISABLE_WINDOWDECORATION = "1";
         BROWSER = "brave";
       };
 
-      packages = [
-        theme.fonts.sans.package
-        theme.fonts.mono.package
-        theme.fonts.icon.package
-        pkgs.noto-fonts
-        pkgs.brightnessctl
-        pkgs.hyprsunset
-        pkgs.playerctl
-        pkgs.grim
-        pkgs.slurp
-        pkgs.wl-clipboard
-        pkgs.libnotify
-        pkgs.fastfetch
-      ];
+      packages =
+        lib.filter (p: p != null) [
+          theme.fonts.sans.package
+          theme.fonts.serif.package
+          theme.fonts.mono.package
+          theme.fonts.icon.package
+        ]
+        ++ [
+          pkgs.lilex
+          pkgs.eb-garamond
+          pkgs.noto-fonts
+          pkgs.noto-fonts-color-emoji
+          pkgs.brightnessctl
+          pkgs.hyprsunset
+          pkgs.playerctl
+          pkgs.grim
+          pkgs.slurp
+          pkgs.wl-clipboard
+          pkgs.libnotify
+          pkgs.fastfetch
+        ];
     };
 
-    fonts.fontconfig.enable = true;
+    fonts.fontconfig = {
+      enable = true;
+      defaultFonts = {
+        sansSerif = [
+          theme.fonts.sans.name
+          "Noto Sans"
+        ];
+        serif = [
+          theme.fonts.serif.name
+          "EB Garamond"
+          "IBM Plex Serif"
+          "Noto Serif"
+        ];
+        monospace = [
+          theme.fonts.mono.name
+          "Lilex"
+          "IBM Plex Mono"
+          "Noto Sans Mono"
+        ];
+        emoji = [
+          "Noto Color Emoji"
+        ];
+      };
+    };
+
+    xdg.configFile."fontconfig/conf.d/60-omarchnix-ui-aliases.conf".text =
+      let
+        mkFontAliasRules =
+          families: preferred:
+          lib.concatMapStringsSep "\n" (family: ''
+            <match target="pattern">
+              <test name="family" qual="any">
+                <string>${family}</string>
+              </test>
+              <edit name="family" mode="prepend" binding="strong">
+                ${lib.concatMapStringsSep "\n                " (p: "<string>${p}</string>") preferred}
+              </edit>
+            </match>'') families;
+      in
+      ''
+        <?xml version="1.0"?>
+        <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+        <fontconfig>
+        ${mkFontAliasRules
+          [
+            "system-ui"
+            "ui-sans-serif"
+            "-apple-system"
+            "BlinkMacSystemFont"
+            "Segoe UI"
+            "DejaVu Sans"
+            "Liberation Sans"
+            "FreeSans"
+            "Arial"
+            "Helvetica"
+            "Helvetica Neue"
+            "Open Sans"
+          ]
+          [
+            theme.fonts.sans.name
+            "Noto Sans"
+          ]
+        }
+        ${mkFontAliasRules
+          [
+            "ui-serif"
+            "DejaVu Serif"
+            "Liberation Serif"
+            "FreeSerif"
+            "Times New Roman"
+            "Times"
+            "Georgia"
+          ]
+          [
+            theme.fonts.serif.name
+            "EB Garamond"
+            "IBM Plex Serif"
+            "Noto Serif"
+          ]
+        }
+        ${mkFontAliasRules
+          [
+            "ui-monospace"
+            "DejaVu Sans Mono"
+            "Liberation Mono"
+            "FreeMono"
+            "Courier New"
+            "Courier"
+          ]
+          [
+            theme.fonts.mono.name
+            "Lilex"
+            "IBM Plex Mono"
+            "Noto Sans Mono"
+          ]
+        }
+        </fontconfig>
+      '';
+
+    home.activation.omarchnixBrowserFontDefaults = config.lib.dag.entryAfter [ "writeBoundary" ] ''
+      for pair in \
+        "brave:$HOME/.config/BraveSoftware/Brave-Browser/Default/Preferences" \
+        "chromium:$HOME/.config/chromium/Default/Preferences"; do
+        proc="''${pair%%:*}"
+        prefs="''${pair#*:}"
+        if [ -f "$prefs" ] && [ ! -L "$prefs" ] && ! ${pkgs.procps}/bin/pgrep -u "$USER" -f "/$proc/$proc " >/dev/null 2>&1; then
+          tmp_prefs="$(mktemp "$prefs.XXXXXX")"
+          if ${pkgs.jq}/bin/jq \
+            --arg sans ${lib.escapeShellArg theme.fonts.sans.name} \
+            --arg serif ${lib.escapeShellArg theme.fonts.serif.name} \
+            --arg mono ${lib.escapeShellArg theme.fonts.mono.name} '
+            .webkit.webprefs.fonts = ((.webkit.webprefs.fonts // {})
+              | .standard.Zyyy = (.standard.Zyyy // $sans)
+              | .sansserif.Zyyy = (.sansserif.Zyyy // $sans)
+              | .serif.Zyyy = (.serif.Zyyy // $serif)
+              | .fixed.Zyyy = (.fixed.Zyyy // $mono))
+          ' "$prefs" > "$tmp_prefs" 2>/dev/null; then
+            chmod --reference="$prefs" "$tmp_prefs" 2>/dev/null || chmod 0600 "$tmp_prefs"
+            mv "$tmp_prefs" "$prefs"
+          else
+            rm -f "$tmp_prefs"
+          fi
+        fi
+      done
+    '';
 
     xdg.mimeApps = {
       enable = lib.mkDefault true;
@@ -321,23 +461,21 @@ in
       };
     };
 
-    gtk =
-      let
-        isLight = (theme.mode or "dark") == "light";
-      in
-      {
-        enable = true;
-        font = {
-          name = theme.fonts.sans.name;
-          size = theme.fonts.sans.size;
-        };
-        # Unset gtk-xft-dpi is -1. WebKitGTK 4.1 then multiplies that by the
-        # Wayland buffer scale and divides by 96, producing a negative DPR.
-        gtk3.extraConfig.gtk-xft-dpi = 98304;
-        gtk4.extraConfig.gtk-xft-dpi = 98304;
-        gtk3.extraConfig.gtk-application-prefer-dark-theme = !isLight;
-        gtk4.extraConfig.gtk-application-prefer-dark-theme = !isLight;
+    systemd.user.sessionVariables = {
+      GTK_USE_PORTAL = "1";
+    };
+
+    gtk = {
+      enable = true;
+      font = {
+        name = theme.fonts.sans.name;
+        size = theme.fonts.sans.size;
       };
+      # Unset gtk-xft-dpi is -1. WebKitGTK 4.1 then multiplies that by the
+      # Wayland buffer scale and divides by 96, producing a negative DPR.
+      gtk3.extraConfig.gtk-xft-dpi = 98304;
+      gtk4.extraConfig.gtk-xft-dpi = 98304;
+    };
 
     dconf.settings."org/gnome/desktop/interface" =
       let
@@ -346,6 +484,9 @@ in
       {
         color-scheme = if isLight then "prefer-light" else "prefer-dark";
         gtk-theme = if isLight then "Adwaita" else "Adwaita-dark";
+        font-name = "${theme.fonts.sans.name} ${toString theme.fonts.sans.size}";
+        document-font-name = "${theme.fonts.serif.name} ${toString theme.fonts.serif.size}";
+        monospace-font-name = "${theme.fonts.mono.name} ${toString theme.fonts.mono.size}";
       };
   };
 }

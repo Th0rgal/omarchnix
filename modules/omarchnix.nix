@@ -300,40 +300,93 @@ in
       };
     })
 
-    (lib.mkIf (cfg.enable && cfg.desktop.enable) {
-      hardware.graphics.enable = lib.mkDefault true;
+    (lib.mkIf (cfg.enable && cfg.desktop.enable) (
+      let
+        michelangelusPkg =
+          if pkgs ? michelangelus-font then
+            pkgs.michelangelus-font
+          else if (pkgs ? omarchnix) && (pkgs.omarchnix ? michelangelus-font) then
+            pkgs.omarchnix.michelangelus-font
+          else
+            pkgs.callPackage ../pkgs/michelangelus-font.nix { };
+      in
+      {
+        hardware.graphics.enable = lib.mkDefault true;
 
-      i18n.inputMethod = {
-        enable = lib.mkDefault true;
-        type = lib.mkDefault "fcitx5";
-        fcitx5.waylandFrontend = lib.mkDefault true;
-      };
-
-      programs.hyprland = {
-        enable = true;
-        withUWSM = true;
-        xwayland.enable = true;
-      };
-
-      environment.systemPackages = [
-        pkgs.hyprsunset
-      ];
-
-      xdg.portal = {
-        enable = lib.mkDefault true;
-        extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
-        config.hyprland = {
-          default = [
-            "hyprland"
-            "gtk"
+        fonts = {
+          enableDefaultPackages = false;
+          packages = [
+            pkgs.ibm-plex
+            pkgs.lilex
+            pkgs.nerd-fonts.lilex
+            michelangelusPkg
+            pkgs.eb-garamond
+            pkgs.font-awesome
+            pkgs.noto-fonts
+            pkgs.noto-fonts-cjk-sans
+            pkgs.noto-fonts-cjk-serif
+            pkgs.noto-fonts-color-emoji
           ];
-          "org.freedesktop.impl.portal.Settings" = [ "gtk" ];
+          fontconfig = {
+            enable = lib.mkDefault true;
+            defaultFonts = {
+              sansSerif = lib.mkDefault [
+                "IBM Plex Sans"
+                "Noto Sans"
+              ];
+              serif = lib.mkDefault [
+                "Michelangelus"
+                "EB Garamond"
+                "IBM Plex Serif"
+                "Noto Serif"
+              ];
+              monospace = lib.mkDefault [
+                "Lilex Nerd Font"
+                "Lilex"
+                "IBM Plex Mono"
+                "Noto Sans Mono"
+              ];
+              emoji = lib.mkDefault [
+                "Noto Color Emoji"
+              ];
+            };
+          };
         };
-      };
 
-      security.pam.services.hyprlock = { };
-      security.pam.services.omarchy-lock-password = { };
-      security.polkit.enable = true;
-    })
+        i18n.inputMethod = {
+          enable = lib.mkDefault true;
+          type = lib.mkDefault "fcitx5";
+          fcitx5.waylandFrontend = lib.mkDefault true;
+        };
+
+        programs.dconf.enable = lib.mkDefault true;
+
+        programs.hyprland = {
+          enable = true;
+          withUWSM = true;
+          xwayland.enable = true;
+        };
+
+        environment.systemPackages = [
+          pkgs.hyprsunset
+        ];
+
+        xdg.portal = {
+          enable = lib.mkDefault true;
+          extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+          config.hyprland = {
+            default = [
+              "hyprland"
+              "gtk"
+            ];
+            "org.freedesktop.impl.portal.Settings" = [ "gtk" ];
+          };
+        };
+
+        security.pam.services.hyprlock = { };
+        security.pam.services.omarchy-lock-password = { };
+        security.polkit.enable = true;
+      }
+    ))
   ];
 }

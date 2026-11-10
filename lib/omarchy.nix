@@ -296,6 +296,7 @@ let
       sourceDir ? null,
       pkgs ? null,
       ui ? { },
+      fonts ? { },
     }:
     let
       palette = resolvePalette rawPalette sourceDir;
@@ -309,27 +310,41 @@ let
           mixHex palette.background palette.foreground 10
       );
       bgAltHex = stripHash palette.dark_background;
+      defaultSerifPkg =
+        if pkgs == null then
+          null
+        else if pkgs ? michelangelus-font then
+          pkgs.michelangelus-font
+        else if (pkgs ? omarchnix) && (pkgs.omarchnix ? michelangelus-font) then
+          pkgs.omarchnix.michelangelus-font
+        else
+          pkgs.callPackage ../pkgs/michelangelus-font.nix { };
     in
     {
       inherit name palette sourceDir;
       mode = palette.mode;
 
-      fonts = {
+      fonts = lib.recursiveUpdate {
         sans = {
-          name = "Inter";
-          package = if pkgs != null then pkgs.inter else null;
-          size = 11;
+          name = "IBM Plex Sans";
+          package = if pkgs != null then pkgs.ibm-plex else null;
+          size = 9;
+        };
+        serif = {
+          name = "Michelangelus";
+          package = defaultSerifPkg;
+          size = 10;
         };
         mono = {
-          name = "JetBrains Mono";
-          package = if pkgs != null then pkgs.jetbrains-mono else null;
+          name = "Lilex Nerd Font";
+          package = if pkgs != null then pkgs.nerd-fonts.lilex else null;
           size = 11;
         };
         icon = {
           name = "Font Awesome 7 Free";
           package = if pkgs != null then pkgs.font-awesome else null;
         };
-      };
+      } fonts;
 
       cursor = {
         name = "Bibata-Modern-Classic";
@@ -375,11 +390,12 @@ let
       palette,
       pkgs ? null,
       ui ? { },
+      fonts ? { },
     }:
     mkThemeAttrset {
       name = normalizeThemeName name;
       rawPalette = palette;
-      inherit pkgs ui;
+      inherit pkgs ui fonts;
     };
 
   importThemeFromDir =
@@ -388,6 +404,7 @@ let
       dir,
       pkgs ? null,
       ui ? { },
+      fonts ? { },
     }:
     let
       colorsFile = dir + "/colors.toml";
@@ -405,6 +422,7 @@ let
         rawPalette
         pkgs
         ui
+        fonts
         ;
       sourceDir = dir;
     };
@@ -531,6 +549,7 @@ let
       name ? null,
       palette ? null,
       ui ? { },
+      fonts ? { },
       pkgs ? null,
       themesSrc ? omarchySrc,
     }:
@@ -543,13 +562,18 @@ let
             theme
           else
             throw "lib.omarchy.importTheme: 'name' is required when importing from 'palette'";
-        inherit palette pkgs ui;
+        inherit
+          palette
+          pkgs
+          ui
+          fonts
+          ;
       }
     else if builtins.isPath theme || (builtins.isAttrs theme && theme ? outPath) then
       importThemeFromDir {
         name = if name != null then normalizeThemeName name else builtins.baseNameOf (toString theme);
         dir = theme;
-        inherit pkgs ui;
+        inherit pkgs ui fonts;
       }
     else if builtins.isString theme then
       let
@@ -565,7 +589,7 @@ let
         importThemeFromDir {
           name = normalized;
           dir = candidateDir;
-          inherit pkgs ui;
+          inherit pkgs ui fonts;
         }
       else
         throw "lib.omarchy.importTheme: unknown Omarchy theme '${theme}' (normalized '${normalized}'). Available bundled themes: ${lib.concatStringsSep ", " themeNames}"

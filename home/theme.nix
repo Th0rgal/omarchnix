@@ -4,13 +4,18 @@
 
   fonts = {
     sans = {
-      name = "Inter";
-      package = pkgs.inter;
-      size = 11;
+      name = "IBM Plex Sans";
+      package = pkgs.ibm-plex;
+      size = 9;
+    };
+    serif = {
+      name = "Michelangelus";
+      package = pkgs.michelangelus-font or (pkgs.callPackage ../pkgs/michelangelus-font.nix { });
+      size = 10;
     };
     mono = {
-      name = "JetBrains Mono";
-      package = pkgs.jetbrains-mono;
+      name = "Lilex Nerd Font";
+      package = pkgs.nerd-fonts.lilex;
       size = 11;
     };
     icon = {

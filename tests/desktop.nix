@@ -39,6 +39,10 @@ assert
 assert m2airConfig.home-manager.users.thomas.programs.foot.enable == true;
 assert m2airConfig.home-manager.users.thomas.programs.waybar.enable == false;
 assert m2airConfig.home-manager.users.thomas.systemd.user.services ? omarchy-shell;
+assert m2airConfig.home-manager.users.thomas.systemd.user.services ? omarchy-fcitx5;
+assert m2airConfig.i18n.inputMethod.enable == true;
+assert m2airConfig.i18n.inputMethod.type == "fcitx5";
+assert m2airConfig.i18n.inputMethod.fcitx5.waylandFrontend == true;
 assert m2airConfig.home-manager.users.thomas.programs.fuzzel.enable == true;
 assert m2airConfig.home-manager.users.thomas.programs.hyprlock.enable == true;
 assert m2airConfig.home-manager.users.thomas.services.hypridle.enable == true;

@@ -143,7 +143,63 @@ let
       nodejs
       pnpm
       pnpmConfigHook
+      python3
     ];
+
+    postPatch = ''
+      python3 - <<'PY'
+      import pathlib
+
+      ks_ts = pathlib.Path("src/keyboardShortcuts.ts")
+      ks_txt = ks_ts.read_text()
+      if "hasStrictPlatformModifier" in ks_txt:
+          ks_ts.write_text(
+              ks_txt.replace("hasStrictPlatformModifier(event)", "hasPrimaryModifier(event)")
+          )
+
+      fp_tsx = pathlib.Path("src/FilePanel.tsx")
+      fp_txt = fp_tsx.read_text()
+      old_fp = (
+          '    if (!available()) return;\n'
+          '    if (opened() && hasPrimaryModifier(e) && !e.altKey && e.shiftKey && (e.code === "KeyB" || e.key.toLowerCase() === "b")) {\n'
+          '      e.preventDefault();\n'
+          '      e.stopImmediatePropagation();\n'
+          '      if (!e.repeat) setTree(v => !v);\n'
+          '      return;\n'
+          '    }\n'
+          '    if ((opened() || sideVisible()) && hasPrimaryModifier(e) && !e.altKey && e.shiftKey && (e.code === "KeyE" || e.key.toLowerCase() === "e")) {\n'
+          '      e.preventDefault();\n'
+          '      e.stopImmediatePropagation();\n'
+          '      if (!e.repeat) { setMaximized(false); setSplit(v => !v); }\n'
+          '      return;\n'
+          '    }\n'
+          '    if (openSide() && isBtwShortcut(e)) {'
+      )
+      if old_fp in fp_txt:
+          btw_end = fp_txt.index("      return;\n    }", fp_txt.index("if (openSide() && isBtwShortcut(e)) {")) + len("      return;\n    }")
+          btw_block = fp_txt[fp_txt.index("    if (openSide() && isBtwShortcut(e)) {"):btw_end].replace(
+              "if (openSide() && isBtwShortcut(e)) {",
+              "if (openSide() && onMission() && isBtwShortcut(e)) {",
+              1,
+          )
+          rest_block = old_fp[:-len("\n    if (openSide() && isBtwShortcut(e)) {")]
+          fp_tsx.write_text(fp_txt[:fp_txt.index(old_fp)] + btw_block + "\n" + rest_block + fp_txt[btw_end:])
+
+      app_tsx = pathlib.Path("src/App.tsx")
+      app_txt = app_tsx.read_text()
+      if "isBtwShortcut" not in app_txt and "if (isSearchShortcut(e) || sidebarFocused) {" in app_txt:
+          app_txt = app_txt.replace(
+              "  hasPrimaryModifier,\n",
+              "  hasPrimaryModifier,\n  isBtwShortcut,\n",
+              1,
+          ).replace(
+              "if (isSearchShortcut(e) || sidebarFocused) {",
+              "if (isSearchShortcut(e) || (!e.shiftKey && isBtwShortcut(e)) || sidebarFocused) {",
+              1,
+          )
+          app_tsx.write_text(app_txt)
+      PY
+    '';
 
     buildPhase = ''
       runHook preBuild
@@ -505,6 +561,32 @@ stdenv.mkDerivation {
         GdkRGBA clear = { 0, 0, 0, 0 };
         webkit_web_view_set_background_color(WEBKIT_WEB_VIEW(wv), &clear);
     }'
+    ${python3}/bin/python3 - <<'PY'
+    import pathlib
+
+    mc = pathlib.Path("main.c")
+    txt = mc.read_text()
+    if "GDK_META_MASK" not in txt:
+        fn = (
+            "static gboolean on_wv_super_meta(GtkWidget *wv, GdkEvent *ev, gpointer ud) {\n"
+            "    (void)wv; (void)ud;\n"
+            "    guint *st = (ev->type == GDK_KEY_PRESS || ev->type == GDK_KEY_RELEASE) ? &ev->key.state :\n"
+            "                (ev->type == GDK_BUTTON_PRESS || ev->type == GDK_BUTTON_RELEASE) ? &ev->button.state :\n"
+            "                (ev->type == GDK_SCROLL) ? &ev->scroll.state : NULL;\n"
+            "    if (st && (*st & (GDK_SUPER_MASK | GDK_MOD4_MASK)) && !(*st & GDK_CONTROL_MASK)) *st |= GDK_META_MASK;\n"
+            "    return FALSE;\n"
+            "}\n"
+        )
+        assert "static gboolean on_decide_policy(" in txt
+        assert 'g_signal_connect(wv, "decide-policy"' in txt
+        txt = txt.replace("static gboolean on_decide_policy(", fn + "static gboolean on_decide_policy(", 1)
+        txt = txt.replace(
+            'g_signal_connect(wv, "decide-policy"',
+            'g_signal_connect(wv, "event", G_CALLBACK(on_wv_super_meta), NULL);\n    g_signal_connect(wv, "decide-policy"',
+            1,
+        )
+        mc.write_text(txt)
+    PY
   '';
 
   buildPhase = ''

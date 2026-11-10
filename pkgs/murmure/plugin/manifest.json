@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "th0rgal.murmure",
+  "name": "Murmure",
+  "version": "1.0.0",
+  "author": "Thomas Marchand",
+  "license": "MIT",
+  "description": "Private, on-device voice dictation pill overlay and status bar indicator.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Murmure.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Murmure Dictation",
+    "description": "Click to toggle dictation, right-click for Murmure Settings.",
+    "defaultSection": "right"
+  }
+}

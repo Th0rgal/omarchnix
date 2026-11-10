@@ -165,6 +165,23 @@
         "type": "github"
       }
     },
+    "omarchy-nearby": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794306191,
+        "narHash": "sha256-lOSa9m+Kwu0b5H46Kh7mXA95154VRaKQ2JMyioiYvV8=",
+        "owner": "jfg96",
+        "repo": "omarchy-nearby",
+        "rev": "b26b5dc22a5c5f1d1c26edb80a7676c932f6afaa",
+        "type": "github"
+      },
+      "original": {
+        "owner": "jfg96",
+        "repo": "omarchy-nearby",
+        "rev": "b26b5dc22a5c5f1d1c26edb80a7676c932f6afaa",
+        "type": "github"
+      }
+    },
     "omarchy-plugin-marketplace": {
       "flake": false,
       "locked": {
@@ -199,6 +216,57 @@
         "type": "github"
       }
     },
+    "omarchy-quickshare": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792669079,
+        "narHash": "sha256-uHT2NjAyPIfLdXVpjyF594U42z4boR73B8fnDp2x21U=",
+        "owner": "PuroDelphi",
+        "repo": "omarchy-quickshare",
+        "rev": "d124909620a37699f081e7415e8c6644ec22657c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "PuroDelphi",
+        "repo": "omarchy-quickshare",
+        "rev": "d124909620a37699f081e7415e8c6644ec22657c",
+        "type": "github"
+      }
+    },
+    "omdrop-awdl": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794267729,
+        "narHash": "sha256-eN8lbyJFFJnlU3nMnr96wbn3PJ8NRkfo6SDpT+C28kg=",
+        "owner": "netmojo-systems",
+        "repo": "omdrop-awdl",
+        "rev": "09752e5f95aa11db041b7ca071b6d673254d0dfe",
+        "type": "github"
+      },
+      "original": {
+        "owner": "netmojo-systems",
+        "repo": "omdrop-awdl",
+        "rev": "09752e5f95aa11db041b7ca071b6d673254d0dfe",
+        "type": "github"
+      }
+    },
+    "omdrop-plugin": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794267850,
+        "narHash": "sha256-4szT6woACY0tkv69gYxKLIFC6TqNcqHol1bZUZajQIo=",
+        "owner": "netmojo-systems",
+        "repo": "omdrop-plugin",
+        "rev": "517afeba331188de6d199a47810b58836019363a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "netmojo-systems",
+        "repo": "omdrop-plugin",
+        "rev": "517afeba331188de6d199a47810b58836019363a",
+        "type": "github"
+      }
+    },
     "orb": {
       "inputs": {
         "nixpkgs": [
@@ -227,8 +295,12 @@
         "nixpkgs": "nixpkgs",
         "nixpkgs-toolchains": "nixpkgs-toolchains",
         "omarchy": "omarchy",
+        "omarchy-nearby": "omarchy-nearby",
         "omarchy-plugin-marketplace": "omarchy-plugin-marketplace",
         "omarchy-plugin-opencode-usage": "omarchy-plugin-opencode-usage",
+        "omarchy-quickshare": "omarchy-quickshare",
+        "omdrop-awdl": "omdrop-awdl",
+        "omdrop-plugin": "omdrop-plugin",
         "orb": "orb",
         "sops-nix": "sops-nix",
         "turbo-lean": "turbo-lean"

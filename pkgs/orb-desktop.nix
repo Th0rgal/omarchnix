@@ -83,6 +83,7 @@ let
           lfp = pathlib.Path(lf_path)
           lft = lfp.read_text()
           lft = lft.replace("open Lake DSL\nopen System (FilePath)", "open System Lake DSL")
+          lft = lft.replace('"-fPIC"] "cc"', '"-fPIC"] ((← IO.getEnv "LEAN_CC").getD "cc")')
           lft = lft.replace('"-Werror"] "cc"', '"-Werror"] ((← IO.getEnv "LEAN_CC").getD "cc")')
           lfp.write_text(lft)
 
@@ -161,16 +162,30 @@ let
       PY
     '';
     buildPhase =
-      builtins.replaceStrings
-        [
-          "export LEAN_CC=\"${stdenv.cc}/bin/cc\""
-          "export ORB_SKIP_TURBO_LEAN=1"
-        ]
-        [
-          "export PATH=\"${clang}/bin:${lld}/bin:${binutils}/bin:$PATH\"\n      export CC=\"${clang}/bin/clang\"\n      export LEAN_CC=\"${clang}/bin/clang\""
-          "export ORB_SKIP_TURBO_LEAN=0\n      export TURBO_LEAN_HOME=\"$TMPDIR/turbo-lean-state\"\n      export TURBO_LEAN_STATE_DIR=\"$TMPDIR/turbo-lean-state\"\n      export TURBO_LEAN_EMIT_C=1\n      export TURBO_LEAN_NO_DAEMON=1\n      export TURBO_LEAN_TELEMETRY=off"
-        ]
-        (old.buildPhase or "");
+      let
+        patched =
+          builtins.replaceStrings
+            [
+              "export ORB_SKIP_TURBO_LEAN=1"
+            ]
+            [
+              ''
+                export PATH="${clang}/bin:${lld}/bin:${binutils}/bin:$PATH"
+                      export CC="${clang}/bin/clang"
+                      export LEAN_CC="${clang}/bin/clang"
+                      export LIBRARY_PATH="$LEAN_BIN_DIR/../lib''${LIBRARY_PATH:+:$LIBRARY_PATH}"
+                      export ORB_SKIP_TURBO_LEAN=0
+                      export TURBO_LEAN_HOME="$TMPDIR/turbo-lean-state"
+                      export TURBO_LEAN_STATE_DIR="$TMPDIR/turbo-lean-state"
+                      export TURBO_LEAN_EMIT_C=1
+                      export TURBO_LEAN_NO_DAEMON=1
+                      export TURBO_LEAN_TELEMETRY=off''
+            ]
+            (old.buildPhase or "");
+      in
+      assert lib.hasInfix "export LEAN_CC=" patched;
+      assert lib.hasInfix "export ORB_SKIP_TURBO_LEAN=0" patched;
+      patched;
   });
 
   pnpmDeps = fetchPnpmDeps {

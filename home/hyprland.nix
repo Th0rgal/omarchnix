@@ -12,7 +12,11 @@ let
   foot = "${pkgs.foot}/bin/foot";
   fuzzel = "${pkgs.fuzzel}/bin/fuzzel";
   orb = if pkgs ? orb-desktop then "${pkgs.orb-desktop}/bin/orb" else "orb";
-  hyprlock = "${pkgs.hyprlock}/bin/hyprlock";
+  shellLock =
+    if cfg.shell.package != null then
+      "${cfg.shell.package}/bin/omarchy-shell lock lock"
+    else
+      "omarchy-shell lock lock";
   brightnessctl = "${pkgs.brightnessctl}/bin/brightnessctl";
   playerctl = "${pkgs.playerctl}/bin/playerctl";
   wpctl = "${pkgs.wireplumber}/bin/wpctl";
@@ -461,7 +465,7 @@ in
         (mkBind "SUPER + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')
         (mkBind "SUPER + P" "hl.dsp.window.pseudo()")
         (mkBind "SUPER + E" ''hl.dsp.layout("togglesplit")'')
-        (mkBind "SUPER + ESCAPE" ''hl.dsp.exec_cmd("${hyprlock}")'')
+        (mkBind "SUPER + ESCAPE" "hl.dsp.exec_cmd(${builtins.toJSON shellLock})")
         (mkBind "SUPER + SHIFT + E" "hl.dsp.exit()")
         (mkBind "SUPER + SHIFT + R" "hl.dsp.reload_config()")
 

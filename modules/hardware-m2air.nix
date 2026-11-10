@@ -186,6 +186,16 @@ in
         memoryPercent = 50;
       };
 
+      # Tune VM & zstd ZRAM reclaim for Apple Silicon 16 KiB pages and unified memory:
+      # - page-cluster = 0 avoids 128 KiB (8x 16 KiB) read-ahead decompression per fault
+      # - swappiness = 180 prefers fast in-RAM zstd compression over dropping NVMe page cache
+      boot.kernel.sysctl = {
+        "vm.swappiness" = lib.mkDefault 180;
+        "vm.page-cluster" = lib.mkDefault 0;
+        "vm.watermark_boost_factor" = lib.mkDefault 0;
+        "vm.watermark_scale_factor" = lib.mkDefault 125;
+      };
+
       environment.sessionVariables = {
         NIXOS_OZONE_WL = "1";
         MOZ_ENABLE_WAYLAND = "1";
@@ -283,7 +293,10 @@ in
       fileSystems."/" = {
         device = "/dev/mapper/cryptroot";
         fsType = "ext4";
-        options = [ "defaults" ];
+        options = [
+          "defaults"
+          "noatime"
+        ];
       };
 
       fileSystems."/boot" = {

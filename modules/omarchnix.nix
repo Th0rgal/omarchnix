@@ -268,8 +268,10 @@ in
           "nix-command"
           "flakes"
         ];
-        auto-optimise-store = lib.mkDefault true;
+        auto-optimise-store = lib.mkDefault false;
       };
+
+      nix.optimise.automatic = lib.mkDefault true;
 
       system.stateVersion = lib.mkDefault "25.05";
     })
@@ -314,7 +316,7 @@ in
         hardware.graphics.enable = lib.mkDefault true;
 
         fonts = {
-          enableDefaultPackages = false;
+          enableDefaultPackages = lib.mkForce false;
           packages = [
             pkgs.ibm-plex
             pkgs.lilex

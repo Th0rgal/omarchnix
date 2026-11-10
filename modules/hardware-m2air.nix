@@ -51,6 +51,40 @@ in
       default = 75;
       description = "Apple SMC battery charge start threshold (%) written to macsmc-battery when present.";
     };
+
+    bootloader = {
+      enable = lib.mkEnableOption "removable ARM64 UEFI GRUB on the Asahi ESP (/boot/EFI/BOOT/BOOTAA64.EFI) without touching Apple NVRAM, m1n1/boot.bin, or vendorfw";
+
+      efiSysMountPoint = lib.mkOption {
+        type = lib.types.str;
+        default = "/boot";
+        description = "Mount point of the Asahi EFI System Partition.";
+      };
+
+      configurationLimit = lib.mkOption {
+        type = lib.types.int;
+        default = 2;
+        description = "Maximum GRUB generations kept on the ~500 MB Asahi ESP.";
+      };
+    };
+
+    fileSystems = {
+      enable = lib.mkEnableOption "UUID-mounted LUKS2 cryptroot (/) and FAT32 Asahi ESP (/boot) for MacBook Air M2";
+
+      luksUuid = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "aa0403dd-9917-49e1-85b1-46b21b39f2d9";
+        description = "UUID of the LUKS2 root partition (/dev/disk/by-uuid/<luksUuid>).";
+      };
+
+      espUuid = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "C650-1003";
+        description = "UUID of the FAT32 Asahi EFI System Partition (/dev/disk/by-uuid/<espUuid>).";
+      };
+    };
   };
 
   config = lib.mkMerge [
@@ -182,6 +216,54 @@ in
             fi
           ''}
         '';
+      };
+    })
+
+    (lib.mkIf (cfg.enable && cfg.bootloader.enable) {
+      boot.loader = {
+        systemd-boot.enable = false;
+        efi = {
+          canTouchEfiVariables = false;
+          efiSysMountPoint = cfg.bootloader.efiSysMountPoint;
+        };
+        grub = {
+          enable = true;
+          device = "nodev";
+          efiSupport = true;
+          efiInstallAsRemovable = true;
+          enableCryptodisk = false;
+          configurationLimit = cfg.bootloader.configurationLimit;
+          extraFiles = lib.mkForce { };
+        };
+      };
+    })
+
+    (lib.mkIf (cfg.enable && cfg.fileSystems.enable) {
+      assertions = [
+        {
+          assertion = cfg.fileSystems.luksUuid != null && cfg.fileSystems.espUuid != null;
+          message = "omarchnix.hardware.m2air.fileSystems.enable requires both luksUuid and espUuid to be set.";
+        }
+      ];
+
+      boot.initrd.luks.devices.cryptroot = {
+        device = "/dev/disk/by-uuid/${cfg.fileSystems.luksUuid}";
+        allowDiscards = true;
+      };
+
+      fileSystems."/" = {
+        device = "/dev/mapper/cryptroot";
+        fsType = "ext4";
+        options = [ "defaults" ];
+      };
+
+      fileSystems."/boot" = {
+        device = "/dev/disk/by-uuid/${cfg.fileSystems.espUuid}";
+        fsType = "vfat";
+        options = [
+          "fmask=0077"
+          "dmask=0077"
+        ];
       };
     })
   ];

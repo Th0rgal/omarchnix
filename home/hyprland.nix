@@ -383,6 +383,8 @@ in
         (mkBind "SUPER + SPACE" "hl.dsp.exec_cmd(launcher)")
         (mkBind "SUPER + D" "hl.dsp.exec_cmd(launcher)")
         (mkBind "SUPER + Q" "hl.dsp.window.close()")
+        (mkBind "SUPER + W" "hl.dsp.window.close()")
+        (mkBind "SUPER + SHIFT + Q" "hl.dsp.window.kill()")
         (mkBind "SUPER + V" ''hl.dsp.window.float({ action = "toggle" })'')
         (mkBind "SUPER + F" ''hl.dsp.window.fullscreen({ mode = "fullscreen" })'')
         (mkBind "SUPER + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')

@@ -15,27 +15,6 @@
 
   networking.hostName = "m2air";
 
-  # Persistent ARM64 UEFI GRUB on the existing Asahi ESP (/boot, FAT32 UUID C650-1003).
-  # Preserves Apple iBoot -> Stage 1 m1n1 -> Stage 2 /boot/m1n1/boot.bin -> U-Boot ->
-  # /boot/EFI/BOOT/BOOTAA64.EFI -> Linux + initrd (initrd unlocks Argon2id LUKS2 by UUID;
-  # GRUB never touches NVRAM, m1n1/boot.bin, vendorfw, or LUKS).
-  boot.loader = {
-    systemd-boot.enable = false;
-    efi = {
-      canTouchEfiVariables = false;
-      efiSysMountPoint = "/boot";
-    };
-    grub = {
-      enable = true;
-      device = "nodev";
-      efiSupport = true;
-      efiInstallAsRemovable = true;
-      enableCryptodisk = false;
-      configurationLimit = 2;
-      extraFiles = lib.mkForce { };
-    };
-  };
-
   omarchnix = {
     enable = true;
     profile = "asahi";
@@ -56,6 +35,7 @@
     };
     hardware.m2air = {
       enable = true;
+      bootloader.enable = true;
       # Validate ordinary NixOS boot on stock nixos-apple-silicon + alx.sh
       # Stage 2 first; switch to .#m2air-aurora (or enable touchId with the
       # Aurora overlay) before running omarchnix-install-stage2 /boot.

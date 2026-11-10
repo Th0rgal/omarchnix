@@ -66,6 +66,7 @@
     age
     restic
     rclone
+    turbo-lean
     orb-desktop
     notion-calendar
     antigravity-hub

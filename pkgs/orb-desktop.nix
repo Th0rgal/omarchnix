@@ -18,6 +18,10 @@
   libnotify,
   xdg-utils,
   cacert,
+  clang,
+  lld,
+  binutils,
+  turbo-lean,
   sandboxed-sh,
   orbSrc,
   autoPatchelfHook,
@@ -42,13 +46,18 @@ let
   # which causes Lake 4.35 to re-fetch from GitHub and fail in the offline Nix
   # sandbox. Stage lean-sys as a sibling path package instead.
   sandboxedShOffline = sandboxed-sh.overrideAttrs (old: {
-    # Lean's bundled clang links every binary against the generic Linux loader
-    # (/lib/ld-linux-*.so.1). That works on Ubuntu and fails on NixOS.
-    nativeBuildInputs =
-      (old.nativeBuildInputs or [ ])
-      ++ lib.optionals stdenv.hostPlatform.isLinux [
-        autoPatchelfHook
-      ];
+    # Compile all Lean 4 modules once in a shared CAS via `turbo-lean` + `clang`/`lld`
+    # instead of invoking raw `lake build` 4× with GCC.
+    nativeBuildInputs = [
+      clang
+      lld
+      binutils
+      turbo-lean
+    ]
+    ++ (old.nativeBuildInputs or [ ])
+    ++ lib.optionals stdenv.hostPlatform.isLinux [
+      autoPatchelfHook
+    ];
     buildInputs =
       (old.buildInputs or [ ])
       ++ lib.optionals stdenv.hostPlatform.isLinux [
@@ -70,6 +79,13 @@ let
           )
       )
 
+      for lf_path in glob.glob("lean/*/lakefile.lean"):
+          lfp = pathlib.Path(lf_path)
+          lft = lfp.read_text()
+          lft = lft.replace("open Lake DSL\nopen System (FilePath)", "open System Lake DSL")
+          lft = lft.replace('"-Werror"] "cc"', '"-Werror"] ((← IO.getEnv "LEAN_CC").getD "cc")')
+          lfp.write_text(lft)
+
       for path in glob.glob("lean/*/lake-manifest.json"):
           p = pathlib.Path(path)
           data = json.loads(p.read_text())
@@ -90,6 +106,24 @@ let
                   new_pkgs.append(entry)
           data["packages"] = new_pkgs
           p.write_text(json.dumps(data, indent=1) + "\n")
+
+      build_sh = pathlib.Path("scripts/build_orb_bins.sh")
+      sh_txt = build_sh.read_text()
+      old_fn = (
+          '    if [[ "''${ORB_SKIP_TURBO_LEAN:-0}" != "1" ]] && command -v turbo-lean >/dev/null 2>&1; then\n'
+          '      turbo-lean build --max-memory-mb "''${ORB_TURBO_LEAN_MAX_MB:-6144}" || true\n'
+          '    fi\n'
+          '    SANDBOXED_ALLOW_RAW_LAKE=1 lake build "$@" -- -DwarningAsError=true'
+      )
+      new_fn = (
+          '    if [[ "''${ORB_SKIP_TURBO_LEAN:-0}" != "1" ]] && command -v turbo-lean >/dev/null 2>&1; then\n'
+          '      RAYON_NUM_THREADS="''${ORB_TURBO_LEAN_JOBS:-2}" TURBO_LEAN_EMIT_C=1 turbo-lean --no-daemon --no-telemetry --cache-dir "''${TURBO_LEAN_HOME:-$TMPDIR/turbo-lean-state}" --max-memory-mb "''${ORB_TURBO_LEAN_MAX_MB:-6144}" build "$@" || SANDBOXED_ALLOW_RAW_LAKE=1 lake build "$@" -- -DwarningAsError=true\n'
+          '    else\n'
+          '      SANDBOXED_ALLOW_RAW_LAKE=1 lake build "$@" -- -DwarningAsError=true\n'
+          '    fi'
+      )
+      if old_fn in sh_txt:
+          build_sh.write_text(sh_txt.replace(old_fn, new_fn, 1))
 
       rpc = pathlib.Path("lean/OrbLocald/OrbLocald/Rpc.lean")
       rpc_txt = rpc.read_text()
@@ -119,11 +153,24 @@ let
               '  | "biometric_authenticate" =>\n    if st.hostOs != "macos" && st.hostOs != "linux" then',
           ),
       ]:
-          assert old_s in rpc_txt, f"missing Rpc.lean snippet: {old_s!r}"
-          rpc_txt = rpc_txt.replace(old_s, new_s, 1)
+          if old_s in rpc_txt:
+              rpc_txt = rpc_txt.replace(old_s, new_s, 1)
+          else:
+              assert new_s in rpc_txt, f"missing Rpc.lean snippet: {old_s!r}"
       rpc.write_text(rpc_txt)
       PY
     '';
+    buildPhase =
+      builtins.replaceStrings
+        [
+          "export LEAN_CC=\"${stdenv.cc}/bin/cc\""
+          "export ORB_SKIP_TURBO_LEAN=1"
+        ]
+        [
+          "export PATH=\"${clang}/bin:${lld}/bin:${binutils}/bin:$PATH\"\n      export CC=\"${clang}/bin/clang\"\n      export LEAN_CC=\"${clang}/bin/clang\""
+          "export ORB_SKIP_TURBO_LEAN=0\n      export TURBO_LEAN_HOME=\"$TMPDIR/turbo-lean-state\"\n      export TURBO_LEAN_STATE_DIR=\"$TMPDIR/turbo-lean-state\"\n      export TURBO_LEAN_EMIT_C=1\n      export TURBO_LEAN_NO_DAEMON=1\n      export TURBO_LEAN_TELEMETRY=off"
+        ]
+        (old.buildPhase or "");
   });
 
   pnpmDeps = fetchPnpmDeps {
@@ -252,7 +299,11 @@ let
                 origin = "http://" + host
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-            self.send_header("Cache-Control", "no-cache")
+            req_p = getattr(self, "path", "").split("?", 1)[0]
+            if req_p.startswith(("/assets/", "/provider-icons/")) or req_p.endswith((".woff2", ".wasm")):
+                self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            else:
+                self.send_header("Cache-Control", "no-cache")
             super().end_headers()
 
         def guess_type(self, path):
@@ -480,6 +531,7 @@ stdenv.mkDerivation {
   src = "${orbSrc}/linux_shell";
 
   nativeBuildInputs = [
+    clang
     pkg-config
     wrapGAppsHook3
     makeWrapper
@@ -547,20 +599,31 @@ stdenv.mkDerivation {
         if (rgba) gtk_widget_set_visual(win, rgba);
         gtk_widget_set_app_paintable(win, TRUE);
     }'
-    substituteInPlace main.c \
-      --replace-fail \
-      'WebKitUserContentManager *ucm = webkit_user_content_manager_new();' \
-      'WebKitSettings *wks = webkit_settings_new();
-    webkit_settings_set_hardware_acceleration_policy(wks, WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS);
-    WebKitUserContentManager *ucm = webkit_user_content_manager_new();'
-    substituteInPlace main.c \
-      --replace-fail \
-      'GtkWidget *wv = webkit_web_view_new_with_user_content_manager(ucm);' \
-      'GtkWidget *wv = g_object_new(WEBKIT_TYPE_WEB_VIEW, "settings", wks, "user-content-manager", ucm, "is-ephemeral", FALSE, NULL);
+    if grep -q 'WebKitUserContentManager \*ucm = webkit_user_content_manager_new();' main.c && ! grep -q 'WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS' main.c; then
+      substituteInPlace main.c \
+        --replace-fail \
+        'WebKitUserContentManager *ucm = webkit_user_content_manager_new();' \
+        'WebKitSettings *wks = webkit_settings_new();
+      webkit_settings_set_hardware_acceleration_policy(wks, WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS);
+      WebKitUserContentManager *ucm = webkit_user_content_manager_new();'
+      substituteInPlace main.c \
+        --replace-fail \
+        'GtkWidget *wv = webkit_web_view_new_with_user_content_manager(ucm);' \
+        'GtkWidget *wv = g_object_new(WEBKIT_TYPE_WEB_VIEW, "settings", wks, "user-content-manager", ucm, "is-ephemeral", FALSE, NULL);
+      {
+          GdkRGBA clear = { 0, 0, 0, 0 };
+          webkit_web_view_set_background_color(WEBKIT_WEB_VIEW(wv), &clear);
+      }'
+    else
+      substituteInPlace main.c \
+        --replace-fail \
+        'GtkWidget *wv = g_object_new(WEBKIT_TYPE_WEB_VIEW, "settings", wks, "user-content-manager", ucm, "is-ephemeral", FALSE, NULL);' \
+        'GtkWidget *wv = g_object_new(WEBKIT_TYPE_WEB_VIEW, "settings", wks, "user-content-manager", ucm, "is-ephemeral", FALSE, NULL);
     {
         GdkRGBA clear = { 0, 0, 0, 0 };
         webkit_web_view_set_background_color(WEBKIT_WEB_VIEW(wv), &clear);
     }'
+    fi
     ${python3}/bin/python3 - <<'PY'
     import pathlib
 
@@ -585,13 +648,24 @@ stdenv.mkDerivation {
             'g_signal_connect(wv, "event", G_CALLBACK(on_wv_super_meta), NULL);\n    g_signal_connect(wv, "decide-policy"',
             1,
         )
-        mc.write_text(txt)
+    if "webkit_memory_pressure_settings_new" not in txt and 'GtkWidget *wv = g_object_new(WEBKIT_TYPE_WEB_VIEW, "settings", wks, "user-content-manager", ucm, "is-ephemeral", FALSE, NULL);' in txt:
+        txt = txt.replace(
+            'GtkWidget *wv = g_object_new(WEBKIT_TYPE_WEB_VIEW, "settings", wks, "user-content-manager", ucm, "is-ephemeral", FALSE, NULL);',
+            'WebKitMemoryPressureSettings *mp = webkit_memory_pressure_settings_new(); webkit_memory_pressure_settings_set_memory_limit(mp, 512);\n'
+            '    webkit_memory_pressure_settings_set_conservative_threshold(mp, 0.35); webkit_memory_pressure_settings_set_strict_threshold(mp, 0.60);\n'
+            '    webkit_memory_pressure_settings_set_kill_threshold(mp, 0.0); webkit_website_data_manager_set_memory_pressure_settings(mp);\n'
+            '    WebKitWebContext *ctx = g_object_new(WEBKIT_TYPE_WEB_CONTEXT, "memory-pressure-settings", mp, NULL); webkit_memory_pressure_settings_free(mp);\n'
+            '    webkit_web_context_set_cache_model(ctx, WEBKIT_CACHE_MODEL_DOCUMENT_BROWSER);\n'
+            '    GtkWidget *wv = g_object_new(WEBKIT_TYPE_WEB_VIEW, "web-context", ctx, "settings", wks, "user-content-manager", ucm, "is-ephemeral", FALSE, NULL); g_object_unref(ctx);',
+            1,
+        )
+    mc.write_text(txt)
     PY
   '';
 
   buildPhase = ''
     runHook preBuild
-    make HAS_WEBKIT=1 orb-desktop
+    make CC="${clang}/bin/clang" HAS_WEBKIT=1 orb-desktop
     runHook postBuild
   '';
 
@@ -623,6 +697,10 @@ stdenv.mkDerivation {
     ${linuxSigner}
     PY
     chmod 0755 "$out/bin/.orb-signer"
+    runHook postInstall
+  '';
+
+  postFixup = ''
     makeWrapper "$out/bin/.orb-desktop-unwrapped" "$out/bin/orb" \
       "''${gappsWrapperArgs[@]}" \
       --prefix PATH : "/run/current-system/sw/bin:${
@@ -644,6 +722,21 @@ stdenv.mkDerivation {
       --set ORB_STATIC_SERVER "$out/bin/.orb-static-server" \
       --set ORB_UI_ROOT "$out/share/orb" \
       --run ${lib.escapeShellArg ''
+        if [ -d /run/opengl-driver/share ]; then
+          export XDG_DATA_DIRS="/run/opengl-driver/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+        fi
+        if [ -d /run/opengl-driver/lib ]; then
+          export LD_LIBRARY_PATH="/run/opengl-driver/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        fi
+        if [ -d /run/opengl-driver/lib/dri ]; then
+          export LIBGL_DRIVERS_PATH="/run/opengl-driver/lib/dri"
+        fi
+        if [ -d /run/opengl-driver/lib/gbm ]; then
+          export GBM_BACKENDS_PATH="/run/opengl-driver/lib/gbm"
+        fi
+        if [ -d /run/opengl-driver/share/glvnd/egl_vendor.d ]; then
+          export __EGL_VENDOR_LIBRARY_DIRS="/run/opengl-driver/share/glvnd/egl_vendor.d"
+        fi
         case " $* " in
           *" --self-test "*) ;;
           *)
@@ -670,7 +763,6 @@ stdenv.mkDerivation {
             ;;
         esac
       ''}
-    runHook postInstall
   '';
 
   passthru = {

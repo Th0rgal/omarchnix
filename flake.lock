@@ -230,7 +230,8 @@
         "omarchy-plugin-marketplace": "omarchy-plugin-marketplace",
         "omarchy-plugin-opencode-usage": "omarchy-plugin-opencode-usage",
         "orb": "orb",
-        "sops-nix": "sops-nix"
+        "sops-nix": "sops-nix",
+        "turbo-lean": "turbo-lean"
       }
     },
     "sops-nix": {
@@ -250,6 +251,23 @@
       "original": {
         "owner": "Mic92",
         "repo": "sops-nix",
+        "type": "github"
+      }
+    },
+    "turbo-lean": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794314940,
+        "narHash": "sha256-Bhd+j5gauHXItURXUENWKe1p57zMA6P5tcvFPKHt680=",
+        "owner": "Th0rgal",
+        "repo": "turbo-lean",
+        "rev": "82a940653812ad7552ae7087f2c5a3164e56e7ff",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "turbo-lean",
+        "rev": "82a940653812ad7552ae7087f2c5a3164e56e7ff",
         "type": "github"
       }
     }

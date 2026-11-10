@@ -9,6 +9,64 @@ let
   cfg = config.programs.omarchnix;
   hmLib = config.lib.dag;
   omarchyShellPkg = cfg.shell.package;
+  omarchyLib = import ../lib/omarchy.nix { inherit lib; };
+
+  clipboardBarPluginSrc = pkgs.runCommand "omarchnix-clipboard-bar-src" { } ''
+    mkdir -p "$out"
+    cat > "$out/manifest.json" <<'EOF'
+    {
+      "schemaVersion": 1,
+      "id": "omarchnix.clipboard",
+      "name": "Clipboard History",
+      "version": "1.0.0",
+      "author": "Omarchnix",
+      "license": "MIT",
+      "description": "Top status bar button for Omarchy clipboard history (Maccy equivalent).",
+      "kinds": [
+        "bar-widget"
+      ],
+      "entryPoints": {
+        "barWidget": "Widget.qml"
+      },
+      "barWidget": {
+        "displayName": "Clipboard",
+        "description": "Open clipboard history (Cmd+Shift+V / Cmd+Ctrl+V).",
+        "defaultSection": "right"
+      }
+    }
+    EOF
+    cat > "$out/Widget.qml" <<'EOF'
+    import QtQuick
+    import Quickshell
+    import qs.Commons
+    import qs.Ui
+
+    BarWidget {
+      id: root
+      moduleName: "omarchnix.clipboard"
+
+      implicitWidth: button.implicitWidth
+      implicitHeight: button.implicitHeight
+
+      BarIconButton {
+        id: button
+        anchors.fill: parent
+        bar: root.bar
+        text: "󰅌"
+        slotSize: Style.bar.statusSlot
+        tooltipText: "Clipboard History (Cmd+Shift+V)"
+        onPressed: function() {
+          if (root.bar) root.bar.run("omarchy-shell shell toggle omarchy.clipboard")
+        }
+      }
+    }
+    EOF
+  '';
+
+  clipboardBarPlugin = omarchyLib.buildPlugin {
+    inherit pkgs;
+    src = clipboardBarPluginSrc;
+  };
 
   lockedPluginEntries = lib.mapAttrsToList (
     id: pluginCfg:
@@ -109,6 +167,11 @@ let
     tray = [ ];
     right = [
       { id = "omarchy.tray"; }
+      {
+        id = "omarchy.indicators";
+        items = [ "StayAwake" ];
+        alwaysShow = true;
+      }
       { id = "omarchy.keyboard-layout"; }
       { id = "omarchy.agents"; }
       { id = "omarchy.bluetooth"; }
@@ -181,6 +244,12 @@ let
 in
 {
   config = lib.mkIf (cfg.enable && omarchyShellPkg != null) {
+    programs.omarchnix.plugins.locked."omarchnix.clipboard" = {
+      package = lib.mkDefault clipboardBarPlugin;
+      enable = lib.mkDefault true;
+      section = lib.mkDefault "right";
+    };
+
     home.sessionVariables = {
       OMARCHY_PATH = "${omarchyShellPkg.sharePath}";
     };

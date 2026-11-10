@@ -29,6 +29,10 @@
         layout = "us";
         variant = "intl";
       };
+      touchpad = {
+        naturalScroll = false;
+        scrollFactor = 0.5;
+      };
       # The desktop is the console session: no display manager, Hyprland is
       # owned by a real systemd unit so `nixos-rebuild switch` cannot kill it.
       autostartTty.enable = true;
@@ -81,4 +85,5 @@
   };
 
   security.sudo.wheelNeedsPassword = true;
+  services.gnome.gnome-keyring.enable = true;
 }

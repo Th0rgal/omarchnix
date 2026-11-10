@@ -21,21 +21,21 @@ in
       listener = [
         {
           timeout = 180;
-          on-timeout = "${brightnessctl} -s set 10%";
-          on-resume = "${brightnessctl} -r";
+          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${brightnessctl} -s set 10%";
+          on-resume = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${brightnessctl} -r";
         }
         {
           timeout = 300;
-          on-timeout = "${loginctl} lock-session";
+          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${loginctl} lock-session";
         }
         {
           timeout = 360;
-          on-timeout = "${hyprctl} dispatch dpms off";
+          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${hyprctl} dispatch dpms off";
           on-resume = "${hyprctl} dispatch dpms on";
         }
         {
           timeout = 900;
-          on-timeout = "${systemctl} suspend";
+          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${systemctl} suspend";
         }
       ];
     };

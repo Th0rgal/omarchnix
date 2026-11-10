@@ -26,6 +26,16 @@ let
       "${omarchyShellBin}/omarchy-shell shell summon omarchy.image-picker '{\"source\":\"themes\"}'"
     else
       "choice=\"$(${omarchnixCli} theme list | ${fuzzel} --dmenu -p 'Theme: ')\"; [ -n \"$choice\" ] && ${omarchnixCli} theme set \"$choice\"";
+  clipboardCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-shell shell toggle omarchy.clipboard"
+    else
+      "${omarchnixCli} status";
+  idleToggleCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-shell idle toggle"
+    else
+      "mkdir -p \"$HOME/.local/state/omarchy/indicators\"; if [ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ]; then rm -f \"$HOME/.local/state/omarchy/indicators/stay-awake\"; else touch \"$HOME/.local/state/omarchy/indicators/stay-awake\"; fi";
 
   mkBind = keys: dsp: {
     _args = [
@@ -192,7 +202,8 @@ in
           follow_mouse = 1;
           sensitivity = 0;
           touchpad = {
-            natural_scroll = true;
+            natural_scroll = cfg.touchpad.naturalScroll;
+            scroll_factor = cfg.touchpad.scrollFactor;
             tap_to_click = true;
             tap_and_drag = true;
             disable_while_typing = true;
@@ -415,6 +426,13 @@ in
         (mkBind "SUPER + S" ''hl.dsp.workspace.toggle_special("scratchpad")'')
         (mkBind "SUPER + SHIFT + S" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
         (mkBind "SUPER + SHIFT + P" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "CTRL + SUPER + SHIFT + 4" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "CTRL + SUPER + SHIFT + code:13" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "SUPER + SHIFT + 4" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "SUPER + SHIFT + code:13" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "SUPER + SHIFT + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
+        (mkBind "SUPER + CTRL + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
+        (mkBind "SUPER + SHIFT + I" "hl.dsp.exec_cmd(${builtins.toJSON idleToggleCmd})")
         (mkBind "SUPER + SHIFT + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
         (mkBind "SUPER + CTRL + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
         (mkBind "SUPER + ALT + T" ''hl.dsp.exec_cmd("${omarchnixCli} theme toggle")'')

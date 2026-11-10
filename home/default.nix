@@ -151,6 +151,20 @@ in
       };
     };
 
+    touchpad = {
+      naturalScroll = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Whether touchpad scrolling is natural (`true`) or traditional/inverted (`false`, so content moves up when fingers move up).";
+      };
+
+      scrollFactor = lib.mkOption {
+        type = lib.types.float;
+        default = 0.5;
+        description = "Touchpad scroll speed factor in Hyprland (`0.5` smooths Apple MTP trackpad scrolling to match macOS inertia feel).";
+      };
+    };
+
     plugins = {
       locked = lib.mkOption {
         default = { };

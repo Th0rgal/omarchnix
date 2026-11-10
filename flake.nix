@@ -49,6 +49,26 @@
       url = "github:Th0rgal/turbo-lean/82a940653812ad7552ae7087f2c5a3164e56e7ff";
       flake = false;
     };
+
+    omdrop-awdl = {
+      url = "github:netmojo-systems/omdrop-awdl/09752e5f95aa11db041b7ca071b6d673254d0dfe";
+      flake = false;
+    };
+
+    omdrop-plugin = {
+      url = "github:netmojo-systems/omdrop-plugin/517afeba331188de6d199a47810b58836019363a";
+      flake = false;
+    };
+
+    omarchy-quickshare = {
+      url = "github:PuroDelphi/omarchy-quickshare/d124909620a37699f081e7415e8c6644ec22657c";
+      flake = false;
+    };
+
+    omarchy-nearby = {
+      url = "github:jfg96/omarchy-nearby/b26b5dc22a5c5f1d1c26edb80a7676c932f6afaa";
+      flake = false;
+    };
   };
 
   outputs =
@@ -108,10 +128,32 @@
             buildTheme = args: omarchyLib.buildThemePkg ({ pkgs = final; } // args);
             buildPlugin = args: omarchyLib.buildPlugin ({ pkgs = final; } // args);
             michelangelus-font = final.michelangelus-font;
+            omdrop = final.omdrop;
+            omarchy-quickshare = final.omarchy-quickshare;
+            omarchy-nearby = final.omarchy-nearby;
           };
           michelangelus-font = final.callPackage ./pkgs/michelangelus-font.nix { };
           turbo-lean = final.callPackage ./pkgs/turbo-lean.nix {
             turboLeanSrc = inputs.turbo-lean;
+          };
+          crispasr-cohere = final.callPackage ./pkgs/crispasr-cohere.nix { };
+          murmure = final.callPackage ./pkgs/murmure {
+            buildPlugin = final.omarchnix.buildPlugin;
+          };
+          omdrop = final.callPackage ./pkgs/omdrop.nix {
+            omdropAwdlSrc = inputs.omdrop-awdl;
+            omdropPluginSrc = inputs.omdrop-plugin;
+            buildPlugin = final.omarchnix.buildPlugin;
+            inherit omarchyShell;
+          };
+          omarchy-quickshare = final.callPackage ./pkgs/omarchy-quickshare.nix {
+            omarchyQuickshareSrc = inputs.omarchy-quickshare;
+            buildPlugin = final.omarchnix.buildPlugin;
+            inherit omarchyShell;
+          };
+          omarchy-nearby = final.callPackage ./pkgs/omarchy-nearby.nix {
+            omarchyNearbySrc = inputs.omarchy-nearby;
+            buildPlugin = final.omarchnix.buildPlugin;
           };
           orb-desktop = final.callPackage ./pkgs/orb-desktop.nix {
             orbSrc = inputs.orb;
@@ -288,6 +330,11 @@
           omarchy-shell = pkgs.omarchnix.omarchy-shell;
           omarchnix = pkgs.omarchnix.cli;
           turbo-lean = pkgs.turbo-lean;
+          crispasr-cohere = pkgs.crispasr-cohere;
+          murmure = pkgs.murmure;
+          omdrop = pkgs.omdrop;
+          omarchy-quickshare = pkgs.omarchy-quickshare;
+          omarchy-nearby = pkgs.omarchy-nearby;
           orb-desktop = pkgs.orb-desktop;
           notion-calendar = pkgs.notion-calendar;
           plugin-opencode-model-usage = pkgs.omarchnix.buildPlugin {
@@ -358,6 +405,12 @@
                         user = "alice";
                         theme = "catppuccin";
                         shellBackend = "omarchy-shell";
+                        murmure.enable = true;
+                      };
+                      services.sharing = {
+                        airdrop.enable = true;
+                        quickshare.enable = true;
+                        nearby.enable = true;
                       };
                     };
                     home-manager.users.alice = {
@@ -392,6 +445,16 @@
               standaloneNixos.config.home-manager.users.alice.wayland.windowManager.hyprland.enable == true;
             assert standaloneNixos.config.home-manager.users.alice.programs.waybar.enable == false;
             assert standaloneNixos.config.home-manager.users.alice.systemd.user.services ? omarchy-shell;
+            assert standaloneNixos.config.systemd.services ? awdl0;
+            assert standaloneNixos.config.systemd.services ? omdrop-awdl-sleep;
+            assert standaloneNixos.config.home-manager.users.alice.systemd.user.services ? omarchy-quickshare;
+            assert standaloneNixos.config.home-manager.users.alice.systemd.user.services ? murmure;
+            assert
+              standaloneNixos.config.home-manager.users.alice.programs.omarchnix.plugins.locked
+                ? "omarchnix.sharing";
+            assert
+              standaloneNixos.config.home-manager.users.alice.programs.omarchnix.plugins.locked
+                ? "th0rgal.murmure";
             assert self.nixosConfigurations.spark.pkgs.stdenv.hostPlatform.system == "aarch64-linux";
             assert self.nixosConfigurations.workstation.pkgs.stdenv.hostPlatform.system == "x86_64-linux";
             pkgs.runCommand "omarchnix-modules-eval" { } ''

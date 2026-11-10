@@ -42,6 +42,7 @@ in
     ./hardening.nix
     ./containers.nix
     ./secrets.nix
+    ./sharing.nix
   ];
 
   options = {
@@ -135,6 +136,10 @@ in
           };
         };
 
+        murmure = {
+          enable = lib.mkEnableOption "Murmure on-device Wayland dictation (`Fn + Right Shift` + shared `voiced` Cohere Transcribe daemon)";
+        };
+
         autostartTty = {
           enable = lib.mkEnableOption "autostart the Hyprland session on a bare TTY (no display manager)";
 
@@ -175,6 +180,12 @@ in
                 touchpad = {
                   naturalScroll = lib.mkDefault cfg.desktop.touchpad.naturalScroll;
                   scrollFactor = lib.mkDefault cfg.desktop.touchpad.scrollFactor;
+                };
+                murmure.enable = lib.mkDefault cfg.desktop.murmure.enable;
+                sharing = {
+                  airdrop.enable = lib.mkDefault cfg.services.sharing.airdrop.enable;
+                  quickshare.enable = lib.mkDefault cfg.services.sharing.quickshare.enable;
+                  nearby.enable = lib.mkDefault cfg.services.sharing.nearby.enable;
                 };
               };
             };
@@ -402,6 +413,17 @@ in
             "org.freedesktop.impl.portal.Settings" = [ "gtk" ];
           };
         };
+
+        # Grant the active local seat user read access to hardware keyboard evdev
+        # nodes (such as Apple MTP `KEY_FN` + `KEY_RIGHTSHIFT`) for Murmure global
+        # push-to-talk / tap-to-toggle dictation without root or uinput grabs.
+        # Must run at priority 70 (after `60-input-id.rules` sets `ID_INPUT_KEYBOARD=1`
+        # and before `71-seat.rules` / `73-seat-late.rules` apply `uaccess` ACLs).
+        services.udev.packages = lib.optional cfg.desktop.murmure.enable (
+          pkgs.writeTextDir "etc/udev/rules.d/70-murmure-keyboard.rules" ''
+            SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"
+          ''
+        );
 
         security.pam.services.hyprlock = { };
         security.pam.services.omarchy-lock-password = { };

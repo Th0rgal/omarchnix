@@ -256,6 +256,8 @@ in
     ./hyprland.nix
     ./waybar.nix
     ./omarchy-shell.nix
+    ./murmure.nix
+    ./sharing.nix
     ./agents.nix
     ./fcitx5.nix
     ./foot.nix

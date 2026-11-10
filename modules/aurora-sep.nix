@@ -1065,6 +1065,19 @@ in
                 "$@"
             '';
           };
+          speakerguarddSessionIdle = pkgs.writeShellApplication {
+            name = "speakerguardd-session-idle";
+            runtimeInputs = [
+              pkgs.python3
+              config.services.pipewire.package
+              pkgs.coreutils
+            ];
+            text = ''
+              exec python3 -I ${../pkgs/speakerguardd-session-idle.py} \
+                --upstream "${sgPkg}/libexec/speakerguardd-v2/speakerguardd-session" \
+                "$@"
+            '';
+          };
         in
         {
           environment.systemPackages = [
@@ -1159,6 +1172,10 @@ in
             wantedBy = [ "pipewire.service" ];
             path = sgTools;
             environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
+            serviceConfig.ExecStart = [
+              ""
+              "${speakerguarddSessionIdle}/bin/speakerguardd-session-idle --machine \${SGV2_MACHINE}"
+            ];
           };
           systemd.services.speakerguardd.serviceConfig.ExecCondition = [ "${sgGate} legacy" ];
           systemd.services.speakersafetyd.serviceConfig = {

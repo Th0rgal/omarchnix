@@ -106,11 +106,9 @@ let
   enabledNonBarPlugins = lib.concatMap (
     entry:
     let
-      isBarOrWidget =
-        builtins.elem "bar" (entry.manifest.kinds or [ ])
-        || builtins.elem "bar-widget" (entry.manifest.kinds or [ ]);
+      hasNonBarKind = lib.any (k: k != "bar" && k != "bar-widget") (entry.manifest.kinds or [ ]);
     in
-    if entry.enable && !isBarOrWidget then [ { id = entry.id; } ] else [ ]
+    if entry.enable && hasNonBarKind then [ { id = entry.id; } ] else [ ]
   ) lockedPluginEntries;
 
   selectedBarOverride =
@@ -148,23 +146,32 @@ let
       { id = "omarchy.elsewhen"; }
       { id = "omarchy.weather"; }
     ];
-    tray = [ ];
+    tray = [
+      { id = "omarchy.agents"; }
+      { id = "omarchy.monitor"; }
+    ];
     right = [
       { id = "omarchy.tray"; }
-      {
-        id = "omarchy.indicators";
-        items = [ "StayAwake" ];
-        alwaysShow = true;
-      }
       { id = "omarchy.keyboard-layout"; }
-      { id = "omarchy.agents"; }
       { id = "omarchy.bluetooth"; }
       { id = "omarchy.network"; }
       { id = "omarchy.audio"; }
-      { id = "omarchy.monitor"; }
       { id = "omarchy.power"; }
     ];
   };
+
+  mergedRightLayout =
+    let
+      pluginRight = enabledBarWidgetsBySection "right";
+      coreRight = [
+        { id = "omarchy.keyboard-layout"; }
+        { id = "omarchy.bluetooth"; }
+        { id = "omarchy.network"; }
+        { id = "omarchy.audio"; }
+        { id = "omarchy.power"; }
+      ];
+    in
+    appendUniqueById ([ { id = "omarchy.tray"; } ] ++ pluginRight) coreRight;
 
   mergedShellConfig = {
     version = 1;
@@ -181,7 +188,7 @@ let
         center = appendUniqueById baseLayout.center (enabledBarWidgetsBySection "center");
         centerEnd = appendUniqueById baseLayout.centerEnd (enabledBarWidgetsBySection "centerEnd");
         tray = appendUniqueById baseLayout.tray (enabledBarWidgetsBySection "tray");
-        right = appendUniqueById baseLayout.right (enabledBarWidgetsBySection "right");
+        right = mergedRightLayout;
       };
     }
     // lib.optionalAttrs (selectedBarOverride != null) {
@@ -279,10 +286,12 @@ in
       ${lib.concatMapStringsSep "\n" (entry: ''
         target_plugin_dir="$HOME/.config/omarchy/plugins/${lib.escapeShellArg entry.id}"
         rm -rf "$target_plugin_dir"
-        mkdir -p "$target_plugin_dir"
-        cp -r --no-preserve=mode "${entry.drv}/." "$target_plugin_dir/"
-        chmod -R u+w "$target_plugin_dir"
-        "${omarchyShellPkg}/bin/omarchy-plugin-validate" "$target_plugin_dir" >/dev/null
+        ${lib.optionalString entry.enable ''
+          mkdir -p "$target_plugin_dir"
+          cp -r --no-preserve=mode "${entry.drv}/." "$target_plugin_dir/"
+          chmod -R u+w "$target_plugin_dir"
+          "${omarchyShellPkg}/bin/omarchy-plugin-validate" "$target_plugin_dir" >/dev/null
+        ''}
       '') lockedPluginEntries}
 
       if [ ! -f "$HOME/.config/omarchy/shell.json" ] || [ -L "$HOME/.config/omarchy/shell.json" ]; then
@@ -295,11 +304,24 @@ in
           "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
         ${lib.concatMapStringsSep "\n" (
           entry:
-          lib.optionalString entry.enable (
+          if !entry.enable then
+            ''
+              tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
+              ${pkgs.jq}/bin/jq --arg id ${lib.escapeShellArg entry.id} '
+                .version = 1
+                | .bar.layout = (
+                    (.bar.layout // {})
+                    | with_entries(.value = [(.value // [])[] | select((.id // .) != $id)])
+                  )
+                | .plugins = [(.plugins // [])[] | select((if type == "string" then . else .id end) != $id)]
+              ' "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
+            ''
+          else
             let
               isBarWidget =
                 builtins.elem "bar-widget" (entry.manifest.kinds or [ ])
                 && !(builtins.elem "bar" (entry.manifest.kinds or [ ]));
+              hasNonBarKind = lib.any (k: k != "bar" && k != "bar-widget") (entry.manifest.kinds or [ ]);
               section =
                 if entry.section != null then
                   entry.section
@@ -317,29 +339,41 @@ in
                 else
                   "centerEnd";
             in
-            if isBarWidget then
-              ''
-                tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
-                ${pkgs.jq}/bin/jq --arg id ${lib.escapeShellArg entry.id} --arg sec ${lib.escapeShellArg section} '
-                  .version = 1
-                  | .bar.layout[$sec] = (
-                      (.bar.layout[$sec] // [])
-                      | if any(.[]; .id == $id) then . else . + [{ id: $id }] end
-                    )
-                ' "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
-              ''
-            else
-              ''
-                tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
-                ${pkgs.jq}/bin/jq --arg id ${lib.escapeShellArg entry.id} '
-                  .version = 1
-                  | .plugins = (
-                      [(.plugins // [])[] | if type == "string" then { id: . } else . end]
-                      | if any(.[]; .id == $id) then . else . + [{ id: $id }] end
-                    )
-                ' "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
-              ''
-          )
+            lib.optionalString isBarWidget ''
+              tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
+              ${pkgs.jq}/bin/jq --arg id ${lib.escapeShellArg entry.id} --arg sec ${lib.escapeShellArg section} '
+                .version = 1
+                | .bar.layout = (
+                    (.bar.layout // {})
+                    | with_entries(
+                        if .key == $sec then .
+                        else .value = [(.value // [])[] | select((.id // .) != $id)]
+                        end
+                      )
+                  )
+                | .bar.layout[$sec] = (
+                    (.bar.layout[$sec] // []) as $cur
+                    | if any($cur[]; (.id // .) == $id) then $cur
+                      elif $sec == "right" then
+                        ([$cur | to_entries[] | select((.value.id // .value) == "omarchy.bluetooth") | .key][0]) as $btIdx
+                        | if $btIdx != null then ($cur[:$btIdx] + [{ id: $id }] + $cur[$btIdx:])
+                          else ($cur + [{ id: $id }])
+                          end
+                      else ($cur + [{ id: $id }])
+                      end
+                  )
+              ' "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
+            ''
+            + lib.optionalString hasNonBarKind ''
+              tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
+              ${pkgs.jq}/bin/jq --arg id ${lib.escapeShellArg entry.id} '
+                .version = 1
+                | .plugins = (
+                    [(.plugins // [])[] | if type == "string" then { id: . } else . end]
+                    | if any(.[]; .id == $id) then . else . + [{ id: $id }] end
+                  )
+              ' "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
+            ''
         ) lockedPluginEntries}
       fi
 

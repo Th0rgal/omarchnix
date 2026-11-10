@@ -685,6 +685,7 @@ let
       pkgs,
       src,
       subdir ? "",
+      postInstall ? "",
     }:
     let
       pluginSrc = if subdir == "" then src else "${src}/${subdir}";
@@ -737,8 +738,11 @@ let
       }
       ''
         mkdir -p "$out"
-        cp -r --no-preserve=mode "${pluginSrc}/." "$out/"
+        cp -r --no-preserve=ownership "${pluginSrc}/." "$out/"
+        chmod -R u+w "$out"
         rm -rf "$out/.git"
+
+        ${postInstall}
 
         link="$(find "$out" -type l -print -quit)"
         if [ -n "$link" ]; then

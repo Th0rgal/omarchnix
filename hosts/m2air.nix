@@ -50,6 +50,9 @@
         layout = "us";
         variant = "intl";
       };
+      # The desktop is the console session: no display manager, Hyprland is
+      # owned by a real systemd unit so `nixos-rebuild switch` cannot kill it.
+      autostartTty.enable = true;
     };
     hardware.m2air = {
       enable = true;
@@ -64,6 +67,10 @@
     };
   };
 
+  # Google Antigravity IDE ships as a binary Electron build; allow only that
+  # unfree package rather than the whole unfree set.
+  nixpkgs.config.allowUnfreePackages = [ "antigravity-ide" ];
+
   environment.systemPackages = with pkgs; [
     brave
     firefox
@@ -75,6 +82,7 @@
     rclone
     orb-desktop
     notion-calendar
+    antigravity-ide
   ];
 
   users.users.thomas = {

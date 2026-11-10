@@ -20,6 +20,8 @@ assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.extr
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.systemd.enable == false;
 assert builtins.any (p: (p.pname or "") == "orb-desktop") m2airConfig.environment.systemPackages;
 assert
+  (m2airConfig.xdg.portal.config.hyprland."org.freedesktop.impl.portal.Settings" or null) == "gtk";
+assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.kb_layout
   == "us";
 assert

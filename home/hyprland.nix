@@ -19,6 +19,13 @@ let
   grim = "${pkgs.grim}/bin/grim";
   slurp = "${pkgs.slurp}/bin/slurp";
   wlCopy = "${pkgs.wl-clipboard}/bin/wl-copy";
+  omarchnixCli = if cfg.cliPackage != null then "${cfg.cliPackage}/bin/omarchnix" else "omarchnix";
+  omarchyShellBin = if cfg.shell.package != null then "${cfg.shell.package}/bin" else "";
+  themePickerCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-shell shell summon omarchy.image-picker '{\"source\":\"themes\"}'"
+    else
+      "choice=\"$(${omarchnixCli} theme list | ${fuzzel} --dmenu -p 'Theme: ')\"; [ -n \"$choice\" ] && ${omarchnixCli} theme set \"$choice\"";
 
   mkBind = keys: dsp: {
     _args = [
@@ -195,7 +202,7 @@ in
 
         gestures = {
           workspace_swipe_distance = 300;
-          workspace_swipe_invert = true;
+          workspace_swipe_invert = false;
           workspace_swipe_create_new = true;
         };
 
@@ -294,6 +301,16 @@ in
           fingers = 3;
           direction = "horizontal";
           action = "workspace";
+        }
+        {
+          fingers = 4;
+          direction = "right";
+          action = mkLuaInline ''function() hl.dispatch(hl.dsp.window.move({ workspace = "r-1" })) end'';
+        }
+        {
+          fingers = 4;
+          direction = "left";
+          action = mkLuaInline ''function() hl.dispatch(hl.dsp.window.move({ workspace = "r+1" })) end'';
         }
       ];
 
@@ -396,9 +413,14 @@ in
         (mkBind "SUPER + S" ''hl.dsp.workspace.toggle_special("scratchpad")'')
         (mkBind "SUPER + SHIFT + S" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
         (mkBind "SUPER + SHIFT + P" ''hl.dsp.exec_cmd("${grim} -g \"$(${slurp})\" - | ${wlCopy}")'')
+        (mkBind "SUPER + SHIFT + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
+        (mkBind "SUPER + CTRL + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
+        (mkBind "SUPER + ALT + T" ''hl.dsp.exec_cmd("${omarchnixCli} theme toggle")'')
 
-        (mkBind "SUPER + mouse_down" ''hl.dsp.focus({ workspace = "e+1" })'')
-        (mkBind "SUPER + mouse_up" ''hl.dsp.focus({ workspace = "e-1" })'')
+        (mkBind "SUPER + mouse_down" ''hl.dsp.focus({ workspace = "e-1" })'')
+        (mkBind "SUPER + mouse_up" ''hl.dsp.focus({ workspace = "e+1" })'')
+        (mkBind "SUPER + ALT + mouse_down" "hl.dsp.group.prev()")
+        (mkBind "SUPER + ALT + mouse_up" "hl.dsp.group.next()")
 
         (mkBindOpts "SUPER + mouse:272" "hl.dsp.window.drag()" { mouse = true; })
         (mkBindOpts "SUPER + mouse:273" "hl.dsp.window.resize()" { mouse = true; })

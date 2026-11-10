@@ -17,6 +17,7 @@
   openssl,
   libnotify,
   xdg-utils,
+  cacert,
   sandboxed-sh,
   orbSrc,
   autoPatchelfHook,
@@ -445,6 +446,16 @@ stdenv.mkDerivation {
   postPatch = ''
     substituteInPlace main.c \
       --replace-fail \
+      'static const char *const keep[] = { "HOME", "PATH", "TMPDIR", "USER", "LANG", "ORB_STATE_DIR", "ORB_SIGNER_BIN", "ORB_APPROVAL_KEY_PATH" };' \
+      'static const char *const keep[] = { "HOME", "PATH", "TMPDIR", "USER", "LANG", "ORB_STATE_DIR", "ORB_SIGNER_BIN", "ORB_APPROVAL_KEY_PATH", "SSL_CERT_FILE", "SSL_CERT_DIR", "NIX_SSL_CERT_FILE" };' \
+      --replace-fail \
+      'char pkv[40], tkv[4200], kv[8][1024], *envp[11];' \
+      'char pkv[40], tkv[4200], kv[11][1024], *envp[14];' \
+      --replace-fail \
+      'for (size_t i = 0; i < 8; ++i) {' \
+      'for (size_t i = 0; i < 11; ++i) {'
+    substituteInPlace main.c \
+      --replace-fail \
       'static const gchar *const allow_list[] = { "http://127.0.0.1/*", "http://localhost/*", "file:///*", NULL };' \
       'static const gchar *const allow_list[] = { NULL };'
     substituteInPlace main.c \
@@ -545,6 +556,8 @@ stdenv.mkDerivation {
       }" \
       --set ORB_LOCALD_BIN "${sandboxedShOffline}/bin/orb-locald" \
       --set ORB_SIGNER_BIN "$out/bin/.orb-signer" \
+      --set-default SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
+      --set-default NIX_SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
       --set ORB_UNWRAPPED "$out/bin/.orb-desktop-unwrapped" \
       --set ORB_STATIC_SERVER "$out/bin/.orb-static-server" \
       --set ORB_UI_ROOT "$out/share/orb" \

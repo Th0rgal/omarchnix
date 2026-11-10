@@ -265,29 +265,37 @@ in
 
     programs.zsh.enable = true;
 
-    gtk = {
-      enable = true;
-      font = {
-        name = theme.fonts.sans.name;
-        size = theme.fonts.sans.size;
+    gtk =
+      let
+        isLight = (theme.mode or "dark") == "light";
+      in
+      {
+        enable = true;
+        font = {
+          name = theme.fonts.sans.name;
+          size = theme.fonts.sans.size;
+        };
+        # Unset gtk-xft-dpi is -1. WebKitGTK 4.1 then multiplies that by the
+        # Wayland buffer scale and divides by 96, producing a negative DPR.
+        gtk3.extraConfig.gtk-xft-dpi = 98304;
+        gtk4.extraConfig.gtk-xft-dpi = 98304;
+        gtk3.extraConfig.gtk-application-prefer-dark-theme = !isLight;
+        gtk4.extraConfig.gtk-application-prefer-dark-theme = !isLight;
+        gtk3.extraCss = ''
+          window { backdrop-filter: blur(20px); }
+        '';
+        gtk4.extraCss = ''
+          window { backdrop-filter: blur(20px); }
+        '';
       };
-      # Unset gtk-xft-dpi is -1. WebKitGTK 4.1 then multiplies that by the
-      # Wayland buffer scale and divides by 96, producing a negative DPR.
-      gtk3.extraConfig.gtk-xft-dpi = 98304;
-      gtk4.extraConfig.gtk-xft-dpi = 98304;
-      gtk3.extraConfig.gtk-application-prefer-dark-theme = true;
-      gtk4.extraConfig.gtk-application-prefer-dark-theme = true;
-      gtk3.extraCss = ''
-        window { backdrop-filter: blur(20px); }
-      '';
-      gtk4.extraCss = ''
-        window { backdrop-filter: blur(20px); }
-      '';
-    };
 
-    dconf.settings."org/gnome/desktop/interface" = {
-      color-scheme = "prefer-dark";
-      gtk-theme = "Adwaita-dark";
-    };
+    dconf.settings."org/gnome/desktop/interface" =
+      let
+        isLight = (theme.mode or "dark") == "light";
+      in
+      {
+        color-scheme = if isLight then "prefer-light" else "prefer-dark";
+        gtk-theme = if isLight then "Adwaita" else "Adwaita-dark";
+      };
   };
 }

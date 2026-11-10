@@ -120,6 +120,16 @@ in
             description = "Default XKB keyboard variant passed into Home Manager (`intl` matches macOS `USInternational-PC`, `\"\"` for plain layout).";
           };
         };
+
+        autostartTty = {
+          enable = lib.mkEnableOption "autostart the Hyprland session on a bare TTY (no display manager)";
+
+          tty = lib.mkOption {
+            type = lib.types.str;
+            default = "tty1";
+            description = "TTY (without `/dev/`) that hosts the autostarted Hyprland session.";
+          };
+        };
       };
     };
   };
@@ -146,6 +156,63 @@ in
                 };
               };
             };
+        };
+      }
+    ))
+
+    (lib.mkIf (cfg.enable && cfg.desktop.enable && cfg.desktop.autostartTty.enable) (
+      let
+        tty = cfg.desktop.autostartTty.tty;
+        user = if cfg.desktop.user != null then cfg.desktop.user else "thomas";
+        runtimeDir = "/run/user/${toString config.users.users.${user}.uid}";
+        sessionScript = pkgs.writeShellScript "hyprland-${tty}-session" ''
+          export XDG_RUNTIME_DIR="${runtimeDir}"
+          export XDG_SESSION_TYPE=wayland
+          export XDG_CURRENT_DESKTOP=Hyprland
+          exec ${lib.getExe pkgs.uwsm} start -e -D Hyprland hyprland.desktop
+        '';
+      in
+      {
+        # getty.target pulls in autovt@tty1, which `switch-to-configuration`
+        # starts on every activation and thereby kills the live session.
+        systemd.targets.getty.wants = lib.mkForce [ ];
+
+        systemd.services."hyprland-${tty}" = {
+          description = "Hyprland (uwsm) session on /dev/${tty}";
+          wantedBy = [ "multi-user.target" ];
+          after = [
+            "systemd-user-sessions.service"
+            "nss-lookup.target"
+            "network.target"
+          ];
+          conflicts = [ "autovt@${tty}.service" ];
+          # A rebuild must never take the running desktop down.
+          restartIfChanged = false;
+          stopIfChanged = false;
+          unitConfig = {
+            StartLimitIntervalSec = 0;
+            StartLimitBurst = 0;
+          };
+          serviceConfig = {
+            User = user;
+            Type = "exec";
+            PAMName = "login";
+            TTYPath = "/dev/${tty}";
+            TTYReset = true;
+            TTYVHangup = true;
+            TTYVTDisallocate = false;
+            StandardInput = "tty";
+            StandardOutput = "tty";
+            StandardError = "tty";
+            UtmpIdentifier = tty;
+            UtmpMode = "user";
+            # Restart the desktop even after a clean exit (e.g. a killed
+            # Hyprland leaves the TTY blank otherwise); `systemctl stop` is
+            # still honoured and does not loop.
+            Restart = "always";
+            RestartSec = 3;
+            ExecStart = sessionScript;
+          };
         };
       }
     ))
@@ -218,6 +285,18 @@ in
         enable = true;
         withUWSM = true;
         xwayland.enable = true;
+      };
+
+      xdg.portal = {
+        enable = lib.mkDefault true;
+        extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+        config.hyprland = {
+          default = [
+            "hyprland"
+            "gtk"
+          ];
+          "org.freedesktop.impl.portal.Settings" = [ "gtk" ];
+        };
       };
 
       security.pam.services.hyprlock = { };

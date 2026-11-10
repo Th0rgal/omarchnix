@@ -45,6 +45,7 @@ pkgs.writeShellApplication {
       theme list [--json]                 List all available Omarchy themes (bundled + user)
       theme current                       Print the active Omarchy theme
       theme set <name> [--offline]        Live-switch the active Omarchy theme across shell, foot, Hyprland, and agents
+      theme toggle [--dark <t>] [--light <t>]  Toggle between dark (default: tokyo-night) and light (default: white) themes
       theme palette <name> [--json]       Resolve semantic & ANSI palette for any Omarchy theme
       plugin registry [query] [--json]    Search the plugins.omarchy.org marketplace registry
       plugin install <id|url> [--enable]  Install a plugin from plugins.omarchy.org or git URL (non-interactive --yes supported)
@@ -230,6 +231,32 @@ pkgs.writeShellApplication {
       [[ "$ok" == "true" ]]
     }
 
+    apply_interface_mode() {
+      local colors_file="$HOME/.local/state/omarchy/current/theme/colors.toml"
+      local mode="dark"
+      if [[ -f "$colors_file" ]]; then
+        mode="$(omarchy-theme-color --file "$colors_file" mode 2>/dev/null || echo dark)"
+      fi
+      local scheme="prefer-dark"
+      local gtk_theme="Adwaita-dark"
+      if [[ "$mode" == "light" ]]; then
+        scheme="prefer-light"
+        gtk_theme="Adwaita"
+      fi
+      # dconf is authoritative for the xdg-desktop-portal-gtk Settings backend
+      # (Electron apps such as Bitwarden read dark/light preference there), and
+      # it works without the GNOME GSettings schema directory.
+      if command -v dconf >/dev/null 2>&1; then
+        dconf write /org/gnome/desktop/interface/color-scheme "'$scheme'" 2>/dev/null || true
+        dconf write /org/gnome/desktop/interface/gtk-theme "'$gtk_theme'" 2>/dev/null || true
+      fi
+      if command -v gsettings >/dev/null 2>&1 \
+        && gsettings get org.gnome.desktop.interface color-scheme >/dev/null 2>&1; then
+        gsettings set org.gnome.desktop.interface color-scheme "$scheme" 2>/dev/null || true
+        gsettings set org.gnome.desktop.interface gtk-theme "$gtk_theme" 2>/dev/null || true
+      fi
+    }
+
     cmd_theme() {
       local sub="''${1:-list}"
       shift || true
@@ -274,6 +301,63 @@ pkgs.writeShellApplication {
           else
             OMARCHY_THEME_WAIT=1 omarchy-theme-set "$name"
           fi
+          apply_interface_mode
+          ;;
+        toggle)
+          local dark_theme="tokyo-night"
+          local light_theme="white"
+          local offline=0
+          while (( $# > 0 )); do
+            case "$1" in
+              --dark)
+                dark_theme="''${2:-tokyo-night}"
+                shift 2
+                ;;
+              --light)
+                light_theme="''${2:-white}"
+                shift 2
+                ;;
+              --offline | --headless)
+                offline=1
+                shift
+                ;;
+              *)
+                echo "Usage: omarchnix theme toggle [--dark <name>] [--light <name>] [--offline]" >&2
+                exit 1
+                ;;
+            esac
+          done
+          local state_dir="$HOME/.local/state/omarchy"
+          local colors_file="$state_dir/current/theme/colors.toml"
+          local cur_slug=""
+          if [[ -f "$state_dir/current/theme.name" ]]; then
+            cur_slug="$(tr -d '\n' < "$state_dir/current/theme.name")"
+          fi
+          local cur_mode="dark"
+          if [[ -f "$colors_file" ]]; then
+            cur_mode="$(omarchy-theme-color --file "$colors_file" mode 2>/dev/null || echo dark)"
+          fi
+          mkdir -p "$state_dir"
+          local target=""
+          if [[ "$cur_mode" == "light" ]]; then
+            [[ -n "$cur_slug" ]] && printf '%s\n' "$cur_slug" > "$state_dir/last-light-theme"
+            if [[ "$dark_theme" == "tokyo-night" && -f "$state_dir/last-dark-theme" ]]; then
+              dark_theme="$(tr -d '\n' < "$state_dir/last-dark-theme")"
+            fi
+            target="$dark_theme"
+          else
+            [[ -n "$cur_slug" ]] && printf '%s\n' "$cur_slug" > "$state_dir/last-dark-theme"
+            if [[ "$light_theme" == "white" && -f "$state_dir/last-light-theme" ]]; then
+              light_theme="$(tr -d '\n' < "$state_dir/last-light-theme")"
+            fi
+            target="$light_theme"
+          fi
+          if (( offline )); then
+            OMARCHY_THEME_OFFLINE=1 OMARCHY_THEME_SKIP_BACKGROUND=1 omarchy-theme-set "$target"
+          else
+            OMARCHY_THEME_WAIT=1 omarchy-theme-set "$target"
+          fi
+          apply_interface_mode
           ;;
         palette)
           local raw_name="''${1:-}"

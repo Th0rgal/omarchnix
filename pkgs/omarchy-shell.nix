@@ -12,6 +12,8 @@ let
     pkgs.findutils
     pkgs.gawk
     pkgs.git
+    pkgs.glib
+    pkgs.gsettings-desktop-schemas
     pkgs.gnugrep
     pkgs.gnused
     pkgs.gum
@@ -29,6 +31,7 @@ let
     pkgs.socat
     pkgs.systemd
     pkgs.util-linux
+    pkgs.vips
     pkgs.wl-clipboard
   ];
 
@@ -83,6 +86,9 @@ let
         substituteInPlace "$out/bin/omarchy-shell" \
           --replace-fail 'socat -t 86400 - "UNIX-CONNECT:$socket"' 'socat -t 86400 STDIO,shut-none "UNIX-CONNECT:$socket"'
 
+        substituteInPlace "$out/shell/plugins/bar/widgets/Workspaces.qml" \
+          --replace-fail 'var target = ids[Util.clamp(index - wheel.steps, 0, ids.length - 1)]' 'var target = ids[Util.clamp(index + wheel.steps, 0, ids.length - 1)]'
+
         substituteInPlace "$out/bin/omarchy-theme-set-browser" \
           --replace-fail 'omarchy-theme-set-browser-policy "''${THEME_HEX_COLOR#\#}" <&0 &' 'if [ "''${saw_any}" = "true" ]; then omarchy-theme-set-browser-policy "''${THEME_HEX_COLOR#\#}" <&0 & policy_pid=$!; else policy_pid=""; fi' \
           --replace-fail 'policy_pid=$!' ':' \
@@ -118,12 +124,17 @@ pkgs.runCommand "omarchy-shell"
       cp "${omarchySrc}/default/fonts/omarchy/omarchy.ttf" "$out/share/fonts/truetype/omarchy/omarchy.ttf"
     fi
 
+    # glib's gsettings only honours GSETTINGS_SCHEMA_DIR here, so point it at the
+    # gsettings-desktop-schemas store layout that omarchy-theme-set-gnome needs.
+    gsettings_schema_dir="$(echo "${pkgs.gsettings-desktop-schemas}"/share/gsettings-schemas/*/glib-2.0/schemas)"
     for script in "$out/share/omarchy/bin"/*; do
       [ -f "$script" ] || continue
       script_name="$(basename "$script")"
       makeWrapper "$script" "$out/bin/$script_name" \
         --set-default OMARCHY_PATH "${omarchyShare}" \
-        --prefix PATH : "$out/bin:${omarchyRuntimePath}"
+        --prefix PATH : "$out/bin:${omarchyRuntimePath}" \
+        --set-default GSETTINGS_SCHEMA_DIR "$gsettings_schema_dir" \
+        --prefix XDG_DATA_DIRS : "${pkgs.gsettings-desktop-schemas}/share"
     done
 
     ln -s "${pkgs.quickshell}/bin/quickshell" "$out/bin/quickshell"

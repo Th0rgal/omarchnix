@@ -109,6 +109,32 @@
           };
           sandboxed-sh = final.orb-desktop.passthru.sandboxed-sh;
           notion-calendar = final.callPackage ./pkgs/notion-calendar.nix { };
+          # Enable Wayland text-input-v3 IME (fcitx5 dead-key preedit & XCompose) in Antigravity,
+          # matching NixOS's Brave and Bitwarden Electron wrappers without re-running autoPatchelf.
+          antigravity-hub =
+            if prev.stdenv.hostPlatform.isLinux && (prev ? antigravity-hub) then
+              final.symlinkJoin {
+                pname = prev.antigravity-hub.pname;
+                version = prev.antigravity-hub.version;
+                paths = [ prev.antigravity-hub ];
+                nativeBuildInputs = [ final.makeShellWrapper ];
+                postBuild = ''
+                  rm "$out/bin/antigravity"
+                  makeShellWrapper "${prev.antigravity-hub}/bin/antigravity" "$out/bin/antigravity" \
+                    --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--enable-wayland-ime=true --wayland-text-input-version=3}}"
+                '';
+                inherit (prev.antigravity-hub) meta passthru;
+              }
+            else
+              prev.antigravity-hub;
+        }
+        // prev.lib.optionalAttrs (prev ? aurora-sep) {
+          # nixos-aurora already runs Aurora's SEP contract tests (test_interface.py,
+          # test_lockout_reason.py) in postPatch; upstream libfprint's 131 simulated USB
+          # umockdev tests (egis_etu905, aes2550, etc.) fail/timeout under parallel builds.
+          libfprint = prev.libfprint.overrideAttrs {
+            doInstallCheck = false;
+          };
         };
 
       mkNixos =

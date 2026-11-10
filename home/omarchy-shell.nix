@@ -252,7 +252,13 @@ in
     ++ lib.optional (cfg.cliPackage != null) cfg.cliPackage;
 
     home.activation.omarchnixStateAndPlugins = hmLib.entryAfter [ "writeBoundary" "dconfSettings" ] ''
-      mkdir -p "$HOME/.config/omarchy/plugins" "$HOME/.config/omarchy/themes" "$HOME/.local/state/omarchy/current"
+      mkdir -p "$HOME/.config/hypr" "$HOME/.config/omarchy/plugins" "$HOME/.config/omarchy/themes" "$HOME/.local/state/omarchy/current"
+
+      if [ -f "${omarchyShellPkg.sharePath}/config/hypr/hyprsunset.conf" ] && { [ ! -f "$HOME/.config/hypr/hyprsunset.conf" ] || [ -L "$HOME/.config/hypr/hyprsunset.conf" ]; }; then
+        rm -f "$HOME/.config/hypr/hyprsunset.conf"
+        cp --no-preserve=mode "${omarchyShellPkg.sharePath}/config/hypr/hyprsunset.conf" "$HOME/.config/hypr/hyprsunset.conf"
+        chmod 0644 "$HOME/.config/hypr/hyprsunset.conf"
+      fi
 
       ${lib.concatMapStringsSep "\n" (entry: ''
         target_theme_dir="$HOME/.config/omarchy/themes/${lib.escapeShellArg entry.slug}"

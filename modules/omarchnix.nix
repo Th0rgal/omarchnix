@@ -315,6 +315,10 @@ in
         xwayland.enable = true;
       };
 
+      environment.systemPackages = [
+        pkgs.hyprsunset
+      ];
+
       xdg.portal = {
         enable = lib.mkDefault true;
         extraPortals = [ pkgs.xdg-desktop-portal-gtk ];

@@ -46,7 +46,7 @@
     };
 
     turbo-lean = {
-      url = "github:Th0rgal/turbo-lean/82a940653812ad7552ae7087f2c5a3164e56e7ff";
+      url = "github:Th0rgal/turbo-lean/f240450af444a302a0e02d5a5f8af00351089386";
       flake = false;
     };
 
@@ -157,7 +157,9 @@
           };
           orb-desktop = final.callPackage ./pkgs/orb-desktop.nix {
             orbSrc = inputs.orb;
-            sandboxed-sh = prev.sandboxed-sh or inputs.orb.packages.${final.stdenv.hostPlatform.system}.default;
+            sandboxed-sh = final.callPackage "${inputs.orb}/nix/package.nix" {
+              inherit (final) turbo-lean;
+            };
           };
           sandboxed-sh = final.orb-desktop.passthru.sandboxed-sh;
           notion-calendar = final.callPackage ./pkgs/notion-calendar.nix { };

@@ -44,6 +44,11 @@
       url = "github:Th0rgal/orb";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    turbo-lean = {
+      url = "github:Th0rgal/turbo-lean/82a940653812ad7552ae7087f2c5a3164e56e7ff";
+      flake = false;
+    };
   };
 
   outputs =
@@ -105,6 +110,9 @@
             michelangelus-font = final.michelangelus-font;
           };
           michelangelus-font = final.callPackage ./pkgs/michelangelus-font.nix { };
+          turbo-lean = final.callPackage ./pkgs/turbo-lean.nix {
+            turboLeanSrc = inputs.turbo-lean;
+          };
           orb-desktop = final.callPackage ./pkgs/orb-desktop.nix {
             orbSrc = inputs.orb;
             sandboxed-sh = prev.sandboxed-sh or inputs.orb.packages.${final.stdenv.hostPlatform.system}.default;
@@ -279,6 +287,7 @@
         rec {
           omarchy-shell = pkgs.omarchnix.omarchy-shell;
           omarchnix = pkgs.omarchnix.cli;
+          turbo-lean = pkgs.turbo-lean;
           orb-desktop = pkgs.orb-desktop;
           notion-calendar = pkgs.notion-calendar;
           plugin-opencode-model-usage = pkgs.omarchnix.buildPlugin {

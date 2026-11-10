@@ -289,21 +289,16 @@ let
       color15 = bright_foreground;
     };
 
-  importThemeFromDir =
+  mkThemeAttrset =
     {
       name,
-      dir,
+      rawPalette,
+      sourceDir ? null,
       pkgs ? null,
+      ui ? { },
     }:
     let
-      colorsFile = dir + "/colors.toml";
-      _ =
-        if !(builtins.pathExists colorsFile) then
-          throw "lib.omarchy.importTheme: missing colors.toml in '${toString dir}' (theme '${name}')"
-        else
-          true;
-      rawPalette = builtins.fromTOML (builtins.readFile colorsFile);
-      palette = resolvePalette rawPalette dir;
+      palette = resolvePalette rawPalette sourceDir;
       bgHex = stripHash palette.background;
       surfaceHex = stripHash (
         if palette.mode == "light" then
@@ -313,14 +308,10 @@ let
         else
           mixHex palette.background palette.foreground 10
       );
-      bgAltHex = stripHash (
-        if palette.mode == "light" then palette.dark_background else palette.dark_background
-      );
+      bgAltHex = stripHash palette.dark_background;
     in
-    assert _;
     {
-      inherit name palette;
-      sourceDir = dir;
+      inherit name palette sourceDir;
       mode = palette.mode;
 
       fonts = {
@@ -352,7 +343,8 @@ let
         borderSize = 2;
         rounding = 10;
         barHeight = 32;
-      };
+      }
+      // ui;
 
       colors = {
         bg = bgHex;
@@ -377,6 +369,145 @@ let
       };
     };
 
+  importThemeFromPalette =
+    {
+      name,
+      palette,
+      pkgs ? null,
+      ui ? { },
+    }:
+    mkThemeAttrset {
+      name = normalizeThemeName name;
+      rawPalette = palette;
+      inherit pkgs ui;
+    };
+
+  importThemeFromDir =
+    {
+      name,
+      dir,
+      pkgs ? null,
+      ui ? { },
+    }:
+    let
+      colorsFile = dir + "/colors.toml";
+      _ =
+        if !(builtins.pathExists colorsFile) then
+          throw "lib.omarchy.importTheme: missing colors.toml in '${toString dir}' (theme '${name}')"
+        else
+          true;
+      rawPalette = builtins.fromTOML (builtins.readFile colorsFile);
+    in
+    assert _;
+    mkThemeAttrset {
+      inherit
+        name
+        rawPalette
+        pkgs
+        ui
+        ;
+      sourceDir = dir;
+    };
+
+  renderColorsToml =
+    paletteAttrs:
+    let
+      orderedKeys = [
+        "mode"
+        "accent"
+        "selection"
+        "muted"
+        "hyprland_active_border"
+        "hyprland_inactive_border"
+        "background"
+        "dark_background"
+        "darker_background"
+        "lighter_background"
+        "foreground"
+        "dark_foreground"
+        "light_foreground"
+        "bright_foreground"
+        "red"
+        "yellow"
+        "orange"
+        "green"
+        "cyan"
+        "blue"
+        "magenta"
+        "brown"
+        "bright_red"
+        "bright_yellow"
+        "bright_green"
+        "bright_cyan"
+        "bright_blue"
+        "bright_magenta"
+      ];
+      extraKeys = lib.filter (k: !(builtins.elem k orderedKeys)) (builtins.attrNames paletteAttrs);
+      presentOrdered = lib.filter (k: paletteAttrs ? ${k} && paletteAttrs.${k} != null) orderedKeys;
+      presentExtra = lib.filter (k: paletteAttrs.${k} != null) extraKeys;
+      allKeys = presentOrdered ++ presentExtra;
+    in
+    lib.concatMapStringsSep "\n" (k: "${k} = ${builtins.toJSON (toString paletteAttrs.${k})}") allKeys
+    + "\n";
+
+  buildThemePkg =
+    {
+      pkgs,
+      name,
+      palette,
+      wallpaper ? { },
+    }:
+    let
+      slug = normalizeThemeName name;
+      resolved = resolvePalette palette null;
+      colorsTomlText = renderColorsToml palette;
+      colorsTomlFile = pkgs.writeText "${slug}-colors.toml" colorsTomlText;
+
+      stop0 = wallpaper.stop0 or resolved.darker_background;
+      stop1 = wallpaper.stop1 or resolved.dark_background;
+      stop2 = wallpaper.stop2 or resolved.background;
+      glowPrimary = wallpaper.glowPrimary or resolved.accent;
+      glowSecondary = wallpaper.glowSecondary or resolved.blue;
+      glowPrimaryOpacity = toString (wallpaper.accentOpacity or "0.09");
+      glowSecondaryOpacity = toString (wallpaper.secondaryOpacity or "0.04");
+      cx = wallpaper.cx or "72%";
+      cy = wallpaper.cy or "24%";
+      r = wallpaper.r or "58%";
+
+      wallpaperSvg = pkgs.writeText "${slug}-wallpaper.svg" ''
+        <svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1664" viewBox="0 0 2560 1664">
+          <defs>
+            <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="${stop0}"/>
+              <stop offset="55%" stop-color="${stop1}"/>
+              <stop offset="100%" stop-color="${stop2}"/>
+            </linearGradient>
+            <radialGradient id="glow" cx="${cx}" cy="${cy}" r="${r}">
+              <stop offset="0%" stop-color="${glowPrimary}" stop-opacity="${glowPrimaryOpacity}"/>
+              <stop offset="50%" stop-color="${glowSecondary}" stop-opacity="${glowSecondaryOpacity}"/>
+              <stop offset="100%" stop-color="${stop0}" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <rect width="2560" height="1664" fill="url(#bg)"/>
+          <rect width="2560" height="1664" fill="url(#glow)"/>
+        </svg>
+      '';
+    in
+    pkgs.runCommand "omarchy-theme-${slug}"
+      {
+        nativeBuildInputs = [ pkgs.librsvg ];
+        passthru = {
+          themeName = slug;
+          themeMode = resolved.mode;
+        };
+      }
+      ''
+        mkdir -p "$out/backgrounds"
+        cp "${colorsTomlFile}" "$out/colors.toml"
+        rsvg-convert -f png -o "$out/backgrounds/1-${slug}.png" "${wallpaperSvg}"
+        rsvg-convert -w 960 -h 600 -f png -o "$out/preview.png" "${wallpaperSvg}"
+      '';
+
   bundledThemeDirs =
     if omarchySrc == null then
       { }
@@ -396,15 +527,29 @@ let
 
   importTheme =
     {
-      theme,
+      theme ? null,
+      name ? null,
+      palette ? null,
+      ui ? { },
       pkgs ? null,
       themesSrc ? omarchySrc,
     }:
-    if builtins.isPath theme || (builtins.isAttrs theme && theme ? outPath) then
+    if palette != null then
+      importThemeFromPalette {
+        name =
+          if name != null then
+            name
+          else if builtins.isString theme then
+            theme
+          else
+            throw "lib.omarchy.importTheme: 'name' is required when importing from 'palette'";
+        inherit palette pkgs ui;
+      }
+    else if builtins.isPath theme || (builtins.isAttrs theme && theme ? outPath) then
       importThemeFromDir {
-        name = builtins.baseNameOf (toString theme);
+        name = if name != null then normalizeThemeName name else builtins.baseNameOf (toString theme);
         dir = theme;
-        inherit pkgs;
+        inherit pkgs ui;
       }
     else if builtins.isString theme then
       let
@@ -420,12 +565,12 @@ let
         importThemeFromDir {
           name = normalized;
           dir = candidateDir;
-          inherit pkgs;
+          inherit pkgs ui;
         }
       else
         throw "lib.omarchy.importTheme: unknown Omarchy theme '${theme}' (normalized '${normalized}'). Available bundled themes: ${lib.concatStringsSep ", " themeNames}"
     else
-      throw "lib.omarchy.importTheme: 'theme' must be an Omarchy theme name string or path to a theme directory containing colors.toml";
+      throw "lib.omarchy.importTheme: pass 'theme' (name or directory path) or '{ name, palette }'";
 
   allBundledThemes =
     pkgs:
@@ -589,6 +734,9 @@ in
     resolvePalette
     importTheme
     importThemeFromDir
+    importThemeFromPalette
+    renderColorsToml
+    buildThemePkg
     themeNames
     bundledThemeDirs
     allBundledThemes

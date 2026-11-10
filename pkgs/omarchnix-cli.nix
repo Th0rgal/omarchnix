@@ -13,9 +13,11 @@ pkgs.writeShellApplication {
     pkgs.bash
     pkgs.coreutils
     pkgs.curl
+    pkgs.dconf
     pkgs.findutils
     pkgs.gawk
     pkgs.git
+    pkgs.glib
     pkgs.gnugrep
     pkgs.gnused
     pkgs.jq
@@ -30,6 +32,7 @@ pkgs.writeShellApplication {
 
     export OMARCHY_PATH="''${OMARCHY_PATH:-${omarchyShell.sharePath}}"
     export OMARCHY_SHELL_IPC_TIMEOUT="''${OMARCHY_SHELL_IPC_TIMEOUT:-10s}"
+    export GIO_EXTRA_MODULES="${pkgs.dconf.lib}/lib/gio/modules''${GIO_EXTRA_MODULES:+:$GIO_EXTRA_MODULES}"
     MARKETPLACE_REGISTRY_DEFAULT="${registryPath}"
     MARKETPLACE_REGISTRY_URL="https://raw.githubusercontent.com/omacom/omarchy-plugin-marketplace/main/registry.json"
 
@@ -231,6 +234,43 @@ pkgs.writeShellApplication {
       [[ "$ok" == "true" ]]
     }
 
+    normalize_slug() {
+      printf '%s' "$1" | sed -E 's/<[^>]+>//g' | tr '[:upper:]' '[:lower:]' | tr ' _' '--'
+    }
+
+    theme_exists() {
+      local slug
+      slug="$(normalize_slug "$1")"
+      [[ -n "$slug" ]] && [[ -d "$HOME/.config/omarchy/themes/$slug" || -d "$OMARCHY_PATH/themes/$slug" ]]
+    }
+
+    theme_has_background() {
+      local slug
+      slug="$(normalize_slug "$1")"
+      [[ -n "$slug" ]] || return 1
+      local bg
+      bg="$(
+        find -L \
+          "$HOME/.config/omarchy/backgrounds/$slug" \
+          "$HOME/.config/omarchy/themes/$slug/backgrounds" \
+          "$OMARCHY_PATH/themes/$slug/backgrounds" \
+          -maxdepth 1 -type f 2>/dev/null | head -n 1
+      )"
+      [[ -n "$bg" ]]
+    }
+
+    run_theme_set() {
+      local target="$1"
+      local offline="''${2:-0}"
+      if (( offline )); then
+        OMARCHY_THEME_OFFLINE=1 OMARCHY_THEME_SKIP_BACKGROUND=1 omarchy-theme-set "$target"
+      elif theme_has_background "$target"; then
+        OMARCHY_THEME_WAIT=1 omarchy-theme-set "$target"
+      else
+        OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 omarchy-theme-set "$target"
+      fi
+    }
+
     apply_interface_mode() {
       local colors_file="$HOME/.local/state/omarchy/current/theme/colors.toml"
       local mode="dark"
@@ -276,6 +316,9 @@ pkgs.writeShellApplication {
         current)
           omarchy-theme-current
           ;;
+        sync-mode)
+          apply_interface_mode
+          ;;
         set)
           local name=""
           local offline=0
@@ -296,25 +339,32 @@ pkgs.writeShellApplication {
             esac
           done
           [[ -n "$name" ]] || { echo "Usage: omarchnix theme set <name> [--offline]" >&2; exit 1; }
-          if (( offline )); then
-            OMARCHY_THEME_OFFLINE=1 OMARCHY_THEME_SKIP_BACKGROUND=1 omarchy-theme-set "$name"
-          else
-            OMARCHY_THEME_WAIT=1 omarchy-theme-set "$name"
-          fi
+          run_theme_set "$name" "$offline"
           apply_interface_mode
           ;;
         toggle)
-          local dark_theme="tokyo-night"
-          local light_theme="white"
+          local pair_file="$HOME/.config/omarchy/theme-pair.json"
+          local default_dark="tokyo-night"
+          local default_light="white"
+          if [[ -f "$pair_file" ]]; then
+            default_dark="$(jq -r '.dark // "tokyo-night"' "$pair_file" 2>/dev/null || echo "tokyo-night")"
+            default_light="$(jq -r '.light // "white"' "$pair_file" 2>/dev/null || echo "white")"
+          fi
+          local dark_theme="$default_dark"
+          local light_theme="$default_light"
+          local explicit_dark=0
+          local explicit_light=0
           local offline=0
           while (( $# > 0 )); do
             case "$1" in
               --dark)
-                dark_theme="''${2:-tokyo-night}"
+                dark_theme="''${2:-$default_dark}"
+                explicit_dark=1
                 shift 2
                 ;;
               --light)
-                light_theme="''${2:-white}"
+                light_theme="''${2:-$default_light}"
+                explicit_light=1
                 shift 2
                 ;;
               --offline | --headless)
@@ -341,22 +391,26 @@ pkgs.writeShellApplication {
           local target=""
           if [[ "$cur_mode" == "light" ]]; then
             [[ -n "$cur_slug" ]] && printf '%s\n' "$cur_slug" > "$state_dir/last-light-theme"
-            if [[ "$dark_theme" == "tokyo-night" && -f "$state_dir/last-dark-theme" ]]; then
-              dark_theme="$(tr -d '\n' < "$state_dir/last-dark-theme")"
+            if (( ! explicit_dark )) && [[ -f "$state_dir/last-dark-theme" ]]; then
+              local remembered_dark
+              remembered_dark="$(tr -d '\n' < "$state_dir/last-dark-theme")"
+              if theme_exists "$remembered_dark"; then
+                dark_theme="$remembered_dark"
+              fi
             fi
             target="$dark_theme"
           else
             [[ -n "$cur_slug" ]] && printf '%s\n' "$cur_slug" > "$state_dir/last-dark-theme"
-            if [[ "$light_theme" == "white" && -f "$state_dir/last-light-theme" ]]; then
-              light_theme="$(tr -d '\n' < "$state_dir/last-light-theme")"
+            if (( ! explicit_light )) && [[ -f "$state_dir/last-light-theme" ]]; then
+              local remembered_light
+              remembered_light="$(tr -d '\n' < "$state_dir/last-light-theme")"
+              if theme_exists "$remembered_light"; then
+                light_theme="$remembered_light"
+              fi
             fi
             target="$light_theme"
           fi
-          if (( offline )); then
-            OMARCHY_THEME_OFFLINE=1 OMARCHY_THEME_SKIP_BACKGROUND=1 omarchy-theme-set "$target"
-          else
-            OMARCHY_THEME_WAIT=1 omarchy-theme-set "$target"
-          fi
+          run_theme_set "$target" "$offline"
           apply_interface_mode
           ;;
         palette)

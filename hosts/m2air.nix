@@ -40,6 +40,8 @@
     hardware.m2air = {
       enable = true;
       bootloader.enable = true;
+      chargeControlEndThreshold = 100;
+      chargeControlStartThreshold = null;
       # Validate ordinary NixOS boot on stock nixos-apple-silicon + alx.sh
       # Stage 2 first; switch to .#m2air-aurora (or enable touchId with the
       # Aurora overlay) before running omarchnix-install-stage2 /boot.

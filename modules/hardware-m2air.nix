@@ -42,13 +42,13 @@ in
 
     chargeControlEndThreshold = lib.mkOption {
       type = lib.types.nullOr (lib.types.ints.between 50 100);
-      default = 80;
-      description = "Apple SMC battery charge upper threshold (%) written to macsmc-battery when present; null leaves at 100%.";
+      default = 100;
+      description = "Apple SMC battery charge upper threshold (%) written to macsmc-battery when present (100 charges to full, 80 caps at 80%).";
     };
 
     chargeControlStartThreshold = lib.mkOption {
-      type = lib.types.nullOr (lib.types.ints.between 40 95);
-      default = 75;
+      type = lib.types.nullOr (lib.types.ints.between 40 100);
+      default = null;
       description = "Apple SMC battery charge start threshold (%) written to macsmc-battery when present.";
     };
 
@@ -196,7 +196,11 @@ in
         "L+ /usr/share/omarchy-platform/display-cutouts.json - - - - ${displayCutoutsJson}"
       ];
 
-      systemd.services.macsmc-battery-thresholds = lib.mkIf (cfg.chargeControlEndThreshold != null) {
+      services.udev.extraRules = ''
+        SUBSYSTEM=="power_supply", KERNEL=="macsmc-battery", RUN+="${pkgs.coreutils}/bin/chgrp wheel /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold", RUN+="${pkgs.coreutils}/bin/chmod 0664 /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold"
+      '';
+
+      systemd.services.macsmc-battery-thresholds = {
         description = "Configure Apple SMC battery charge thresholds on MacBook Air M2";
         wantedBy = [ "multi-user.target" ];
         after = [ "multi-user.target" ];
@@ -205,17 +209,21 @@ in
           Type = "oneshot";
           RemainAfterExit = true;
         };
-        script = ''
-          bat="/sys/class/power_supply/macsmc-battery"
-          if [ -w "$bat/charge_control_end_threshold" ]; then
-            echo ${toString cfg.chargeControlEndThreshold} > "$bat/charge_control_end_threshold"
-          fi
-          ${lib.optionalString (cfg.chargeControlStartThreshold != null) ''
-            if [ -w "$bat/charge_control_start_threshold" ]; then
-              echo ${toString cfg.chargeControlStartThreshold} > "$bat/charge_control_start_threshold"
+        script =
+          let
+            endThreshold = if cfg.chargeControlEndThreshold != null then cfg.chargeControlEndThreshold else 100;
+          in
+          ''
+            bat="/sys/class/power_supply/macsmc-battery"
+            if [ -w "$bat/charge_control_end_threshold" ]; then
+              echo ${toString endThreshold} > "$bat/charge_control_end_threshold" || true
             fi
-          ''}
-        '';
+            ${lib.optionalString (cfg.chargeControlStartThreshold != null && endThreshold < 100) ''
+              if [ -w "$bat/charge_control_start_threshold" ]; then
+                echo ${toString cfg.chargeControlStartThreshold} > "$bat/charge_control_start_threshold" || true
+              fi
+            ''}
+          '';
       };
     })
 

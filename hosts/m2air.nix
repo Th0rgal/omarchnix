@@ -73,6 +73,8 @@
     age
     restic
     rclone
+    orb-desktop
+    notion-calendar
   ];
 
   users.users.thomas = {

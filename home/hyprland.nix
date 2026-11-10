@@ -11,6 +11,7 @@ let
 
   foot = "${pkgs.foot}/bin/foot";
   fuzzel = "${pkgs.fuzzel}/bin/fuzzel";
+  orb = if pkgs ? orb-desktop then "${pkgs.orb-desktop}/bin/orb" else "orb";
   hyprlock = "${pkgs.hyprlock}/bin/hyprlock";
   brightnessctl = "${pkgs.brightnessctl}/bin/brightnessctl";
   playerctl = "${pkgs.playerctl}/bin/playerctl";
@@ -54,7 +55,10 @@ in
     package = null;
     portalPackage = null;
     configType = "lua";
-    systemd.enable = true;
+    # UWSM (programs.hyprland.withUWSM) already owns graphical-session.target.
+    # Home Manager's hyprland-session.target also BindsTo+PropagatesStopTo that
+    # target, so the first startup exec that stops it tears the compositor down.
+    systemd.enable = false;
     xwayland.enable = true;
     extraConfig = "";
 
@@ -151,8 +155,19 @@ in
           };
           blur = {
             enabled = true;
-            size = 6;
-            passes = 2;
+            size = 8;
+            passes = 3;
+            new_optimizations = true;
+            xray = false;
+            ignore_opacity = true;
+            contrast = 1.0;
+            brightness = 0.85;
+            noise = 0.01;
+            vibrancy = 0.35;
+            vibrancy_darkness = 0.2;
+            popups = true;
+            popups_ignorealpha = 0.2;
+            special = true;
           };
         };
 
@@ -305,6 +320,24 @@ in
           float = true;
           size = "75% 70%";
           center = true;
+          opacity = 0.94;
+        }
+        {
+          name = "orb-vibrancy";
+          match = {
+            class = "^(orb-desktop|\\.orb-desktop-unwrapped|orb)$";
+          };
+          opacity = "0.86 0.86";
+          rounding = theme.ui.rounding;
+          border_size = theme.ui.borderSize;
+        }
+        {
+          name = "notion-calendar-app";
+          match = {
+            class = "^(notion-calendar|brave-calendar\\.notion\\.so.*)$";
+          };
+          opacity = "0.97 0.97";
+          rounding = theme.ui.rounding;
         }
       ];
 
@@ -317,10 +350,19 @@ in
           blur = true;
           ignore_alpha = 0.2;
         }
+        {
+          name = "omarchy-glass";
+          match = {
+            namespace = "^(omarchy-bar|omarchy-dock|omarchy-menu|omarchy-notifications|omarchy-osd|omarchy-polkit|omarchy-reminders|omarchy-clipboard|omarchy-emojis|omarchy-image-selector|omarchy-keyboard-panel|omarchy-network-qr|fuzzel)$";
+          };
+          blur = true;
+          ignore_alpha = 0.15;
+        }
       ];
 
       bind = [
         (mkBind "SUPER + Return" "hl.dsp.exec_cmd(terminal)")
+        (mkBind "SUPER + O" ''hl.dsp.exec_cmd("${orb}")'')
         (mkBind "SUPER + SPACE" "hl.dsp.exec_cmd(launcher)")
         (mkBind "SUPER + D" "hl.dsp.exec_cmd(launcher)")
         (mkBind "SUPER + Q" "hl.dsp.window.close()")
@@ -370,14 +412,14 @@ in
           repeating = true;
         })
         (mkBindOpts "XF86KbdBrightnessUp"
-          ''hl.dsp.exec_cmd("${brightnessctl} -d '*::kbd_backlight' set 10%+")''
+          ''hl.dsp.exec_cmd("${brightnessctl} -d '*kbd_backlight' set 10%+")''
           {
             locked = true;
             repeating = true;
           }
         )
         (mkBindOpts "XF86KbdBrightnessDown"
-          ''hl.dsp.exec_cmd("${brightnessctl} -d '*::kbd_backlight' set 10%-")''
+          ''hl.dsp.exec_cmd("${brightnessctl} -d '*kbd_backlight' set 10%-")''
           {
             locked = true;
             repeating = true;

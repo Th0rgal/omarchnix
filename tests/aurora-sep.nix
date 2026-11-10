@@ -82,7 +82,10 @@ let
                 strncpy(addr.sun_path, "/run/aurora-touchid-rearm.sock", sizeof(addr.sun_path) - 1);
                 if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
                   const char msg[] = "rearm\n";
+                  char reply[16];
                   (void)write(fd, msg, sizeof(msg) - 1);
+                  shutdown(fd, SHUT_WR);
+                  (void)read(fd, reply, sizeof(reply));
                 }
                 close(fd);
               }
@@ -103,11 +106,14 @@ let
               exit 0
             fi
             cat >/dev/null || true
-            count=0
-            if [ -f /run/mock-touchid-rearm-count ]; then
-              count=$(cat /run/mock-touchid-rearm-count)
-            fi
-            echo $((count + 1)) > /run/mock-touchid-rearm-count
+            (
+              flock -x 9
+              count=0
+              if [ -f /run/mock-touchid-rearm-count ]; then
+                count=$(cat /run/mock-touchid-rearm-count)
+              fi
+              echo $((count + 1)) > /run/mock-touchid-rearm-count
+            ) 9>/run/mock-touchid-rearm.lock
             echo "ok"
             EOF
             chmod +x "$out/libexec/aurora-touchid-rearm"

@@ -271,6 +271,23 @@ in
         name = theme.fonts.sans.name;
         size = theme.fonts.sans.size;
       };
+      # Unset gtk-xft-dpi is -1. WebKitGTK 4.1 then multiplies that by the
+      # Wayland buffer scale and divides by 96, producing a negative DPR.
+      gtk3.extraConfig.gtk-xft-dpi = 98304;
+      gtk4.extraConfig.gtk-xft-dpi = 98304;
+      gtk3.extraConfig.gtk-application-prefer-dark-theme = true;
+      gtk4.extraConfig.gtk-application-prefer-dark-theme = true;
+      gtk3.extraCss = ''
+        window { backdrop-filter: blur(20px); }
+      '';
+      gtk4.extraCss = ''
+        window { backdrop-filter: blur(20px); }
+      '';
+    };
+
+    dconf.settings."org/gnome/desktop/interface" = {
+      color-scheme = "prefer-dark";
+      gtk-theme = "Adwaita-dark";
     };
   };
 }

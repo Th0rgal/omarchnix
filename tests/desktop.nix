@@ -15,6 +15,10 @@ assert m2airConfig.home-manager.users ? thomas;
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.enable == true;
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.configType == "lua";
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.extraConfig == "";
+# UWSM owns graphical-session.target; HM's hyprland-session.target must stay off
+# or the generated startup exec stops the compositor a few seconds after login.
+assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.systemd.enable == false;
+assert builtins.any (p: (p.pname or "") == "orb-desktop") m2airConfig.environment.systemPackages;
 assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.kb_layout
   == "us";
@@ -51,7 +55,7 @@ pkgs.testers.runNixOSTest {
     paths = [ pkgs.qemu_kvm ];
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postBuild = ''
-      for bin in qemu-kvm qemu-system-x86_64; do
+      for bin in qemu-kvm; do
         wrapProgram "$out/bin/$bin" \
           --set SDL_VIDEODRIVER offscreen \
           --set LIBGL_ALWAYS_SOFTWARE 1 \
@@ -129,10 +133,22 @@ pkgs.testers.runNixOSTest {
         users.thomas = import ../home;
       };
 
+      nixpkgs.overlays = lib.mkForce [
+        inputs.orb.overlays.default
+        (final: prev: {
+          orb-desktop = final.callPackage ../pkgs/orb-desktop.nix {
+            orbSrc = inputs.orb;
+            sandboxed-sh = prev.sandboxed-sh or inputs.orb.packages.${final.stdenv.hostPlatform.system}.default;
+          };
+          sandboxed-sh = final.orb-desktop.passthru.sandboxed-sh;
+        })
+      ];
+
       environment.systemPackages = [
         pkgs.jq
         pkgs.netpbm
         pkgs.procps
+        pkgs.orb-desktop
       ];
     };
 
@@ -234,6 +250,7 @@ pkgs.testers.runNixOSTest {
             ).strip()
         )
         assert unique_colors >= 16, f"screenshot looks blank ({unique_colors} unique colors)"
+        desktop.succeed("orb --self-test")
         desktop.copy_from_machine("/tmp/desktop-shot.png", "")
   '';
 }

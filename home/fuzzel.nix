@@ -5,7 +5,7 @@
     settings = {
       main = {
         font = "${theme.fonts.sans.name}:size=${toString (theme.fonts.sans.size + 1)}";
-        dpi-aware = "auto";
+        dpi-aware = "no";
         prompt = "> ";
         terminal = "${pkgs.foot}/bin/foot -e";
         layer = "overlay";
@@ -18,7 +18,7 @@
       };
 
       colors = {
-        background = "${theme.colors.bg}f2";
+        background = "${theme.colors.bg}cc";
         text = "${theme.colors.fg}ff";
         prompt = "${theme.colors.accent}ff";
         placeholder = "${theme.colors.fgMuted}ff";

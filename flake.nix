@@ -39,6 +39,11 @@
       url = "github:JJDizz1L/dizziee.opencode-model-usage/95a0f856d704e12915888dca7ec093e5df3009d9";
       flake = false;
     };
+
+    orb = {
+      url = "github:Th0rgal/orb";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -47,6 +52,7 @@
       nixpkgs,
       apple-silicon-support,
       nixos-aurora,
+      orb,
       ...
     }@inputs:
     let
@@ -62,7 +68,7 @@
       };
 
       omarchnixOverlay =
-        final: _prev:
+        final: prev:
         let
           omarchyShell = import ./pkgs/omarchy-shell.nix {
             inherit (final) lib;
@@ -96,6 +102,12 @@
             themes = omarchyLib.allBundledThemes final;
             buildPlugin = args: omarchyLib.buildPlugin ({ pkgs = final; } // args);
           };
+          orb-desktop = final.callPackage ./pkgs/orb-desktop.nix {
+            orbSrc = inputs.orb;
+            sandboxed-sh = prev.sandboxed-sh or inputs.orb.packages.${final.stdenv.hostPlatform.system}.default;
+          };
+          sandboxed-sh = final.orb-desktop.passthru.sandboxed-sh;
+          notion-calendar = final.callPackage ./pkgs/notion-calendar.nix { };
         };
 
       mkNixos =
@@ -122,6 +134,7 @@
                   apple-silicon-support.overlays.default
                 ]
                 ++ [
+                  orb.overlays.default
                   omarchnixOverlay
                 ];
               nix.registry.nixpkgs.flake = nixpkgs;
@@ -228,12 +241,17 @@
         let
           pkgs = import nixpkgs {
             inherit system;
-            overlays = [ omarchnixOverlay ];
+            overlays = [
+              orb.overlays.default
+              omarchnixOverlay
+            ];
           };
         in
         rec {
           omarchy-shell = pkgs.omarchnix.omarchy-shell;
           omarchnix = pkgs.omarchnix.cli;
+          orb-desktop = pkgs.orb-desktop;
+          notion-calendar = pkgs.notion-calendar;
           plugin-opencode-model-usage = pkgs.omarchnix.buildPlugin {
             src = inputs.omarchy-plugin-opencode-usage;
           };
@@ -247,7 +265,10 @@
         let
           pkgs = import nixpkgs {
             inherit system;
-            overlays = [ omarchnixOverlay ];
+            overlays = [
+              orb.overlays.default
+              omarchnixOverlay
+            ];
           };
         in
         {

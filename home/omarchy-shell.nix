@@ -127,7 +127,7 @@ let
     };
     bar = {
       position = "top";
-      background = "opaque";
+      background = "glassy";
       layout = {
         left = appendUniqueById baseLayout.left (enabledBarWidgetsBySection "left");
         centerBegin = appendUniqueById baseLayout.centerBegin (enabledBarWidgetsBySection "centerBegin");
@@ -155,13 +155,18 @@ let
           <stop offset="100%" stop-color="#${theme.colors.surface}"/>
         </linearGradient>
         <radialGradient id="glow" cx="72%" cy="28%" r="55%">
-          <stop offset="0%" stop-color="#${theme.colors.accent}" stop-opacity="0.22"/>
-          <stop offset="55%" stop-color="#${theme.colors.accentAlt}" stop-opacity="0.08"/>
+          <stop offset="0%" stop-color="#${theme.colors.accent}" stop-opacity="0.55"/>
+          <stop offset="45%" stop-color="#${theme.colors.accentAlt}" stop-opacity="0.28"/>
+          <stop offset="100%" stop-color="#${theme.colors.bg}" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="glow2" cx="18%" cy="82%" r="45%">
+          <stop offset="0%" stop-color="#${theme.colors.accentAlt}" stop-opacity="0.40"/>
           <stop offset="100%" stop-color="#${theme.colors.bg}" stop-opacity="0"/>
         </radialGradient>
       </defs>
       <rect width="2560" height="1664" fill="url(#bg)"/>
       <rect width="2560" height="1664" fill="url(#glow)"/>
+      <rect width="2560" height="1664" fill="url(#glow2)"/>
     </svg>
   '';
 
@@ -203,7 +208,9 @@ in
         cp --no-preserve=mode "${defaultShellJson}" "$HOME/.config/omarchy/shell.json"
         chmod 0644 "$HOME/.config/omarchy/shell.json"
       else
-        :
+        tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
+        ${pkgs.jq}/bin/jq '.version = 1 | .bar.background = (.bar.background // "glassy") | del(.bar.transparent)' \
+          "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
         ${lib.concatMapStringsSep "\n" (
           entry:
           lib.optionalString entry.enable (
@@ -251,8 +258,8 @@ in
         ) lockedPluginEntries}
       fi
 
-      if [ ! -f "$HOME/.local/state/omarchy/current/background" ] && [ ! -L "$HOME/.local/state/omarchy/current/background" ]; then
-        ln -sf "${wallpaperPng}" "$HOME/.local/state/omarchy/current/background"
+      if [ ! -e "$HOME/.local/state/omarchy/current/background" ] || [ -L "$HOME/.local/state/omarchy/current/background" ]; then
+        ln -sfn "${wallpaperPng}" "$HOME/.local/state/omarchy/current/background"
       fi
 
       if [ ! -f "$HOME/.local/state/omarchy/current/theme/colors.toml" ]; then

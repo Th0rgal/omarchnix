@@ -55,15 +55,17 @@ pkgs.testers.runNixOSTest {
     paths = [ pkgs.qemu_kvm ];
     nativeBuildInputs = [ pkgs.makeWrapper ];
     postBuild = ''
-      for bin in qemu-kvm; do
-        wrapProgram "$out/bin/$bin" \
-          --set SDL_VIDEODRIVER offscreen \
-          --set LIBGL_ALWAYS_SOFTWARE 1 \
-          --set __EGL_VENDOR_LIBRARY_DIRS "${pkgs.mesa}/share/glvnd/egl_vendor.d" \
-          --set LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
-          --set GBM_BACKENDS_PATH "${pkgs.mesa}/lib/gbm" \
-          --prefix LD_LIBRARY_PATH : "${pkgs.libglvnd}/lib:${pkgs.mesa}/lib" \
-          --append-flags "-display sdl,gl=on"
+      for bin in qemu-kvm qemu-system-x86_64; do
+        if [ -e "$out/bin/$bin" ]; then
+          wrapProgram "$out/bin/$bin" \
+            --set SDL_VIDEODRIVER offscreen \
+            --set LIBGL_ALWAYS_SOFTWARE 1 \
+            --set __EGL_VENDOR_LIBRARY_DIRS "${pkgs.mesa}/share/glvnd/egl_vendor.d" \
+            --set LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
+            --set GBM_BACKENDS_PATH "${pkgs.mesa}/lib/gbm" \
+            --prefix LD_LIBRARY_PATH : "${pkgs.libglvnd}/lib:${pkgs.mesa}/lib" \
+            --append-flags "-display sdl,gl=on"
+        fi
       done
     '';
   };
@@ -132,17 +134,6 @@ pkgs.testers.runNixOSTest {
         extraSpecialArgs = { inherit inputs; };
         users.thomas = import ../home;
       };
-
-      nixpkgs.overlays = lib.mkForce [
-        inputs.orb.overlays.default
-        (final: prev: {
-          orb-desktop = final.callPackage ../pkgs/orb-desktop.nix {
-            orbSrc = inputs.orb;
-            sandboxed-sh = prev.sandboxed-sh or inputs.orb.packages.${final.stdenv.hostPlatform.system}.default;
-          };
-          sandboxed-sh = final.orb-desktop.passthru.sandboxed-sh;
-        })
-      ];
 
       environment.systemPackages = [
         pkgs.jq

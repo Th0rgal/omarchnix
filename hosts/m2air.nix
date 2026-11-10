@@ -67,9 +67,9 @@
     };
   };
 
-  # Google Antigravity IDE ships as a binary Electron build; allow only that
-  # unfree package rather than the whole unfree set.
-  nixpkgs.config.allowUnfreePackages = [ "antigravity-ide" ];
+  # Google Antigravity ships as a binary Electron app; allow only that unfree
+  # package rather than the whole unfree set.
+  nixpkgs.config.allowUnfreePackages = [ "antigravity-hub" ];
 
   environment.systemPackages = with pkgs; [
     brave
@@ -82,7 +82,7 @@
     rclone
     orb-desktop
     notion-calendar
-    antigravity-ide
+    antigravity-hub
   ];
 
   users.users.thomas = {

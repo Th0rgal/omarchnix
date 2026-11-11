@@ -323,6 +323,12 @@ in
         defaultText = lib.literalExpression "config.programs.omarchnix.macos.enable";
         description = "Replace `omarchy.workspaces` with forward-slanted `/` parallelogram workspace chips (`th0rgal.workspaces`).";
       };
+
+      persistentCount = lib.mkOption {
+        type = lib.types.ints.between 1 10;
+        default = 5;
+        description = "Number of contiguous persistent workspace chips (`1..N`) always shown in `th0rgal.workspaces`.";
+      };
     };
 
     minimalBar = {
@@ -422,6 +428,13 @@ in
         };
       })
 
+      (lib.mkIf (mCfg.enable && !mCfg.dock.enable) {
+        programs.omarchnix.shell.disabledPlugins = [
+          "omarchy.dock"
+          "omarchy.dev-gallery"
+        ];
+      })
+
       (lib.mkIf mCfg.dock.enable {
         programs.omarchnix.plugins.locked.${macosDockId} = {
           package = macosDockPlugin;
@@ -471,6 +484,12 @@ in
         };
 
         programs.omarchnix.shell.workspaceWidgetId = slantedWorkspacesId;
+
+        xdg.configFile."omarchy/workspaces.json".text =
+          builtins.toJSON {
+            persistentCount = mCfg.slantedWorkspaces.persistentCount;
+          }
+          + "\n";
       })
 
       (lib.mkIf mCfg.minimalBar.enable {

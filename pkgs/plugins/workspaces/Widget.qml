@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Shapes
 import Quickshell
+import Quickshell.Io
 import Quickshell.Hyprland
 import qs.Commons
 import qs.Commons as Commons
@@ -12,6 +13,31 @@ BarWidget {
   moduleName: "th0rgal.workspaces"
 
   readonly property int slots: 10
+  readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/workspaces.json"
+  property int persistentCount: 5
+
+  function parseConfig(raw) {
+    var text = String(raw || "").trim()
+    if (!text) return
+    try {
+      var obj = JSON.parse(text)
+      if (obj && typeof obj.persistentCount === "number") {
+        var n = Math.floor(obj.persistentCount)
+        if (n >= 1 && n <= root.slots) root.persistentCount = n
+      }
+    } catch (e) {
+      console.warn("th0rgal.workspaces: failed to parse config: " + e)
+    }
+  }
+
+  FileView {
+    id: configFile
+    path: root.configPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.parseConfig(text())
+    onFileChanged: reload()
+  }
 
   readonly property var monitor: {
     var window = root.QsWindow.window
@@ -47,7 +73,8 @@ BarWidget {
 
   function workspaceIds() {
     var base = root.block * root.slots
-    var ids = [base + 1, base + 2, base + 3, base + 4, base + 5]
+    var ids = []
+    for (var p = 1; p <= root.persistentCount; p++) ids.push(base + p)
     var guests = []
     var values = Hyprland.workspaces.values
 

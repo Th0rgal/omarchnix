@@ -170,6 +170,18 @@ in
         macos = {
           enable = lib.mkEnableOption "macOS-style desktop suite (Mission Control & contiguous Spaces, auto-hide Dock, Spotlight, slanted Workspaces, minimal bar, and per-Space preloaded Wallpapers)";
 
+          dock = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Enable the frosted-glass auto-hide bottom Dock (`th0rgal.macos-dock`) when `omarchnix.desktop.macos.enable` is active (`false` keeps a dockless top-bar layout).";
+          };
+
+          persistentWorkspaces = lib.mkOption {
+            type = lib.types.ints.between 1 10;
+            default = 5;
+            description = "Number of contiguous persistent workspace chips (`1..N`) shown in `th0rgal.workspaces`.";
+          };
+
           gestures = lib.mkOption {
             type = lib.types.bool;
             default = true;
@@ -253,6 +265,8 @@ in
                 murmure.enable = lib.mkDefault cfg.desktop.murmure.enable;
                 macos = {
                   enable = lib.mkDefault cfg.desktop.macos.enable;
+                  dock.enable = lib.mkDefault (cfg.desktop.macos.enable && cfg.desktop.macos.dock);
+                  slantedWorkspaces.persistentCount = lib.mkDefault cfg.desktop.macos.persistentWorkspaces;
                   missionControl.gestures = lib.mkDefault cfg.desktop.macos.gestures;
                   touchIdHud.enable = lib.mkDefault (
                     if cfg.desktop.macos.touchIdHud != null then

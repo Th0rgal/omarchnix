@@ -413,6 +413,26 @@ Item {
       return "ok"
     }
 
+    function hold(payloadJson: string): string {
+      var p = {}
+      try {
+        p = JSON.parse(String(payloadJson || "{}"))
+      } catch (e) {}
+      previewStep1.stop()
+      previewStep2.stop()
+      previewStep3.stop()
+      root.previewActive = false
+      root.ipcContextActive = true
+      root.appName = String(p.app !== undefined ? p.app : "Orb")
+      root.subtitle = String(p.subtitle !== undefined ? p.subtitle : "Approve 1 request: READ \"GITHUB_TOKEN\"")
+      root.cancelPid = 0
+      root.authState = String(p.state || "scanning")
+      root.scanProgress = typeof p.progress === "number" ? p.progress : (root.authState === "matched" ? 1.0 : 0.92)
+      root.showSheet()
+      sessionWatchdog.stop()
+      return "ok"
+    }
+
     function state(): string {
       return JSON.stringify({
         opened: root.surfaceMapped,

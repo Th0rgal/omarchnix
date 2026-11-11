@@ -151,6 +151,29 @@ let
               '@media (max-width: 720px) { :root[data-platform="linux"] .file-panel.maximized .file-header { padding-left: 10px; } }\n'
               ':root[data-platform="linux"] .dlg-fullscreen > .dlg-head { padding-left: 14px; }\n'
           )
+      if "omarchnix-webkitgtk-titlebar-fix" not in css_txt:
+          css_txt += (
+              '\n/* omarchnix-webkitgtk-titlebar-fix: keep sidebar at 78%/72% Kawase glass while\n'
+              '   rendering .titlebar and .main as an opaque var(--bg) surface without offscreen\n'
+              '   RGBA isolation tiles or -webkit-app-region splits in WebKitGTK 6.0. */\n'
+              ':root[data-platform="linux"],\n'
+              ':root[data-platform="linux"][data-theme="light"] {\n'
+              '  --surface-opacity: 100%;\n'
+              '}\n'
+              ':root[data-platform="linux"] .titlebar,\n'
+              ':root[data-platform="linux"] .main,\n'
+              ':root[data-platform="linux"] .app[data-files-split="true"] > .titlebar {\n'
+              '  background: var(--bg);\n'
+              '  isolation: auto;\n'
+              '}\n'
+              ':root[data-platform="linux"] .titlebar,\n'
+              ':root[data-platform="linux"] .titlebar * {\n'
+              '  -webkit-app-region: initial;\n'
+              '}\n'
+              ':root[data-platform="linux"] .mission-tools:empty {\n'
+              '  display: none;\n'
+              '}\n'
+          )
       styles_css.write_text(css_txt)
 
       vb_tsx = pathlib.Path("src/VoiceButton.tsx")

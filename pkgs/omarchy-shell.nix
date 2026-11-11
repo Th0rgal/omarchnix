@@ -797,7 +797,7 @@ let
             '  new_pct="$(backlight_brightness "$device")"',
             '  target_mon="''${monitor:-$(omarchy-hyprland-monitor-laptop 2>/dev/null || true)}"',
             '  if (( ''${new_pct:-1} <= 0 )); then',
-            '    : > "''${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero"',
+            '    printf \'%s\\n\' "$target_mon" > "''${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero"',
             "    hyprctl eval 'hl.config({ misc = { key_press_enables_dpms = false, mouse_move_enables_dpms = false } })' >/dev/null 2>&1 || true",
             '    [[ -n $target_mon ]] && hyprctl dispatch "hl.dsp.dpms({ action = \\"disable\\", monitor = \\"$target_mon\\" })" >/dev/null 2>&1 || true',
             "  else",

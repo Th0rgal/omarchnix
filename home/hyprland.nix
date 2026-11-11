@@ -88,9 +88,11 @@ let
       exit 0
     fi
 
-    # When the screen was dimmed to 0% (backlight + DPMS off), tapping the Power
-    # button wakes the display back up (to 5%) rather than locking in the dark.
-    if [ -f "''${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero" ] || { [ -n "$hyprctl_bin" ] && "$hyprctl_bin" monitors -j 2>/dev/null | ${jq} -e '[.[] | select(.disabled == false)] | length > 0 and all(.dpmsStatus == false)' >/dev/null 2>&1; }; then
+    # When all enabled displays are dark (e.g. single-screen laptop dimmed to 0%
+    # or idle DPMS off), tapping the Power button wakes the display back up (to 5%)
+    # rather than locking in the dark. When an external display remains lit, Power
+    # still locks the session normally.
+    if [ -n "$hyprctl_bin" ] && "$hyprctl_bin" monitors -j 2>/dev/null | ${jq} -e '[.[] | select(.disabled == false)] | length > 0 and all(.dpmsStatus == false)' >/dev/null 2>&1; then
       ${
         if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
           "${omarchyShellBin}/omarchy-brightness-display on"

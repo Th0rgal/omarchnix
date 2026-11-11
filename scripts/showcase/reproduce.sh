@@ -7,33 +7,49 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT_DIR="${1:-$REPO_ROOT/docs/assets/showcase}"
 SYSTEM="${SYSTEM:-$(nix eval --impure --raw --expr 'builtins.currentSystem')}"
 
+WP_PATH=""
 if [[ -n "${WALLPAPERS_DIR:-}" && -d "${WALLPAPERS_DIR}" ]]; then
-  WP_EXPR="builtins.path { path = $(printf '%q' "$WALLPAPERS_DIR"); name = \"th0rgal-wallpapers\"; filter = p: _: baseNameOf p != \".git\"; }"
+  WP_PATH="${WALLPAPERS_DIR}"
 elif [[ -d "${HOME:-}/Pictures/Wallpapers" && -f "${HOME:-}/Pictures/Wallpapers/singapore.webp" ]]; then
-  WP_EXPR="builtins.path { path = $(printf '%q' "$HOME/Pictures/Wallpapers"); name = \"th0rgal-wallpapers\"; filter = p: _: baseNameOf p != \".git\"; }"
-else
-  WP_EXPR='builtins.fetchGit { url = "https://github.com/Th0rgal/wallpapers.git"; ref = "main"; }'
+  WP_PATH="${HOME}/Pictures/Wallpapers"
 fi
 
 DRV_OUT="$(
-  nix build --impure --no-link --print-out-paths -L --expr "
+  OMARCHNIX_REPO_ROOT="${REPO_ROOT}" \
+  OMARCHNIX_SYSTEM="${SYSTEM}" \
+  OMARCHNIX_WP_PATH="${WP_PATH}" \
+  nix build --impure --no-link --print-out-paths -L --expr '
     let
-      flake = builtins.getFlake \"path:${REPO_ROOT}\";
+      repoRoot = builtins.getEnv "OMARCHNIX_REPO_ROOT";
+      system = builtins.getEnv "OMARCHNIX_SYSTEM";
+      wpPath = builtins.getEnv "OMARCHNIX_WP_PATH";
+      flake = builtins.getFlake ("path:" + repoRoot);
       inputs = flake.inputs;
       pkgs = import inputs.nixpkgs {
-        system = \"${SYSTEM}\";
+        inherit system;
         overlays = [
           inputs.orb.overlays.default
           flake.overlays.default
         ];
       };
+      wallpapersSrc =
+        if wpPath != "" then
+          builtins.path {
+            path = wpPath;
+            name = "th0rgal-wallpapers";
+            filter = p: _: baseNameOf p != ".git";
+          }
+        else
+          builtins.fetchGit {
+            url = "https://github.com/Th0rgal/wallpapers.git";
+            ref = "main";
+          };
     in
-    import ${REPO_ROOT}/scripts/showcase/capture.nix {
-      inherit pkgs inputs;
+    import (repoRoot + "/scripts/showcase/capture.nix") {
+      inherit pkgs inputs wallpapersSrc;
       omarchnixModule = flake.nixosModules.omarchnix;
-      wallpapersSrc = ${WP_EXPR};
     }
-  "
+  '
 )"
 
 mkdir -p "$OUT_DIR"

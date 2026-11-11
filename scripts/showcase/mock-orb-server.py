@@ -14,6 +14,7 @@ import mimetypes
 import os
 import pathlib
 import shutil
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -168,13 +169,30 @@ def discover_ui_root(explicit: str | None) -> pathlib.Path:
 
 
 def make_handler(ui_root: pathlib.Path):
+    stats = {"events_served": 0, "projects_served": 0}
     boot_snippet = (
         "<script>"
+        "(function(){"
         "try{"
         'localStorage.setItem("orb.apiUrl",window.location.origin);'
         'localStorage.setItem("orb.jwt","showcase-token");'
         f'localStorage.setItem("orb.selectedConversation","m:{MISSION_ID}");'
+        "const wrap=(orig)=>{if(!orig||orig.__showcaseWrapped)return orig;"
+        "const fn=async(cmd,args,opts)=>{"
+        'if(cmd==="transport_bridge_configure")return{proxy_base_url:null,stream_proxy_base_urls:[]};'
+        'if(cmd==="desktop_connection_load")return{api_url:window.location.origin,token:"showcase-token"};'
+        'if(cmd==="desktop_connection_save"||cmd==="desktop_prefs_patch")return{ok:true};'
+        'if(cmd==="desktop_prefs_load")return{prefs:{}};'
+        "return orig(cmd,args,opts);};"
+        "fn.__showcaseWrapped=true;return fn;};"
+        "for(const r of[window.__ORB_DESKTOP__,window.__TAURI__]){"
+        'if(r&&r.core&&typeof r.core.invoke==="function")r.core.invoke=wrap(r.core.invoke.bind(r.core));'
+        "}"
+        'if(window.__TAURI_INTERNALS__&&typeof window.__TAURI_INTERNALS__.invoke==="function"){'
+        "window.__TAURI_INTERNALS__.invoke=wrap(window.__TAURI_INTERNALS__.invoke.bind(window.__TAURI_INTERNALS__));"
+        "}"
         "}catch{}"
+        "})();"
         "</script>"
     )
 
@@ -182,14 +200,22 @@ def make_handler(ui_root: pathlib.Path):
         def log_message(self, fmt: str, *args) -> None:
             return
 
-        def send_json(self, payload: object, code: int = 200) -> None:
+        def send_json(
+            self,
+            payload: object,
+            code: int = 200,
+            extra_headers: dict[str, str] | None = None,
+        ) -> None:
             body = json.dumps(payload).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Headers", "*")
+            self.send_header("Access-Control-Expose-Headers", "*")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+            for k, v in (extra_headers or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
 
@@ -212,17 +238,25 @@ def make_handler(ui_root: pathlib.Path):
 
             if path == "/api/control/stream":
                 self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 try:
                     self.wfile.write(b": connected\n\n")
                     self.wfile.flush()
-                except BrokenPipeError:
+                    while True:
+                        time.sleep(15)
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
                     pass
                 return
 
+            if path == "/__showcase_ready":
+                ready = stats["events_served"] >= 1 and stats["projects_served"] >= 1
+                return self.send_json({"ready": ready, **stats}, 200 if ready else 503)
             if path == "/api/health":
                 return self.send_json({"status": "ok", "version": "0.13.0"})
             if path == "/api/auth/me":
@@ -230,6 +264,7 @@ def make_handler(ui_root: pathlib.Path):
             if path == "/api/auth/status":
                 return self.send_json({"authenticated": True, "auth_required": True, "role": "admin"})
             if path == "/api/projects":
+                stats["projects_served"] += 1
                 return self.send_json({"projects": PROJECTS})
             if path == "/api/backends":
                 return self.send_json(
@@ -270,6 +305,8 @@ def make_handler(ui_root: pathlib.Path):
                 return self.send_json({"unread_count": 7, "items": [f"inb-{i}" for i in range(7)]})
             if path == "/api/control/codex-speed":
                 return self.send_json({"tiers": [{"id": "standard", "label": "Standard"}]})
+            if path == "/api/control/queue":
+                return self.send_json({"items": [], "revision": 0})
             if path == "/api/control/cyber-capabilities":
                 return self.send_json({"route_supported": False})
             if path == "/api/control/missions":
@@ -288,14 +325,42 @@ def make_handler(ui_root: pathlib.Path):
             if path == f"/api/control/missions/{MISSION_2_ID}":
                 return self.send_json(MISSIONS[1])
             if path == f"/api/control/missions/{MISSION_ID}/events":
-                if qs.get("since_seq"):
-                    return self.send_json([])
-                if qs.get("before_seq"):
-                    return self.send_json([])
-                return self.send_json(EVENTS)
-            if path.startswith("/api/control/missions/") and path.endswith("/automations"):
-                return self.send_json([])
-            if path.startswith("/api/control/missions/") and path.endswith("/shares"):
+                max_seq = EVENTS[-1]["sequence"]
+                since = int(qs["since_seq"][0]) if qs.get("since_seq") else None
+                before = int(qs["before_seq"][0]) if qs.get("before_seq") else None
+                rows = [
+                    e
+                    for e in EVENTS
+                    if (since is None or e["sequence"] > since)
+                    and (before is None or e["sequence"] < before)
+                ]
+                ev_headers = {
+                    "X-Orb-Events-Protocol": "1",
+                    "X-Has-More": "false",
+                    "X-Max-Sequence": str(max_seq),
+                }
+                if rows:
+                    ev_headers["X-Next-Cursor"] = str(
+                        rows[-1]["sequence"] if since is not None else rows[0]["sequence"]
+                    )
+                    ev_headers["X-Page-Max-Sequence"] = str(rows[-1]["sequence"])
+                    stats["events_served"] += 1
+                return self.send_json(rows, extra_headers=ev_headers)
+            if path == f"/api/control/missions/{MISSION_2_ID}/events":
+                return self.send_json(
+                    [],
+                    extra_headers={
+                        "X-Orb-Events-Protocol": "1",
+                        "X-Has-More": "false",
+                        "X-Max-Sequence": "0",
+                    },
+                )
+            if path.startswith("/api/control/missions/") and (
+                path.endswith("/automations")
+                or path.endswith("/shares")
+                or path.endswith("/checkpoints")
+                or "/tool-calls/" in path
+            ):
                 return self.send_json([])
             if path.startswith("/api/"):
                 return self.send_json({})
@@ -321,6 +386,10 @@ def make_handler(ui_root: pathlib.Path):
     return Handler
 
 
+class ShowcaseHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ui-root", help="Path to share/orb directory")
@@ -329,7 +398,7 @@ def main() -> None:
     args = ap.parse_args()
 
     ui_root = discover_ui_root(args.ui_root)
-    srv = ThreadingHTTPServer((args.host, args.port), make_handler(ui_root))
+    srv = ShowcaseHTTPServer((args.host, args.port), make_handler(ui_root))
     print(f"Serving Orb showcase UI ({ui_root}) + mock Core on http://{args.host}:{args.port}", flush=True)
     srv.serve_forever()
 

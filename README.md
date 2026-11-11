@@ -2,7 +2,21 @@
 
 Declarative Omarchy-compatible NixOS & Home Manager workstation stack across **`aarch64-linux`** (Apple Silicon M-series via Asahi Linux, NVIDIA Grace / DGX Spark) and **`x86_64-linux`** workstations and VMs.
 
-See [`docs/VISION.md`](docs/VISION.md) for the full architecture and [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-19`) for recorded design decisions.
+See [`docs/VISION.md`](docs/VISION.md) for the full architecture, [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-19`) for recorded design decisions, and [`docs/showcase.md`](docs/showcase.md) to reproduce the desktop screenshots below in QEMU/KVM.
+
+---
+
+## Desktop Showcase
+
+Native `2560×1600` (`1.6x` HiDPI) Wayland captures of the `starship-subtle` glass desktop across three contiguous Spaces — step-by-step VM reproduction in [`docs/showcase.md`](docs/showcase.md):
+
+| **Space 1 · Frosted Ghostty Terminal** (`singapore.webp`) |
+| :---: |
+| ![Space 1 — Centered frosted Ghostty terminal with fastfetch and Lilex Nerd Font ligatures over Singapore Jewel](docs/assets/showcase/01-terminal-singapore.png) |
+
+| **Space 2 · Native `orb-desktop` (`GTK4` + `WebKitGTK 6.0`, `bologna-dome.webp`)** | **Space 3 · Biometric `Touch ID` HUD (`th0rgal.touchid`, `kazakhstan-charyn-canyon-peaks.webp`)** |
+| :---: | :---: |
+| ![Space 2 — Centered native Orb Desktop UI with 78% Kawase-blurred sidebar and Markdown + Lean 4 mission view over Bologna Dome](docs/assets/showcase/02-orb-bologna.png) | ![Space 3 — Centered frosted Touch ID biometric sheet in active fingerprint-scan state over Charyn Canyon](docs/assets/showcase/03-touchid-canyon.png) |
 
 ---
 

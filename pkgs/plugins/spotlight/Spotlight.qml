@@ -155,7 +155,7 @@ Item {
       'pixmaps="/run/current-system/sw/share/pixmaps /etc/profiles/per-user/$USER/share/pixmaps /usr/share/pixmaps";',
       'IFS=":"; for d in ${XDG_DATA_DIRS:-}; do [ -n "$d" ] && dirs="$dirs $d/icons" && pixmaps="$pixmaps $d/pixmaps"; done; unset IFS;',
       'for base in $dirs; do',
-      '  [ -d "$base" ] && find -L "$base" \\( -path "*/apps/*" -o -path "*/devices/*" \\) ! -path "*/symbolic/*" \\( -name "*.svg" -o -name "*.png" \\) 2>/dev/null;',
+      '  [ -d "$base" ] && find -L "$base" \\( -path "*/apps/*" -o -path "*/devices/*" \\) ! -path "*/symbolic/*" ! -path "*/MoreWaita/*" ! -path "*/Adwaita/*" \\( -name "*.svg" -o -name "*.png" \\) 2>/dev/null;',
       'done;',
       'for p in $pixmaps; do',
       '  [ -d "$p" ] && find -L "$p" -maxdepth 1 \\( -name "*.svg" -o -name "*.png" \\) 2>/dev/null;',
@@ -595,9 +595,22 @@ Item {
           Keys.onPressed: function(event) {
             var meta = (event.modifiers & Qt.MetaModifier) !== 0
             var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
+            var alt = (event.modifiers & Qt.AltModifier) !== 0
+            var shift = (event.modifiers & Qt.ShiftModifier) !== 0
 
             if (event.key === Qt.Key_Escape) {
               root.dismiss()
+              event.accepted = true
+              return
+            }
+
+            if (alt && (event.key === Qt.Key_Space || event.key === Qt.Key_D)) {
+              if ((event.key === Qt.Key_D || shift) && !root.showResults) {
+                root.forceExpanded = true
+                root.rebuildResults()
+              } else {
+                root.dismiss()
+              }
               event.accepted = true
               return
             }

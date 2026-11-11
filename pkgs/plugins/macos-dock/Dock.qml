@@ -34,7 +34,7 @@ Item {
       '  [ -d "$base" ] || continue;',
       '  case " $seen " in *" $base "*) continue ;; esac;',
       '  seen="$seen $base";',
-      '  find -L "$base" -maxdepth 5 \\( -path "*/apps/*" -o -path "*/devices/*" \\) \\( -name "*.svg" -o -name "*.png" \\) 2>/dev/null || true;',
+      '  find -L "$base" -maxdepth 5 \\( -path "*/apps/*" -o -path "*/devices/*" \\) ! -path "*/symbolic/*" ! -path "*/MoreWaita/*" ! -path "*/Adwaita/*" \\( -name "*.svg" -o -name "*.png" \\) 2>/dev/null || true;',
       'done;',
       'for pix in "/etc/profiles/per-user/${USER:-thomas}/share/pixmaps" /run/current-system/sw/share/pixmaps /usr/share/pixmaps; do',
       '  [ -d "$pix" ] && find -L "$pix" -maxdepth 1 \\( -name "*.svg" -o -name "*.png" \\) 2>/dev/null || true;',

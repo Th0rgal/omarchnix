@@ -758,7 +758,7 @@ PanelWindow {
     Keys.onPressed: function(event) {
       var k = event.key
       if (k === Qt.Key_Escape) {
-        if (view.query.length > 0) view.query = ""
+        if (view.query.length > 0 && !(event.modifiers & Qt.AltModifier)) view.query = ""
         else view.controller.dismiss()
       } else if (k === Qt.Key_Return || k === Qt.Key_Enter) {
         var i = view.selectedIndex

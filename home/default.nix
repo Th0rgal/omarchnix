@@ -409,7 +409,17 @@ in
           pkgs.xdg-user-dirs
           pkgs.fastfetch
           pkgs.mission-center
+          pkgs.adw-gtk3
+          pkgs.adwaita-icon-theme
+          pkgs.morewaita-icon-theme
         ];
+    };
+
+    xdg.dataFile = {
+      "themes/adw-gtk3".source = "${pkgs.adw-gtk3}/share/themes/adw-gtk3";
+      "themes/adw-gtk3-dark".source = "${pkgs.adw-gtk3}/share/themes/adw-gtk3-dark";
+      "icons/MoreWaita".source = "${pkgs.morewaita-icon-theme}/share/icons/MoreWaita";
+      "icons/Adwaita".source = "${pkgs.adwaita-icon-theme}/share/icons/Adwaita";
     };
 
     xdg.userDirs = {
@@ -515,6 +525,9 @@ in
             "-apple-system"
             "BlinkMacSystemFont"
             "Segoe UI"
+            "Cantarell"
+            "Inter"
+            "Roboto"
             "DejaVu Sans"
             "Liberation Sans"
             "FreeSans"
@@ -633,10 +646,18 @@ in
       # Chromium/Brave, PWAs, and Electron on tiling Hyprland (`Cmd+W`/`Cmd+Q` closes).
       gtk3.extraConfig = {
         gtk-xft-dpi = 98304;
+        gtk-xft-antialias = 1;
+        gtk-xft-hinting = 1;
+        gtk-xft-hintstyle = "hintslight";
+        gtk-xft-rgba = "none";
         gtk-decoration-layout = ":";
       };
       gtk4.extraConfig = {
         gtk-xft-dpi = 98304;
+        gtk-xft-antialias = 1;
+        gtk-xft-hinting = 1;
+        gtk-xft-hintstyle = "hintslight";
+        gtk-xft-rgba = "none";
         gtk-decoration-layout = ":";
       };
     };
@@ -655,16 +676,19 @@ in
           font-name = "${theme.fonts.sans.name} ${toString theme.fonts.sans.size}";
           document-font-name = "${theme.fonts.serif.name} ${toString theme.fonts.serif.size}";
           monospace-font-name = "${theme.fonts.mono.name} ${toString theme.fonts.mono.size}";
+          font-antialiasing = "grayscale";
+          font-hinting = "slight";
+          icon-theme = "MoreWaita";
         }
         // lib.optionalAttrs (!dynamicShellTheme) {
           color-scheme = if isLight then "prefer-light" else "prefer-dark";
-          gtk-theme = if isLight then "Adwaita" else "Adwaita-dark";
+          gtk-theme = if isLight then "adw-gtk3" else "adw-gtk3-dark";
         };
         "org/gnome/desktop/wm/preferences" = {
           button-layout = ":";
         }
         // lib.optionalAttrs (!dynamicShellTheme) {
-          theme = if isLight then "Adwaita" else "Adwaita-dark";
+          theme = if isLight then "adw-gtk3" else "adw-gtk3-dark";
         };
         "io/missioncenter/MissionCenter" = {
           first-time-running = false;

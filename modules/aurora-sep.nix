@@ -788,7 +788,10 @@ in
           # Dedicated fingerprint stack for omarchy-shell's Quickshell lock screen
           # (shell/plugins/lock/Service.qml checks /etc/pam.d/omarchy-lock-fingerprint).
           omarchy-lock-fingerprint.text = ''
-            auth required ${config.services.fprintd.package}/lib/security/pam_fprintd.so
+            ${lib.optionalString (omarchyShellPkg != null)
+              "auth [success=die default=ignore] ${pkgs.pam}/lib/security/pam_exec.so quiet ${omarchyShellPkg}/bin/omarchy-hw-laptop-closed"
+            }
+            auth required ${config.services.fprintd.package}/lib/security/pam_fprintd.so timeout=90
             account include login
           '';
 

@@ -426,6 +426,160 @@ let
         mqml = mqml.replace(old_text_sep, new_text_sep, 1)
 
         mon_panel.write_text(mqml, encoding="utf-8")
+
+    lock_svc = out / "shell" / "plugins" / "lock" / "Service.qml"
+    if lock_svc.is_file():
+        lqml = lock_svc.read_text(encoding="utf-8")
+
+        old_blank = "\n".join([
+            "  // A suspended PAM conversation may be orphaned by the daemon restart.",
+            "  function restartFingerprintAfterSleep() {",
+            "    noteFingerprintResumed()",
+            "    if (fingerprintAuthenticating || fingerprintPam.active) {",
+            "      if (fingerprintPam.active) fingerprintPam.abort()",
+            "      settleFingerprintAttempt()",
+            "      return",
+            "    }",
+            "    if (!fingerprintRetryTimer.running) return",
+            "    armFingerprintRetry(FingerprintModel.MATCH_RETRY_MS)",
+            "  }",
+            "",
+            "  function runBlank() {",
+            "    pauseFingerprint()",
+            "    if (!blankProcess.running) blankProcess.running = true",
+            "  }",
+        ])
+        new_blank = "\n".join([
+            "  // A suspended PAM conversation may be orphaned by the daemon restart.",
+            "  function restartFingerprintAfterSleep() {",
+            "    noteFingerprintResumed()",
+            "    fingerprintPaused = false",
+            "    armBlankTimer(idleBlankTimer.resumeMs)",
+            "    if (fingerprintAuthenticating || fingerprintPam.active) {",
+            "      if (fingerprintPam.active) fingerprintPam.abort()",
+            "      settleFingerprintAttempt()",
+            "      return",
+            "    }",
+            "    armFingerprintRetry(FingerprintModel.MATCH_RETRY_MS)",
+            "  }",
+            "",
+            "  function runBlank() {",
+            "    if (!blankProcess.running) blankProcess.running = true",
+            "  }",
+        ])
+        assert old_blank in lqml, "lock/Service.qml restartFingerprintAfterSleep/runBlank block not found"
+        lqml = lqml.replace(old_blank, new_blank, 1)
+
+        old_settle = "\n".join([
+            "    fingerprintLastSettleMs = now",
+            "    armFingerprintRetry(FingerprintModel.retryDelayMs(fingerprintUnreachedStreak))",
+            "  }",
+        ])
+        new_settle = "\n".join([
+            "    fingerprintLastSettleMs = now",
+            "    armFingerprintRetry(inGrace ? FingerprintModel.MATCH_RETRY_MS : FingerprintModel.retryDelayMs(fingerprintUnreachedStreak))",
+            "  }",
+        ])
+        assert old_settle in lqml, "lock/Service.qml settleFingerprintAttempt retry block not found"
+        lqml = lqml.replace(old_settle, new_settle, 1)
+
+        old_pam = "\n".join([
+            "  PamContext {",
+            "    id: fingerprintPam",
+            '    config: "omarchy-lock-fingerprint"',
+            "    user: root.userName",
+            "",
+            "    onPamMessage: {",
+            "      if (!messageIsError) root.noteFingerprintReachedDevice()",
+            "    }",
+        ])
+        new_pam = "\n".join([
+            "  PamContext {",
+            "    id: fingerprintPam",
+            '    config: "omarchy-lock-fingerprint"',
+            "    user: root.userName",
+            "",
+            "    onPamMessage: {",
+            "      var alreadyReached = root.fingerprintAttemptReachedDevice",
+            "      if (!messageIsError) root.noteFingerprintReachedDevice()",
+            '      if (alreadyReached && root.lockRequested && !/timed out/i.test(String(message || ""))) {',
+            "        root.runWake()",
+            "      }",
+            "    }",
+        ])
+        assert old_pam in lqml, "lock/Service.qml fingerprintPam block not found"
+        lqml = lqml.replace(old_pam, new_pam, 1)
+
+        old_sleep_watch = "\n".join([
+            "  // Detect resume both during an active attempt and during backoff.",
+            "  Timer {",
+            "    id: fingerprintSleepWatch",
+            "    interval: 1000",
+            "    repeat: true",
+            "    running: root.lockRequested && root.fingerprintConfigured && (!root.fingerprintPaused || root.fingerprintAuthenticating)",
+        ])
+        new_sleep_watch = "\n".join([
+            "  IdleMonitor {",
+            "    id: lockActivityMonitor",
+            "    enabled: root.lockRequested",
+            "    timeout: 1",
+            "    respectInhibitors: false",
+            "    onIsIdleChanged: {",
+            "      if (!isIdle && root.lockRequested) root.runWake()",
+            "    }",
+            "  }",
+            "",
+            "  // Detect resume both during an active attempt and during backoff.",
+            "  Timer {",
+            "    id: fingerprintSleepWatch",
+            "    interval: 1000",
+            "    repeat: true",
+            "    running: root.lockRequested && root.fingerprintConfigured",
+        ])
+        assert old_sleep_watch in lqml, "lock/Service.qml fingerprintSleepWatch block not found"
+        lqml = lqml.replace(old_sleep_watch, new_sleep_watch, 1)
+
+        old_ipc = "\n".join([
+            "  ShellIpc {",
+            '    target: "lock"',
+            "",
+            "    function lock(): string {",
+            '      if (!root.passwordPamConfigured) return "missing-pam"',
+            "      // omarchy-system-sleep-lock asks for the lock before every suspend.",
+            "      if (root.currentlyLocked()) root.noteSleepRequested()",
+            '      if (!root.currentlyLocked() && !root.beginLock()) return "failed"',
+            '      return "ok"',
+            "    }",
+        ])
+        new_ipc = "\n".join([
+            "  ShellIpc {",
+            '    target: "lock"',
+            "",
+            "    function lock(): string {",
+            '      if (!root.passwordPamConfigured) return "missing-pam"',
+            "      // omarchy-system-sleep-lock asks for the lock before every suspend.",
+            "      if (root.currentlyLocked()) root.noteSleepRequested()",
+            '      if (!root.currentlyLocked() && !root.beginLock()) return "failed"',
+            '      return "ok"',
+            "    }",
+            "",
+            "    function wake(): string {",
+            "      if (root.currentlyLocked()) root.runWake()",
+            '      return "ok"',
+            "    }",
+            "",
+            "    function resume(): string {",
+            "      if (root.currentlyLocked()) {",
+            "        root.restartFingerprintAfterSleep()",
+            "        root.runWake()",
+            "      }",
+            '      return "ok"',
+            "    }",
+        ])
+        assert old_ipc in lqml, "lock/Service.qml ShellIpc lock block not found"
+        lqml = lqml.replace(old_ipc, new_ipc, 1)
+
+        lock_svc.write_text(lqml, encoding="utf-8")
   '';
 
   omarchyShare =
@@ -530,7 +684,9 @@ let
           --replace-fail 'wait "$policy_pid" || failed=1' 'if [ -n "$policy_pid" ]; then wait "$policy_pid" || failed=1; fi'
 
         substituteInPlace "$out/bin/omarchy-theme-set-gnome" \
-          --replace-fail '"Yaru-blue"' '"Adwaita"'
+          --replace-fail '"Adwaita-dark"' '"adw-gtk3-dark"' \
+          --replace-fail '"Adwaita"' '"adw-gtk3"' \
+          --replace-fail '"Yaru-blue"' '"MoreWaita"'
 
         substituteInPlace "$out/bin/omarchy-theme-set-foot" \
           --replace-fail '"$foot_ini" 2>/dev/null | tail -n 1)' '"$HOME/.config/foot/foot.ini" "$foot_ini" 2>/dev/null | tail -n 1)'

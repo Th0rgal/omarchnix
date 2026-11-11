@@ -96,7 +96,7 @@ let
       omarchnix theme toggle
       ```
 
-      Shortcuts: `SUPER + CTRL + T` / `CTRL + SUPER + SHIFT + T` opens the Omarchy theme picker; `SUPER + ALT + T` toggles dark/light mode (`omarchnix theme toggle`).
+      Shortcuts: `ALT + CTRL + T` opens the Omarchy theme picker; `ALT + SHIFT + T` toggles dark/light mode (`omarchnix theme toggle`).
 
       `omarchnix theme set` renders `$OMARCHY_PATH/default/themed/*.tpl` into `~/.local/state/omarchy/current/theme/`, updates `omarchy-shell` over Unix-socket IPC, updates GNOME/GTK `color-scheme` via `gsettings` (`xdg-desktop-portal-gtk` `Settings` portal), retints running `foot` terminals via OSC sequences, reloads Hyprland borders, and updates `opencode` (`SIGUSR2`), `claude` (`~/.claude/themes/omarchy.json`), and `hermes` (`~/.hermes` skin).
     '';

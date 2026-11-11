@@ -209,15 +209,66 @@ in
     '';
 
     # Seed Windows-Explorer-style Thunar defaults as a writable file so `xfconfd`
-    # can freely persist runtime column widths, view toggles, and window geometry.
+    # can freely persist runtime column widths, view toggles, and window geometry,
+    # merging any newly introduced default `<property>` entries without resetting
+    # existing user preferences.
     home.activation.omarchnixThunarDefaults = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       thunar_cfg_dir="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
       thunar_cfg="$thunar_cfg_dir/thunar.xml"
       mkdir -p "$thunar_cfg_dir"
-      if [ ! -f "$thunar_cfg" ] || [ -L "$thunar_cfg" ] || ! grep -q 'misc-use-csd' "$thunar_cfg" 2>/dev/null; then
+      if [ ! -f "$thunar_cfg" ] || [ -L "$thunar_cfg" ]; then
         rm -f "$thunar_cfg"
         cp --no-preserve=mode,ownership "${defaultThunarXml}" "$thunar_cfg"
         chmod 0644 "$thunar_cfg"
+      else
+        ${pkgs.python3}/bin/python3 - "$thunar_cfg" "${defaultThunarXml}" <<'PY'
+      import os
+      import shutil
+      import sys
+      import tempfile
+      import xml.etree.ElementTree as ET
+
+      cfg_path, defaults_path = sys.argv[1], sys.argv[2]
+      try:
+          cur_tree = ET.parse(cfg_path)
+          cur_root = cur_tree.getroot()
+          def_root = ET.parse(defaults_path).getroot()
+          if cur_root.tag != "channel":
+              raise ValueError("unexpected root tag")
+      except Exception:
+          shutil.copyfile(defaults_path, cfg_path)
+          os.chmod(cfg_path, 0o644)
+          sys.exit(0)
+
+      existing = {
+          el.attrib.get("name")
+          for el in cur_root.findall("property")
+          if el.attrib.get("name")
+      }
+      changed = False
+      for prop in def_root.findall("property"):
+          name = prop.attrib.get("name")
+          if name and name not in existing:
+              cur_root.append(prop)
+              existing.add(name)
+              changed = True
+
+      if changed:
+          ET.indent(cur_tree, space="  ")
+          fd, tmp_path = tempfile.mkstemp(prefix="thunar.xml.", dir=os.path.dirname(cfg_path))
+          try:
+              os.fchmod(fd, 0o644)
+              with os.fdopen(fd, "wb") as fh:
+                  cur_tree.write(fh, encoding="UTF-8", xml_declaration=True)
+                  fh.write(b"\n")
+              os.replace(tmp_path, cfg_path)
+          except Exception:
+              try:
+                  os.unlink(tmp_path)
+              except OSError:
+                  pass
+              raise
+      PY
       fi
     '';
   };

@@ -164,7 +164,21 @@ let
         end
         if not is_term then
           local cls = (w.class or w.initial_class or ""):lower()
-          if cls:match("^(foot|foot%-scratchpad|alacritty|kitty|wezterm|.*ghostty.*|org%.omarchy%..*|tui%..*)$") then
+          local term_exact = {
+            ["foot"] = true,
+            ["foot-scratchpad"] = true,
+            ["org.codeberg.dnkl.foot"] = true,
+            ["alacritty"] = true,
+            ["kitty"] = true,
+            ["wezterm"] = true,
+            ["org.wezfurlong.wezterm"] = true,
+          }
+          if
+            term_exact[cls]
+            or cls:find("ghostty", 1, true)
+            or cls:find("^org%.omarchy%.")
+            or cls:find("^tui%.")
+          then
             is_term = true
           end
         end
@@ -187,13 +201,45 @@ let
       local w = hl.get_active_window()
       if not w then return end
       local cls = (w.class or w.initial_class or ""):lower()
-      if cls:match("^(orb%-desktop|%.orb%-desktop%-unwrapped|orb)$") then
+      local orb_classes = {
+        ["orb-desktop"] = true,
+        [".orb-desktop-unwrapped"] = true,
+        ["orb"] = true,
+      }
+      if orb_classes[cls] then
         return
       end
+      local ctrl_w_exact = {
+        ["brave-browser"] = true,
+        ["chromium"] = true,
+        ["chromium-browser"] = true,
+        ["epiphany"] = true,
+        ["antigravity"] = true,
+        ["code"] = true,
+        ["code-url-handler"] = true,
+        ["codium"] = true,
+        ["vscodium"] = true,
+        ["cursor"] = true,
+        ["dev.zed.zed"] = true,
+        ["zed"] = true,
+        ["thunar"] = true,
+      }
+      local ctrl_shift_w_exact = {
+        ["kitty"] = true,
+        ["org.wezfurlong.wezterm"] = true,
+        ["wezterm"] = true,
+      }
       local mods = nil
-      if cls:match("^(brave%-browser|chromium|chromium%-browser|google%-chrome.*|firefox.*|librewolf.*|zen.*|vivaldi.*|epiphany|antigravity|code|code%-url%-handler|codium|vscodium|cursor|dev%.zed%.zed|zed|thunar)$") then
+      if
+        ctrl_w_exact[cls]
+        or cls:find("^google%-chrome")
+        or cls:find("^firefox")
+        or cls:find("^librewolf")
+        or cls:find("^zen")
+        or cls:find("^vivaldi")
+      then
         mods = "CTRL"
-      elseif cls:match("^(.*ghostty.*|kitty|org%.wezfurlong%.wezterm|wezterm)$") then
+      elseif ctrl_shift_w_exact[cls] or cls:find("ghostty", 1, true) then
         mods = "CTRL SHIFT"
       end
       if mods then

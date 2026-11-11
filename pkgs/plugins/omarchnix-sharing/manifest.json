@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "omarchnix.sharing",
   "name": "Wireless Share",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Omarchnix",
   "license": "MIT",
-  "description": "Unified wireless file sharing across AirDrop (Apple), Quick Share (Android & Chromebook), and Nearby (LocalSend).",
+  "description": "Unified wireless file & clipboard sharing across AirDrop (Apple), KDE Connect (iOS & Android over LAN / lean-mesh), Quick Share, and Nearby (LocalSend).",
   "kinds": [
     "service",
     "bar-widget"
@@ -16,7 +16,7 @@
   },
   "barWidget": {
     "displayName": "Share",
-    "description": "Receive and send files nearby via AirDrop, Quick Share, and LocalSend.",
+    "description": "Sync clipboards and share files across AirDrop, KDE Connect, Quick Share, and LocalSend.",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right"

@@ -59,10 +59,18 @@ let
     else
       null;
 
+  defaultKdeconnectPkg =
+    if (pkgs ? kdePackages) && (pkgs.kdePackages ? kdeconnect-kde) then
+      pkgs.kdePackages.kdeconnect-kde
+    else
+      null;
+
   omdropPkg = if sCfg.airdrop.package != null then sCfg.airdrop.package else defaultOmdropPkg;
   quicksharePkg =
     if sCfg.quickshare.package != null then sCfg.quickshare.package else defaultQuicksharePkg;
   nearbyPkg = if sCfg.nearby.package != null then sCfg.nearby.package else defaultNearbyPkg;
+  kdeconnectPkg =
+    if sCfg.kdeconnect.package != null then sCfg.kdeconnect.package else defaultKdeconnectPkg;
 
   omdropPlugin = if omdropPkg != null then (omdropPkg.passthru.plugin or null) else null;
   omdropSkillFile = if omdropPkg != null then (omdropPkg.passthru.skillFile or null) else null;
@@ -72,11 +80,70 @@ let
   airdropActive = sCfg.airdrop.enable && omdropPkg != null;
   quickshareActive = sCfg.quickshare.enable && quicksharePkg != null;
   nearbyActive = sCfg.nearby.enable && nearbyPkg != null;
-  anySharingActive = airdropActive || quickshareActive || nearbyActive;
+  kdeconnectActive = sCfg.kdeconnect.enable && kdeconnectPkg != null;
+  anySharingActive = airdropActive || quickshareActive || nearbyActive || kdeconnectActive;
+
+  kdeconnectPython = pkgs.python3.withPackages (ps: [ ps.pygobject3 ]);
+
+  kdeconnectCliShim =
+    if kdeconnectPkg != null then
+      pkgs.runCommand "kdeconnect-cli-shim-${kdeconnectPkg.version}" { } ''
+        mkdir -p "$out/bin"
+        cat > "$out/bin/kdeconnect-cli" <<'EOF'
+        #!${pkgs.runtimeShell}
+        export QT_QPA_PLATFORM="''${QT_QPA_PLATFORM:-wayland;xcb}"
+        exec "${kdeconnectPkg}/bin/kdeconnect-cli" "$@"
+        EOF
+        chmod 0755 "$out/bin/kdeconnect-cli"
+      ''
+    else
+      null;
+
+  kdeconnectHelperPkg =
+    if kdeconnectPkg != null then
+      pkgs.runCommand "omarchnix-kdeconnect-helper"
+        {
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+        }
+        ''
+          mkdir -p "$out/bin" "$out/libexec"
+          cp --no-preserve=mode,ownership "${../pkgs/omarchnix-kdeconnect-helper.py}" \
+            "$out/libexec/omarchnix-kdeconnect-helper.py"
+          substituteInPlace "$out/libexec/omarchnix-kdeconnect-helper.py" \
+            --replace-fail "@KDECONNECT_CLI@" "${kdeconnectPkg}/bin/kdeconnect-cli" \
+            --replace-fail "@IP_BIN@" "${pkgs.iproute2}/bin/ip" \
+            --replace-fail "@SSHFS_BIN@" "${pkgs.sshfs}/bin/sshfs" \
+            --replace-fail "@FUSERMOUNT3_BIN@" "/run/wrappers/bin/fusermount3" \
+            --replace-fail "@GIO_BIN@" "${pkgs.glib}/bin/gio" \
+            --replace-fail "@XDG_OPEN_BIN@" "${pkgs.xdg-utils}/bin/xdg-open"
+          sed -i "1s|^#!/usr/bin/env python3$|#!${kdeconnectPython}/bin/python3|" \
+            "$out/libexec/omarchnix-kdeconnect-helper.py"
+          chmod 0755 "$out/libexec/omarchnix-kdeconnect-helper.py"
+
+          makeWrapper "$out/libexec/omarchnix-kdeconnect-helper.py" "$out/bin/omarchnix-kdeconnect-helper" \
+            --prefix GI_TYPELIB_PATH : "${pkgs.glib.out}/lib/girepository-1.0" \
+            --prefix PATH : "/run/wrappers/bin:${
+              lib.makeBinPath [
+                pkgs.sshfs
+                pkgs.fuse3
+                pkgs.glib
+                pkgs.iproute2
+                pkgs.xdg-utils
+              ]
+            }:/run/current-system/sw/bin" \
+            --set-default OMARCHNIX_KDECONNECT_SEED_ADDRESSES ${lib.escapeShellArg (builtins.toJSON sCfg.kdeconnect.customAddresses)}
+        ''
+    else
+      null;
 
   omdropBinPath = if airdropActive then "${omdropPkg}/bin/omdrop" else "";
   quickshareBinPath = if quickshareActive then "${quicksharePkg}/bin/omarchy-quickshare" else "";
   nearbyHelperBinPath = if nearbyActive then "${nearbyPkg}/bin/omarchy-nearby-helper" else "";
+  kdeconnectHelperBinPath =
+    if kdeconnectActive && kdeconnectHelperPkg != null then
+      "${kdeconnectHelperPkg}/bin/omarchnix-kdeconnect-helper"
+    else
+      "";
   fileSelectBinPath = if omarchyShell != null then "${omarchyShell}/bin/omarchy-file-select" else "";
   notifyBinPath =
     if omarchyShell != null then "${omarchyShell}/bin/omarchy-notification-send" else "";
@@ -90,6 +157,7 @@ let
             --replace-fail "@OMDROP_BIN@" ${lib.escapeShellArg omdropBinPath} \
             --replace-fail "@QUICKSHARE_BIN@" ${lib.escapeShellArg quickshareBinPath} \
             --replace-fail "@NEARBY_HELPER_BIN@" ${lib.escapeShellArg nearbyHelperBinPath} \
+            --replace-fail "@KDECONNECT_HELPER_BIN@" ${lib.escapeShellArg kdeconnectHelperBinPath} \
             --replace-fail "@FILE_SELECT_BIN@" ${lib.escapeShellArg fileSelectBinPath} \
             --replace-fail "@NOTIFY_BIN@" ${lib.escapeShellArg notifyBinPath} \
             --replace-fail "@XDG_OPEN_BIN@" "${pkgs.xdg-utils}/bin/xdg-open" \
@@ -190,6 +258,26 @@ in
         description = "Status-bar section where `oma.nearby` is placed when `unifiedBar = false`.";
       };
     };
+
+    kdeconnect = {
+      enable = lib.mkEnableOption "KDE Connect bidirectional clipboard, file, and phone sync (`kdeconnectd`)";
+
+      package = lib.mkOption {
+        type = lib.types.nullOr lib.types.package;
+        default = null;
+        defaultText = lib.literalExpression "pkgs.kdePackages.kdeconnect-kde";
+        description = "Package providing `kdeconnectd` and `kdeconnect-cli`.";
+      };
+
+      customAddresses = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Declarative peer IPv4/IPv6 addresses (e.g. `lean-mesh` `10.88.x.x` or static LAN IPs)
+          merged into KDE Connect's `customDevices` list without clobbering UI-added addresses.
+        '';
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable (
@@ -205,6 +293,10 @@ in
           "netmojo.omdrop"
           "macondo.quickshare"
           "oma.nearby"
+          "seb-krz.omarchy-connect"
+          "omakdeconnect"
+          "omaconnect"
+          "omaconnect.plus"
         ];
       })
 
@@ -313,6 +405,51 @@ in
             package = nearbyPlugin;
             enable = true;
             section = sCfg.nearby.barSection;
+          };
+        };
+      })
+
+      (lib.mkIf kdeconnectActive {
+        home.packages = lib.filter (p: p != null) [
+          kdeconnectCliShim
+          kdeconnectHelperPkg
+        ];
+
+        xdg.dataFile."dbus-1/services/org.kde.kdeconnect.service".text = ''
+          [D-BUS Service]
+          Name=org.kde.kdeconnect
+          Exec=${kdeconnectPkg}/bin/kdeconnectd
+          SystemdService=kdeconnect.service
+        '';
+
+        systemd.user.services.kdeconnect = {
+          Unit = {
+            Description = "KDE Connect daemon for Omarchy phone clipboard and file sync";
+            PartOf = [ "graphical-session.target" ];
+            After = [ "graphical-session.target" ];
+            ConditionEnvironment = "WAYLAND_DISPLAY";
+          };
+          Service = {
+            Type = "dbus";
+            BusName = "org.kde.kdeconnect";
+            ExecStart = "${kdeconnectPkg}/bin/kdeconnectd";
+            Environment = [
+              "QT_QPA_PLATFORM=wayland;xcb"
+              "PATH=/run/wrappers/bin:${
+                lib.makeBinPath [
+                  pkgs.sshfs
+                  pkgs.fuse3
+                  pkgs.glib
+                  pkgs.wl-clipboard
+                  pkgs.xdg-utils
+                ]
+              }:/run/current-system/sw/bin"
+            ];
+            Restart = "on-failure";
+            RestartSec = 3;
+          };
+          Install = {
+            WantedBy = [ "graphical-session.target" ];
           };
         };
       })

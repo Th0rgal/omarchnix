@@ -11,6 +11,7 @@ Item {
   readonly property string omdropBin: "@OMDROP_BIN@"
   readonly property string quickshareBin: "@QUICKSHARE_BIN@"
   readonly property string nearbyHelperBin: "@NEARBY_HELPER_BIN@"
+  readonly property string kdeconnectHelperBin: "@KDECONNECT_HELPER_BIN@"
   readonly property string fileSelectBin: "@FILE_SELECT_BIN@"
   readonly property string notifyBin: "@NOTIFY_BIN@"
   readonly property string xdgOpenBin: "@XDG_OPEN_BIN@"
@@ -19,6 +20,7 @@ Item {
   readonly property bool airdropAvailable: omdropBin !== "" && omdropBin.charAt(0) !== "@"
   readonly property bool quickshareAvailable: quickshareBin !== "" && quickshareBin.charAt(0) !== "@"
   readonly property bool nearbyAvailable: nearbyHelperBin !== "" && nearbyHelperBin.charAt(0) !== "@"
+  readonly property bool kdeconnectAvailable: kdeconnectHelperBin !== "" && kdeconnectHelperBin.charAt(0) !== "@"
 
   readonly property string homeDir: Quickshell.env("HOME") || ""
   readonly property string defaultDownloadsDir: homeDir !== "" ? (homeDir + "/Downloads") : "/tmp"
@@ -34,6 +36,7 @@ Item {
     if (openViewCount === 1) {
       if (airdropAvailable) refreshAirdropStatus()
       if (nearbyReady) sendNearby({ command: "discovery_start" })
+      if (kdeconnectAvailable) refreshKdeconnect()
     }
   }
 
@@ -490,6 +493,191 @@ Item {
     }
   }
 
+  // --------------------------------------------------- KDE Connect (LAN & Mesh)
+  property bool kdeconnectDaemonRunning: false
+  property var kdeconnectDevices: []
+  property var kdeconnectCustomAddresses: []
+  property string kdeconnectLocalMeshIp: ""
+  property string kdeconnectLocalMeshIface: ""
+  property string kdeconnectLocalLanIp: ""
+  property string kdeconnectStatus: ""
+  property string kdeconnectError: ""
+
+  readonly property var kdeconnectConnectedDevices: kdeconnectDevices.filter(function(d) {
+    return d && d.connected === true
+  })
+  readonly property var kdeconnectPairableDevices: kdeconnectDevices.filter(function(d) {
+    return d && d.pairable === true && !d.pairRequested && !d.pairRequestedByPeer
+  })
+  readonly property var kdeconnectOfflineDevices: kdeconnectDevices.filter(function(d) {
+    return d && d.paired === true && !d.reachable
+  })
+  readonly property var kdeconnectPairPrompt: {
+    for (var i = 0; i < kdeconnectDevices.length; i++) {
+      var d = kdeconnectDevices[i]
+      if (d && (d.pairRequestedByPeer === true || d.pairRequested === true)) return d
+    }
+    return null
+  }
+
+  Process {
+    id: kdeconnectWatch
+    command: [root.kdeconnectHelperBin, "watch"]
+    running: root.kdeconnectAvailable
+    stdout: SplitParser {
+      onRead: function(line) {
+        var s = String(line || "").trim()
+        if (!s) return
+        try {
+          var snap = JSON.parse(s)
+          if (!snap || snap.version !== 1) return
+          root.kdeconnectDaemonRunning = snap.daemonRunning === true
+          root.kdeconnectDevices = Array.isArray(snap.devices) ? snap.devices : []
+          root.kdeconnectCustomAddresses = Array.isArray(snap.customAddresses) ? snap.customAddresses : []
+          var loc = snap.localAddresses || {}
+          root.kdeconnectLocalMeshIp = String(loc.mesh || "")
+          root.kdeconnectLocalMeshIface = String(loc.meshInterface || "")
+          root.kdeconnectLocalLanIp = String(loc.lan || "")
+        } catch (e) {}
+      }
+    }
+    onExited: {
+      root.kdeconnectDaemonRunning = false
+      if (root.kdeconnectAvailable) kdeconnectReconnect.restart()
+    }
+  }
+
+  Timer {
+    id: kdeconnectReconnect
+    interval: 2500
+    onTriggered: if (root.kdeconnectAvailable && !kdeconnectWatch.running) kdeconnectWatch.running = true
+  }
+
+  Component {
+    id: kcCmdComponent
+    Process {
+      id: kcTask
+      property string payload: ""
+      property string successNotice: ""
+      onStarted: {
+        if (!stdinEnabled) return
+        write(payload + "\n")
+        payload = ""
+        stdinEnabled = false
+      }
+      stderr: StdioCollector { id: kcErr; waitForEnd: true }
+      onExited: function(code) {
+        if (code !== 0) {
+          var errMsg = kcErr.text.trim()
+          if (errMsg !== "") {
+            root.kdeconnectError = errMsg
+            statusClearTimer.restart()
+          }
+        } else {
+          root.kdeconnectError = ""
+          if (successNotice !== "") {
+            root.kdeconnectStatus = successNotice
+            statusClearTimer.restart()
+          }
+        }
+        Qt.callLater(function() { kcTask.destroy() })
+      }
+    }
+  }
+
+  function runKdeconnectCmd(args, stdinValue, successNotice) {
+    if (!kdeconnectAvailable) return
+    kdeconnectError = ""
+    var hasStdin = stdinValue !== undefined && stdinValue !== null
+    var task = kcCmdComponent.createObject(root, {
+      command: [kdeconnectHelperBin].concat(args),
+      stdinEnabled: hasStdin,
+      payload: hasStdin ? JSON.stringify(stdinValue) : "",
+      successNotice: String(successNotice || "")
+    })
+    task.running = true
+  }
+
+  function refreshKdeconnect() {
+    runKdeconnectCmd(["refresh"], null, "")
+  }
+
+  function sendClipboardToPhone(deviceId, deviceName) {
+    var target = deviceId && String(deviceId) !== "" ? String(deviceId) : "--all"
+    var label = deviceName ? ("Clipboard sent to " + deviceName) : "Clipboard sent to phone"
+    runKdeconnectCmd(["send-clipboard", target], null, label)
+  }
+
+  function ringPhone(deviceId, deviceName) {
+    if (!deviceId) return
+    runKdeconnectCmd(["ring", String(deviceId)], null, "Ringing " + (deviceName || "phone") + "…")
+  }
+
+  function browsePhoneFiles(deviceId, deviceName) {
+    if (!deviceId) return
+    kdeconnectStatus = "Mounting " + (deviceName || "phone") + "…"
+    runKdeconnectCmd(["browse-files", String(deviceId)], null, "Opened " + (deviceName || "phone") + " in File Explorer")
+  }
+
+  function pairPhone(deviceId, deviceName) {
+    if (!deviceId) return
+    runKdeconnectCmd(["pair", String(deviceId)], null, "Pair request sent to " + (deviceName || "device"))
+  }
+
+  function acceptPhonePair(deviceId) {
+    if (!deviceId) return
+    runKdeconnectCmd(["accept", String(deviceId)], null, "Paired")
+  }
+
+  function rejectPhonePair(deviceId) {
+    if (!deviceId) return
+    runKdeconnectCmd(["reject", String(deviceId)], null, "")
+  }
+
+  function unpairPhone(deviceId, deviceName) {
+    if (!deviceId) return
+    runKdeconnectCmd(["unpair", String(deviceId)], null, "Unpaired " + (deviceName || "device"))
+  }
+
+  function addKdeconnectAddress(address) {
+    var clean = String(address || "").trim()
+    if (clean === "") return false
+    runKdeconnectCmd(["add-address", clean], null, "Saved " + clean + " & scanning…")
+    return true
+  }
+
+  function removeKdeconnectAddress(address) {
+    var clean = String(address || "").trim()
+    if (clean === "") return
+    runKdeconnectCmd(["remove-address", clean], null, "Removed " + clean)
+  }
+
+  function copyTextValue(value, label) {
+    var clean = String(value || "").trim()
+    if (clean === "" || wlCopyBin === "" || wlCopyBin.charAt(0) === "@") return
+    var task = qsCmdComponent.createObject(root, {
+      command: [wlCopyBin],
+      stdinEnabled: true,
+      payload: clean,
+      kind: "copy"
+    })
+    task.running = true
+    kdeconnectStatus = "Copied " + (label || clean)
+    statusClearTimer.restart()
+  }
+
+  function pickAndSendToPhone(dev) {
+    if (!dev || !dev.id) return
+    pickAndSend({
+      key: "kdeconnect:" + dev.id,
+      protocol: "kdeconnect",
+      badge: "KDE Connect",
+      icon: "󰄜",
+      name: String(dev.name || "Phone"),
+      deviceId: String(dev.id)
+    })
+  }
+
   // ------------------------------------------------ Unified state & countdowns
   readonly property bool anyReceiving: airdropReceiving || quickshareDiscoverable || nearbyReceiving
 
@@ -505,6 +693,7 @@ Item {
 
   readonly property bool hasUrgentPrompt: (
     (quicksharePromptTransfer !== null && String(quicksharePromptTransfer.state) === "waiting_acceptance")
+    || (kdeconnectPairPrompt !== null && kdeconnectPairPrompt.pairRequestedByPeer === true)
     || nearbyIncoming !== null
     || nearbyIncomingText !== ""
   )
@@ -661,14 +850,19 @@ Item {
         device: target.rawDevice,
         paths: files
       })
+    } else if (target.protocol === "kdeconnect" && target.deviceId) {
+      kdeconnectStatus = "Sending to " + target.name + "…"
+      runKdeconnectCmd(["send-files", target.deviceId], files, "Sent to " + target.name)
     }
   }
 
   readonly property string transientNotice: {
     if (airdropError !== "") return airdropError
     if (quickshareError !== "") return quickshareError
+    if (kdeconnectError !== "") return kdeconnectError
     if (airdropSendStatus !== "") return airdropSendStatus
     if (nearbyStatus !== "") return nearbyStatus
+    if (kdeconnectStatus !== "") return kdeconnectStatus
     return ""
   }
 
@@ -678,6 +872,8 @@ Item {
     onTriggered: {
       if (!root.airdropSending) root.airdropSendStatus = ""
       if (!root.nearbyTransferActive) root.nearbyStatus = ""
+      root.kdeconnectStatus = ""
+      root.kdeconnectError = ""
     }
   }
 

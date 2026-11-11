@@ -212,6 +212,7 @@ in
 
       (lib.mkIf sCfg.kdeconnect.enable {
         hardware.uinput.enable = lib.mkDefault true;
+        services.upower.enable = lib.mkDefault true;
 
         services.avahi = {
           enable = lib.mkDefault true;

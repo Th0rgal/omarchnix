@@ -99,7 +99,7 @@ Panel {
         ? ("CONNECTED · " + String(kcConnected[0].name || "PHONE").toUpperCase())
         : ("CONNECTED · " + kcConnected.length + " PHONES")
     }
-    return "AIRDROP · PHONE · QUICK SHARE · NEARBY"
+    return "AIRDROP · PHONE · ANDROID · NEARBY"
   }
 
   property bool viewRegistered: false

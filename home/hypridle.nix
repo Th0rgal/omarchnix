@@ -46,7 +46,12 @@ in
     settings = {
       general = {
         lock_cmd = "${lockCmd}";
-        after_sleep_cmd = "${hyprctl} dispatch 'hl.dsp.dpms(\"on\")'${lib.optionalString dimKbd "; ${kbdRestoreCmd}"}";
+        before_sleep_cmd = "${lockCmd}";
+        after_sleep_cmd = "${hyprctl} dispatch 'hl.dsp.dpms(\"on\")'${lib.optionalString dimKbd "; ${kbdRestoreCmd}"}${
+          lib.optionalString (
+            shellPkg != null
+          ) "; ${shellPkg}/bin/omarchy-shell lock resume >/dev/null 2>&1 || true"
+        }";
         ignore_dbus_inhibit = false;
       };
 

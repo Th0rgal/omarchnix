@@ -415,8 +415,8 @@ in
             );
 
             bind = lib.mkAfter [
-              (mkBind "CTRL + up" "hl.dsp.exec_cmd(${builtins.toJSON mcToggleCmd})")
-              (mkBind "CTRL + down" "hl.dsp.exec_cmd(${builtins.toJSON mcHideCmd})")
+              # Mission Control shortcut (Option + Esc toggles; Esc inside Mission Control closes)
+              (mkBind "ALT + ESCAPE" "hl.dsp.exec_cmd(${builtins.toJSON mcToggleCmd})")
             ];
           };
         };
@@ -475,7 +475,6 @@ in
 
       (lib.mkIf mCfg.minimalBar.enable {
         programs.omarchnix.plugins.locked = {
-          "omarchnix.clipboard".enable = false;
           "omarchnix.appearance".section = "tray";
         };
 

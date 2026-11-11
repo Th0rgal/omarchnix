@@ -58,6 +58,7 @@ in
         keybind = super+c=copy_to_clipboard
         keybind = super+v=paste_from_clipboard
         keybind = super+t=new_tab
+        keybind = super+f=start_search
         keybind = super+w=close_surface
         keybind = ctrl+shift+w=close_surface
         keybind = shift+insert=paste_from_clipboard

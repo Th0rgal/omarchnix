@@ -600,7 +600,9 @@ in
         };
 
         environment.systemPackages = [
+          pkgs.adw-gtk3
           pkgs.adwaita-icon-theme
+          pkgs.morewaita-icon-theme
           pkgs.xarchiver
           pkgs.hyprsunset
           pkgs.lm_sensors

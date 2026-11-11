@@ -22,6 +22,7 @@
       key-bindings = {
         clipboard-copy = "Control+Shift+c Mod4+c XF86Copy";
         clipboard-paste = "Control+Shift+v Mod4+v XF86Paste";
+        search-start = "Control+Shift+r Control+Shift+f Mod4+f";
       };
 
       colors-dark = {

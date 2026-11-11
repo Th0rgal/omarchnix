@@ -55,6 +55,27 @@ let
     } | ${pkgs.wl-clipboard}/bin/wl-copy
   '';
 
+  thunarDataDirs = lib.makeSearchPath "share" [
+    pkgs.morewaita-icon-theme
+    pkgs.adwaita-icon-theme
+    pkgs.adw-gtk3
+  ];
+
+  thunarWrapped = pkgs.symlinkJoin {
+    name = "thunar-themed-${pkgs.thunar.version}";
+    paths = [ pkgs.thunar ];
+    nativeBuildInputs = [ pkgs.makeWrapper ];
+    postBuild = ''
+      for bin in thunar Thunar thunar-settings; do
+        if [ -e "$out/bin/$bin" ]; then
+          wrapProgram "$out/bin/$bin" \
+            --prefix XDG_DATA_DIRS : ${lib.escapeShellArg thunarDataDirs}
+        fi
+      done
+    '';
+    inherit (pkgs.thunar) meta;
+  };
+
   defaultThunarXml = pkgs.writeText "omarchnix-thunar.xml" ''
     <?xml version="1.0" encoding="UTF-8"?>
     <channel name="thunar" version="1.0">
@@ -62,13 +83,17 @@ let
       <property name="last-location-bar" type="string" value="ThunarLocationButtons"/>
       <property name="last-menubar-visible" type="bool" value="false"/>
       <property name="last-statusbar-visible" type="bool" value="true"/>
-      <property name="last-toolbar-items" type="string" value="menu:1,back:1,forward:1,open-parent:1,open-home:1,new-tab:0,new-window:0,toggle-split-view:1,undo:0,redo:0,zoom-out:0,zoom-in:0,zoom-reset:0,view-as-icons:0,view-as-detailed-list:0,view-as-compact-list:0,view-switcher:1,location-bar:1,reload:0,search:1"/>
-      <property name="last-details-view-zoom-level" type="string" value="THUNAR_ZOOM_LEVEL_38_PERCENT"/>
+      <property name="last-toolbar-items" type="string" value="menu:1,back:1,forward:1,open-parent:1,open-home:0,new-tab:0,new-window:0,toggle-split-view:1,undo:0,redo:0,zoom-out:0,zoom-in:0,zoom-reset:0,view-as-icons:0,view-as-detailed-list:0,view-as-compact-list:0,view-switcher:1,location-bar:1,reload:0,search:1"/>
+      <property name="last-details-view-zoom-level" type="string" value="THUNAR_ZOOM_LEVEL_50_PERCENT"/>
       <property name="last-icon-view-zoom-level" type="string" value="THUNAR_ZOOM_LEVEL_100_PERCENT"/>
-      <property name="last-separator-position" type="int" value="190"/>
-      <property name="last-window-width" type="int" value="1040"/>
+      <property name="last-separator-position" type="int" value="196"/>
+      <property name="last-window-width" type="int" value="1060"/>
       <property name="last-window-height" type="int" value="680"/>
       <property name="last-window-maximized" type="bool" value="false"/>
+      <property name="misc-use-csd" type="bool" value="true"/>
+      <property name="misc-symbolic-icons-in-sidepane" type="bool" value="true"/>
+      <property name="misc-symbolic-icons-in-toolbar" type="bool" value="true"/>
+      <property name="misc-thumbnail-draw-frames" type="bool" value="false"/>
       <property name="misc-folders-first" type="bool" value="true"/>
       <property name="misc-expandable-folders" type="bool" value="true"/>
       <property name="misc-show-delete-action" type="bool" value="true"/>
@@ -89,8 +114,7 @@ in
 
   config = lib.mkIf (cfg.enable && fmCfg.enable) {
     home.packages = [
-      pkgs.thunar
-      pkgs.adwaita-icon-theme
+      thunarWrapped
       pkgs.xarchiver
     ];
 
@@ -107,7 +131,7 @@ in
         GenericName=File Manager
         Comment=Browse files and folders
         Keywords=file explorer;file manager;files;folders;finder;explorer;thunar;directory;downloads;browse;
-        Exec=${pkgs.thunar}/bin/thunar %U
+        Exec=${thunarWrapped}/bin/thunar %U
         Icon=${pkgs.adwaita-icon-theme}/share/icons/Adwaita/scalable/places/folder.svg
         Terminal=false
         StartupNotify=true
@@ -119,20 +143,20 @@ in
         [Desktop Entry]
         Type=Application
         Name=Bulk Rename
-        Exec=${pkgs.thunar}/bin/thunar --bulk-rename %F
+        Exec=${thunarWrapped}/bin/thunar --bulk-rename %F
         NoDisplay=true
       '';
       "applications/thunar-settings.desktop".text = ''
         [Desktop Entry]
         Type=Application
         Name=File Manager Settings
-        Exec=${pkgs.thunar}/bin/thunar-settings
+        Exec=${thunarWrapped}/bin/thunar-settings
         NoDisplay=true
       '';
       "dbus-1/services/org.freedesktop.FileManager1.service".text = ''
         [D-BUS Service]
         Name=org.freedesktop.FileManager1
-        Exec=${pkgs.thunar}/bin/Thunar --gapplication-service
+        Exec=${thunarWrapped}/bin/Thunar --gapplication-service
       '';
     };
 
@@ -185,7 +209,9 @@ in
     '';
 
     # Seed Windows-Explorer-style Thunar defaults as a writable file so `xfconfd`
-    # can freely persist runtime column widths, view toggles, and window geometry.
+    # can freely persist runtime column widths, view toggles, and window geometry,
+    # merging any newly introduced default `<property>` entries without resetting
+    # existing user preferences.
     home.activation.omarchnixThunarDefaults = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       thunar_cfg_dir="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
       thunar_cfg="$thunar_cfg_dir/thunar.xml"
@@ -194,6 +220,55 @@ in
         rm -f "$thunar_cfg"
         cp --no-preserve=mode,ownership "${defaultThunarXml}" "$thunar_cfg"
         chmod 0644 "$thunar_cfg"
+      else
+        ${pkgs.python3}/bin/python3 - "$thunar_cfg" "${defaultThunarXml}" <<'PY'
+      import os
+      import shutil
+      import sys
+      import tempfile
+      import xml.etree.ElementTree as ET
+
+      cfg_path, defaults_path = sys.argv[1], sys.argv[2]
+      try:
+          cur_tree = ET.parse(cfg_path)
+          cur_root = cur_tree.getroot()
+          def_root = ET.parse(defaults_path).getroot()
+          if cur_root.tag != "channel":
+              raise ValueError("unexpected root tag")
+      except Exception:
+          shutil.copyfile(defaults_path, cfg_path)
+          os.chmod(cfg_path, 0o644)
+          sys.exit(0)
+
+      existing = {
+          el.attrib.get("name")
+          for el in cur_root.findall("property")
+          if el.attrib.get("name")
+      }
+      changed = False
+      for prop in def_root.findall("property"):
+          name = prop.attrib.get("name")
+          if name and name not in existing:
+              cur_root.append(prop)
+              existing.add(name)
+              changed = True
+
+      if changed:
+          ET.indent(cur_tree, space="  ")
+          fd, tmp_path = tempfile.mkstemp(prefix="thunar.xml.", dir=os.path.dirname(cfg_path))
+          try:
+              os.fchmod(fd, 0o644)
+              with os.fdopen(fd, "wb") as fh:
+                  cur_tree.write(fh, encoding="UTF-8", xml_declaration=True)
+                  fh.write(b"\n")
+              os.replace(tmp_path, cfg_path)
+          except Exception:
+              try:
+                  os.unlink(tmp_path)
+              except OSError:
+                  pass
+              raise
+      PY
       fi
     '';
   };

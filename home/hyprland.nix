@@ -38,6 +38,58 @@ let
   '';
   omarchnixCli = if cfg.cliPackage != null then "${cfg.cliPackage}/bin/omarchnix" else "omarchnix";
   omarchyShellBin = if cfg.shell.package != null then "${cfg.shell.package}/bin" else "";
+  omarchyShellCmd =
+    if omarchyShellBin != "" then "${omarchyShellBin}/omarchy-shell" else "omarchy-shell";
+  jq = "${pkgs.jq}/bin/jq";
+  busctl = "${pkgs.systemd}/bin/busctl";
+  gnugrep = "${pkgs.gnugrep}/bin/grep";
+  powerKeyCmd = pkgs.writeShellScript "omarchnix-power-key" ''
+    set -u
+    lockfile="''${XDG_RUNTIME_DIR:-/tmp}/omarchnix-power-key.lock"
+    exec 9>"$lockfile"
+    ${flock} -n 9 || exit 0
+
+    ${lib.optionalString (cfg.shell.backend == "omarchy-shell") ''
+      status_json="$(${omarchyShellCmd} lock status 2>/dev/null || true)"
+      if [ -n "$status_json" ]; then
+        # When already locked, pressing the Power / Touch ID button wakes the display.
+        if printf '%s\n' "$status_json" | ${jq} -e '.locked == true or .requested == true or .sessionLocked == true' >/dev/null 2>&1; then
+          ${omarchyShellCmd} lock wake >/dev/null 2>&1 || true
+          exit 0
+        fi
+        # Ignore the release of a firm Touch ID click that just unlocked the session.
+        if printf '%s\n' "$status_json" | ${jq} -e '
+          .lastEvent == "unlocked"
+          and (.lastEventAt | type == "string" and length > 0)
+          and ((now - ((.lastEventAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) // 0)) < 2.5)
+        ' >/dev/null 2>&1; then
+          exit 0
+        fi
+      fi
+
+      # Do not lock while an in-session Touch ID HUD prompt (sudo / fprintd / FIDO) is open or animating.
+      tid_json="$(${omarchyShellCmd} touchid state 2>/dev/null || true)"
+      if [ -n "$tid_json" ] && printf '%s\n' "$tid_json" | ${jq} -e '.opened == true or .cardVisible == true' >/dev/null 2>&1; then
+        exit 0
+      fi
+    ''}
+
+    # Do not lock if fprintd is actively waiting for or reading a finger (sudo, polkit, fprintd-verify).
+    for dev in /net/reactivated/Fprint/Device/0 /net/reactivated/Fprint/Device/1; do
+      fprint_props="$(${busctl} get-property net.reactivated.Fprint "$dev" net.reactivated.Fprint.Device finger-needed finger-present 2>/dev/null || true)"
+      if [ -n "$fprint_props" ] && printf '%s\n' "$fprint_props" | ${gnugrep} -q 'b true'; then
+        exit 0
+      fi
+    done
+
+    # Do not lock while the polkit authentication overlay is active.
+    hyprctl_bin="$(PATH="/run/current-system/sw/bin:$PATH" command -v hyprctl 2>/dev/null || true)"
+    if [ -n "$hyprctl_bin" ] && "$hyprctl_bin" layers -j 2>/dev/null | ${jq} -e '.. | objects | select(.namespace? == "omarchy-polkit")' >/dev/null 2>&1; then
+      exit 0
+    fi
+
+    exec ${shellLock}
+  '';
   themePickerCmd =
     if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
       "${omarchyShellBin}/omarchy-shell shell summon omarchy.image-picker '{\"source\":\"themes\"}'"
@@ -112,7 +164,21 @@ let
         end
         if not is_term then
           local cls = (w.class or w.initial_class or ""):lower()
-          if cls:match("^(foot|foot%-scratchpad|alacritty|kitty|wezterm|.*ghostty.*|org%.omarchy%..*|tui%..*)$") then
+          local term_exact = {
+            ["foot"] = true,
+            ["foot-scratchpad"] = true,
+            ["org.codeberg.dnkl.foot"] = true,
+            ["alacritty"] = true,
+            ["kitty"] = true,
+            ["wezterm"] = true,
+            ["org.wezfurlong.wezterm"] = true,
+          }
+          if
+            term_exact[cls]
+            or cls:find("ghostty", 1, true)
+            or cls:find("^org%.omarchy%.")
+            or cls:find("^tui%.")
+          then
             is_term = true
           end
         end
@@ -128,17 +194,52 @@ let
 
   # macOS-style Cmd+W: close the active tab/surface in browsers, code editors, and
   # tabbed terminals (which natively close the window when closing the last tab),
-  # and close the window directly in single-window apps. Cmd+Shift+Q always closes
-  # the whole window.
+  # ignore Orb so Cmd+W never closes Orb by mistake, and close single-window apps.
+  # Option+Shift+Q always closes the whole window.
   smartCloseBind = ''
     function()
       local w = hl.get_active_window()
       if not w then return end
       local cls = (w.class or w.initial_class or ""):lower()
+      local orb_classes = {
+        ["orb-desktop"] = true,
+        [".orb-desktop-unwrapped"] = true,
+        ["orb"] = true,
+      }
+      if orb_classes[cls] then
+        return
+      end
+      local ctrl_w_exact = {
+        ["brave-browser"] = true,
+        ["chromium"] = true,
+        ["chromium-browser"] = true,
+        ["epiphany"] = true,
+        ["antigravity"] = true,
+        ["code"] = true,
+        ["code-url-handler"] = true,
+        ["codium"] = true,
+        ["vscodium"] = true,
+        ["cursor"] = true,
+        ["dev.zed.zed"] = true,
+        ["zed"] = true,
+        ["thunar"] = true,
+      }
+      local ctrl_shift_w_exact = {
+        ["kitty"] = true,
+        ["org.wezfurlong.wezterm"] = true,
+        ["wezterm"] = true,
+      }
       local mods = nil
-      if cls:match("^(brave%-browser|chromium|chromium%-browser|google%-chrome.*|firefox.*|librewolf.*|zen.*|vivaldi.*|epiphany|code|code%-url%-handler|codium|vscodium|cursor|dev%.zed%.zed|zed|thunar)$") then
+      if
+        ctrl_w_exact[cls]
+        or cls:find("^google%-chrome")
+        or cls:find("^firefox")
+        or cls:find("^librewolf")
+        or cls:find("^zen")
+        or cls:find("^vivaldi")
+      then
         mods = "CTRL"
-      elseif cls:match("^(.*ghostty.*|kitty|org%.wezfurlong%.wezterm|wezterm)$") then
+      elseif ctrl_shift_w_exact[cls] or cls:find("ghostty", 1, true) then
         mods = "CTRL SHIFT"
       end
       if mods then
@@ -155,6 +256,13 @@ let
   # Float & center active window at 84%x85% of usable workarea so a clean wallpaper
   # frame remains visible around it; pressing again when already centered returns
   # the window to normal WM tiling.
+  #
+  # Note on Hyprland 0.57+ Lua `hl.dsp.window.resize({ relative = false })`:
+  # `Config::Actions::resize` computes `delta = target - w->reportedSize()` (the last
+  # committed Wayland buffer size) and adds `delta` to the floating layout goal box
+  # (`m_lastFloatingSize`). Never call `resize({ relative = false })` synchronously on
+  # the same frame as `float({ action = "enable" })` or repeat it before `w.size`
+  # commits, otherwise `delta` is subtracted from `m_lastFloatingSize` repeatedly.
   centerShowcaseBind = ''
     function()
       local w = hl.get_active_window()
@@ -163,8 +271,8 @@ let
       if not m then return end
 
       local state = rawget(_G, "__omarchnix_showcase")
-      if not state then
-        state = { seq = {}, geom = {} }
+      if not state or not state.active then
+        state = { seq = {}, active = {}, float_ready = {}, committed = {} }
         rawset(_G, "__omarchnix_showcase", state)
       end
       local addr = tostring(w.address or "")
@@ -207,20 +315,22 @@ let
       end
 
       local t = compute_targets(m)
+      local was_floating = w.floating and (w.fullscreen or 0) == 0
 
-      if w.floating and (w.fullscreen or 0) == 0 then
+      if was_floating then
         local wx = (w.at and w.at.x) or 0
         local wy = (w.at and w.at.y) or 0
         local ww = (w.size and w.size.x) or 0
         local wh = (w.size and w.size.y) or 0
-        local is_centered = math.abs((wx + ww / 2) - t.center_x) <= 28
-          and math.abs((wy + wh / 2) - t.center_y) <= 28
-        local prev = state.geom[addr]
-        local is_showcase_size = (math.abs(ww - t.target_w) <= 36 and math.abs(wh - t.target_h) <= 36)
-          or (prev and math.abs(ww - prev.w) <= 12 and math.abs(wh - prev.h) <= 12)
-        if is_centered and is_showcase_size then
+        local is_centered = math.abs((wx + ww / 2) - t.center_x) <= 36
+          and math.abs((wy + wh / 2) - t.center_y) <= 36
+        local prev = state.committed[addr]
+        local is_showcase_size = (math.abs(ww - t.target_w) <= 40 and math.abs(wh - t.target_h) <= 40)
+          or (prev and math.abs(ww - prev.w) <= 16 and math.abs(wh - prev.h) <= 16)
+        if is_centered and (state.active[addr] or is_showcase_size) then
           state.seq[addr] = (state.seq[addr] or 0) + 1
-          state.geom[addr] = nil
+          state.active[addr] = nil
+          hl.dispatch(hl.dsp.window.pseudo({ action = "disable", window = w }))
           hl.dispatch(hl.dsp.window.float({ action = "disable", window = w }))
           return
         end
@@ -228,37 +338,22 @@ let
 
       local my_seq = (state.seq[addr] or 0) + 1
       state.seq[addr] = my_seq
+      state.active[addr] = true
+
+      local pre_w = (w.size and w.size.x) or 0
+      local pre_h = (w.size and w.size.y) or 0
 
       if (w.fullscreen or 0) ~= 0 then
         local fs_mode = (w.fullscreen == 1) and "maximized" or "fullscreen"
         hl.dispatch(hl.dsp.window.fullscreen({ mode = fs_mode, action = "unset", window = w }))
       end
-      if not w.floating then
-        hl.dispatch(hl.dsp.window.float({ action = "enable", window = w }))
-      end
-      hl.dispatch(hl.dsp.window.resize({ x = t.target_w, y = t.target_h, relative = false, window = w }))
-      hl.dispatch(hl.dsp.window.move({ x = t.target_x, y = t.target_y, relative = false, window = w }))
-      state.geom[addr] = { w = t.target_w, h = t.target_h }
 
-      -- GTK4 Wayland clients (such as Ghostty) ignore the configure width/height on
-      -- the exact transition out of tiled/maximized/fullscreen state and commit their
-      -- saved pre-tiled floating size on the next frame instead. Re-assert the target
-      -- showcase size once floating settles and center using actual committed size.
-      local function settle(reassert_size)
-        if state.seq[addr] ~= my_seq then return end
-        local ok_mapped, is_mapped = pcall(function() return w.mapped end)
-        if not ok_mapped or not is_mapped then return end
-        if not w.floating or (w.fullscreen or 0) ~= 0 then return end
+      local function recenter_committed()
         local cur_m = w.monitor or hl.get_active_monitor()
         if not cur_m then return end
         local ct = compute_targets(cur_m)
-        local ww = (w.size and w.size.x) or 0
-        local wh = (w.size and w.size.y) or 0
-        if reassert_size and (math.abs(ww - ct.target_w) > 2 or math.abs(wh - ct.target_h) > 2) then
-          hl.dispatch(hl.dsp.window.resize({ x = ct.target_w, y = ct.target_h, relative = false, window = w }))
-          ww = (w.size and w.size.x) or ct.target_w
-          wh = (w.size and w.size.y) or ct.target_h
-        end
+        local ww = (w.size and w.size.x) or ct.target_w
+        local wh = (w.size and w.size.y) or ct.target_h
         local cx = math.floor(cur_m.x + ct.res_l + (ct.avail_w - ww) / 2 + 0.5)
         local cy = math.floor(cur_m.y + ct.res_t + (ct.avail_h - wh) / 2 + 0.5)
         local wx = (w.at and w.at.x) or 0
@@ -266,12 +361,70 @@ let
         if math.abs(wx - cx) > 2 or math.abs(wy - cy) > 2 then
           hl.dispatch(hl.dsp.window.move({ x = cx, y = cy, relative = false, window = w }))
         end
-        state.geom[addr] = { w = ww, h = wh }
+        state.committed[addr] = { w = ww, h = wh }
       end
 
-      hl.timer(function() settle(true) end, { timeout = 30, type = "oneshot" })
-      hl.timer(function() settle(true) end, { timeout = 80, type = "oneshot" })
-      hl.timer(function() settle(false) end, { timeout = 150, type = "oneshot" })
+      if was_floating then
+        -- Already floating: `w.size` matches the committed layout goal, so a single
+        -- exact resize + move sets the showcase geometry without cumulative drift.
+        hl.dispatch(hl.dsp.window.resize({ x = t.target_w, y = t.target_h, relative = false, window = w }))
+        hl.dispatch(hl.dsp.window.move({ x = t.target_x, y = t.target_y, relative = false, window = w }))
+        state.float_ready[addr] = { w = t.target_w, h = t.target_h }
+        state.committed[addr] = { w = t.target_w, h = t.target_h }
+
+        for _, delay in ipairs({ 45, 120 }) do
+          hl.timer(function()
+            if state.seq[addr] ~= my_seq then return end
+            local ok_mapped, is_mapped = pcall(function() return w.mapped end)
+            if not ok_mapped or not is_mapped then return end
+            if not w.floating or (w.fullscreen or 0) ~= 0 then return end
+            recenter_committed()
+          end, { timeout = delay, type = "oneshot" })
+        end
+        return
+      end
+
+      -- Transitioning from tiled/maximized/fullscreen: enable floating & center first,
+      -- then wait for the floating Wayland configure to settle before issuing at most
+      -- ONE resize (and skip resizing when `m_lastFloatingSize` is already showcase
+      -- size unless the client committed a different pre-tiled size such as GTK4).
+      hl.dispatch(hl.dsp.window.pseudo({ action = "disable", window = w }))
+      hl.dispatch(hl.dsp.window.float({ action = "enable", window = w }))
+      hl.dispatch(hl.dsp.window.center({ window = w }))
+
+      local ready = state.float_ready[addr]
+      local already_sized = ready and ready.w == t.target_w and ready.h == t.target_h
+      local did_resize = false
+
+      for _, delay in ipairs({ 25, 60, 120, 190 }) do
+        hl.timer(function()
+          if state.seq[addr] ~= my_seq then return end
+          local ok_mapped, is_mapped = pcall(function() return w.mapped end)
+          if not ok_mapped or not is_mapped then return end
+          if not w.floating or (w.fullscreen or 0) ~= 0 then return end
+          local cur_m = w.monitor or hl.get_active_monitor()
+          if not cur_m then return end
+          local ct = compute_targets(cur_m)
+          local ww = (w.size and w.size.x) or 0
+          local wh = (w.size and w.size.y) or 0
+          local size_changed = (ww ~= pre_w) or (wh ~= pre_h)
+
+          if not did_resize and (size_changed or (not already_sized and delay >= 60)) then
+            did_resize = true
+            state.float_ready[addr] = { w = ct.target_w, h = ct.target_h }
+            if math.abs(ww - ct.target_w) > 2 or math.abs(wh - ct.target_h) > 2 then
+              hl.dispatch(hl.dsp.window.resize({ x = ct.target_w, y = ct.target_h, relative = false, window = w }))
+              hl.dispatch(hl.dsp.window.move({ x = ct.target_x, y = ct.target_y, relative = false, window = w }))
+              state.committed[addr] = { w = ct.target_w, h = ct.target_h }
+              return
+            end
+          end
+
+          if size_changed or did_resize or delay >= 120 then
+            recenter_committed()
+          end
+        end, { timeout = delay, type = "oneshot" })
+      end
     end
   '';
 
@@ -308,9 +461,9 @@ let
       code = "code:${toString (ws + 9)}";
     in
     [
-      (mkBind "CTRL + ${code}" "hl.dsp.focus({ workspace = ${toString ws} })")
-      (mkBind "CTRL + SHIFT + ${code}" "hl.dsp.window.move({ workspace = ${toString ws} })")
-      (mkBind "CTRL + SUPER + ${code}" ''hl.dsp.window.move({ workspace = "${toString ws} silent" })'')
+      (mkBind "ALT + ${code}" "hl.dsp.focus({ workspace = ${toString ws} })")
+      (mkBind "ALT + SHIFT + ${code}" "hl.dsp.window.move({ workspace = ${toString ws} })")
+      (mkBind "ALT + CTRL + ${code}" "hl.dsp.window.move({ workspace = ${toString ws}, follow = false })")
     ]
   ) workspaceIndices;
 in
@@ -329,7 +482,7 @@ in
 
     settings = {
       mod = {
-        _var = "SUPER";
+        _var = "ALT";
       };
 
       terminal = {
@@ -506,6 +659,7 @@ in
 
         binds = {
           hide_special_on_workspace_change = true;
+          allow_workspace_cycles = true;
         };
       };
 
@@ -760,80 +914,89 @@ in
       ];
 
       bind = [
-        (mkBind "SUPER + Return" "hl.dsp.exec_cmd(terminal)")
-        (mkBind "CTRL + SUPER + O" ''hl.dsp.exec_cmd("${orb}")'')
-        (mkBind "SUPER + SPACE" "hl.dsp.exec_cmd(launcher)")
-        (mkBind "CTRL + SUPER + SPACE" "hl.dsp.exec_cmd(appLauncher)")
-        (mkBind "SUPER + ALT + SPACE" "hl.dsp.exec_cmd(appLauncher)")
-        (mkBind "SUPER + SHIFT + Q" "hl.dsp.window.close()")
+        # Launchers, core apps & workspace back-and-forth use Option (ALT) so Cmd (SUPER) stays free for Orb & apps
+        (mkBind "ALT + Return" "hl.dsp.exec_cmd(terminal)")
+        (mkBind "ALT + O" ''hl.dsp.exec_cmd("${orb}")'')
+        (mkBind "ALT + SPACE" "hl.dsp.exec_cmd(launcher)")
+        (mkBind "ALT + SHIFT + SPACE" "hl.dsp.exec_cmd(appLauncher)")
+        (mkBind "ALT + TAB" ''hl.dsp.focus({ workspace = "previous" })'')
+        (mkBind "ALT + SHIFT + Q" "hl.dsp.window.close()")
         (mkBind "SUPER + W" smartCloseBind)
-        (mkBind "CTRL + SUPER + SHIFT + Q" "hl.dsp.window.kill()")
+        (mkBind "CTRL + ALT + SHIFT + Q" "hl.dsp.window.kill()")
 
-        # macOS-style universal Copy / Paste / Cut / Select All / Undo / Redo
+        # macOS-style universal Copy / Paste / Cut / Select All / Undo / Redo / Find
         (mkBind "SUPER + C" (mkUniversalClipboardBind "CTRL" "C" "CTRL SHIFT" "C"))
         (mkBind "SUPER + V" (mkUniversalClipboardBind "CTRL" "V" "CTRL SHIFT" "V"))
+        (mkBind "SUPER + F" (mkUniversalClipboardBind "CTRL" "F" "CTRL SHIFT" "F"))
         (mkBind "SUPER + X" (mkSendShortcutOnce "CTRL" "X"))
         (mkBind "SUPER + A" (mkSendShortcutOnce "CTRL" "A"))
         (mkBind "SUPER + Z" (mkSendShortcutOnce "CTRL" "Z"))
         (mkBind "SUPER + SHIFT + Z" (mkSendShortcutOnce "CTRL SHIFT" "Z"))
 
-        # Window management uses CTRL + SUPER (Ctrl + Cmd) so bare Cmd+<letter> stays free for apps
-        (mkBind "CTRL + SUPER + SHIFT + F" ''hl.dsp.window.float({ action = "toggle" })'')
-        (mkBind "SUPER + ALT + V" ''hl.dsp.window.float({ action = "toggle" })'')
-        (mkBind "CTRL + SUPER + C" centerShowcaseBind)
-        (mkBind "SUPER + ALT + C" centerShowcaseBind)
-        (mkBind "CTRL + SUPER + F" ''hl.dsp.window.fullscreen({ mode = "fullscreen" })'')
-        (mkBind "SUPER + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')
-        (mkBind "CTRL + SUPER + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')
-        (mkBind "CTRL + SUPER + P" "hl.dsp.window.pseudo()")
-        (mkBind "CTRL + SUPER + E" ''hl.dsp.layout("togglesplit")'')
+        # Window management uses Option (ALT) — AeroSpace style — so Cmd+<key> never collides with Orb or apps
+        (mkBind "ALT + SHIFT + F" ''hl.dsp.window.float({ action = "toggle" })'')
+        (mkBind "ALT + V" ''hl.dsp.window.float({ action = "toggle" })'')
+        (mkBind "ALT + C" centerShowcaseBind)
+        (mkBind "ALT + F" ''hl.dsp.window.fullscreen({ mode = "fullscreen" })'')
+        (mkBind "ALT + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')
+        (mkBind "ALT + P" "hl.dsp.window.pseudo()")
+        (mkBind "ALT + E" ''hl.dsp.layout("togglesplit")'')
         (mkBind "CTRL + SHIFT + ESCAPE" taskManagerBind)
         (mkBind "SUPER + ALT + ESCAPE" taskManagerBind)
         (mkBind "SUPER + ESCAPE" "hl.dsp.exec_cmd(${builtins.toJSON shellLock})")
+        (mkBind "CTRL + SUPER + Q" "hl.dsp.exec_cmd(${builtins.toJSON shellLock})")
+        (mkBindOpts "XF86PowerOff" "hl.dsp.exec_cmd(${builtins.toJSON "${powerKeyCmd}"})" {
+          locked = true;
+          release = true;
+        })
         (mkBind "CTRL + ALT + SUPER + Q" "hl.dsp.exit()")
-        (mkBind "CTRL + SUPER + R" "hl.dsp.reload_config()")
+        (mkBind "ALT + SHIFT + R" "hl.dsp.reload_config()")
 
-        (mkBind "CTRL + SUPER + left" ''hl.dsp.focus({ direction = "left" })'')
-        (mkBind "CTRL + SUPER + right" ''hl.dsp.focus({ direction = "right" })'')
-        (mkBind "CTRL + SUPER + up" ''hl.dsp.focus({ direction = "up" })'')
-        (mkBind "CTRL + SUPER + down" ''hl.dsp.focus({ direction = "down" })'')
-        (mkBind "CTRL + SUPER + H" ''hl.dsp.focus({ direction = "left" })'')
-        (mkBind "CTRL + SUPER + L" ''hl.dsp.focus({ direction = "right" })'')
-        (mkBind "CTRL + SUPER + K" ''hl.dsp.focus({ direction = "up" })'')
-        (mkBind "CTRL + SUPER + J" ''hl.dsp.focus({ direction = "down" })'')
+        (mkBind "ALT + left" ''hl.dsp.focus({ direction = "left" })'')
+        (mkBind "ALT + right" ''hl.dsp.focus({ direction = "right" })'')
+        (mkBind "ALT + up" ''hl.dsp.focus({ direction = "up" })'')
+        (mkBind "ALT + down" ''hl.dsp.focus({ direction = "down" })'')
+        (mkBind "ALT + H" ''hl.dsp.focus({ direction = "left" })'')
+        (mkBind "ALT + L" ''hl.dsp.focus({ direction = "right" })'')
+        (mkBind "ALT + K" ''hl.dsp.focus({ direction = "up" })'')
+        (mkBind "ALT + J" ''hl.dsp.focus({ direction = "down" })'')
 
-        (mkBind "CTRL + SUPER + SHIFT + left" ''hl.dsp.window.move({ direction = "left" })'')
-        (mkBind "CTRL + SUPER + SHIFT + right" ''hl.dsp.window.move({ direction = "right" })'')
-        (mkBind "CTRL + SUPER + SHIFT + up" ''hl.dsp.window.move({ direction = "up" })'')
-        (mkBind "CTRL + SUPER + SHIFT + down" ''hl.dsp.window.move({ direction = "down" })'')
-        (mkBind "CTRL + SUPER + SHIFT + H" ''hl.dsp.window.move({ direction = "left" })'')
-        (mkBind "CTRL + SUPER + SHIFT + L" ''hl.dsp.window.move({ direction = "right" })'')
-        (mkBind "CTRL + SUPER + SHIFT + K" ''hl.dsp.window.move({ direction = "up" })'')
-        (mkBind "CTRL + SUPER + SHIFT + J" ''hl.dsp.window.move({ direction = "down" })'')
+        (mkBind "ALT + SHIFT + left" ''hl.dsp.window.move({ direction = "left" })'')
+        (mkBind "ALT + SHIFT + right" ''hl.dsp.window.move({ direction = "right" })'')
+        (mkBind "ALT + SHIFT + up" ''hl.dsp.window.move({ direction = "up" })'')
+        (mkBind "ALT + SHIFT + down" ''hl.dsp.window.move({ direction = "down" })'')
+        (mkBind "ALT + SHIFT + H" ''hl.dsp.window.move({ direction = "left" })'')
+        (mkBind "ALT + SHIFT + L" ''hl.dsp.window.move({ direction = "right" })'')
+        (mkBind "ALT + SHIFT + K" ''hl.dsp.window.move({ direction = "up" })'')
+        (mkBind "ALT + SHIFT + J" ''hl.dsp.window.move({ direction = "down" })'')
 
-        (mkBind "SUPER + grave" ''hl.dsp.workspace.toggle_special("scratchpad")'')
-        (mkBind "CTRL + SUPER + S" ''hl.dsp.workspace.toggle_special("scratchpad")'')
-        (mkBind "SUPER + SHIFT + grave" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
-        (mkBind "CTRL + SUPER + SHIFT + S" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
+        (mkBind "ALT + grave" ''hl.dsp.workspace.toggle_special("scratchpad")'')
+        (mkBind "ALT + S" ''hl.dsp.workspace.toggle_special("scratchpad")'')
+        (mkBind "ALT + SHIFT + grave" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
+        (mkBind "ALT + SHIFT + S" ''hl.dsp.window.move({ workspace = "special:scratchpad" })'')
+        (mkBind "ALT + SHIFT + P" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
+        (mkBind "SUPER + SHIFT + P" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
         (mkBind "CTRL + SUPER + SHIFT + P" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
-        (mkBind "CTRL + SUPER + SHIFT + code:13" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
+        (mkBind "ALT + SHIFT + code:13" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
         (mkBind "SUPER + SHIFT + code:13" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
-        (mkBind "CTRL + SUPER + SHIFT + code:14" "hl.dsp.exec_cmd(${builtins.toJSON captureMenuCmd})")
+        (mkBind "CTRL + SUPER + SHIFT + code:13" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
+        (mkBind "ALT + SHIFT + code:14" "hl.dsp.exec_cmd(${builtins.toJSON captureMenuCmd})")
         (mkBind "SUPER + SHIFT + code:14" "hl.dsp.exec_cmd(${builtins.toJSON captureMenuCmd})")
+        (mkBind "CTRL + SUPER + SHIFT + code:14" "hl.dsp.exec_cmd(${builtins.toJSON captureMenuCmd})")
         (mkBind "SUPER + SHIFT + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
         (mkBind "SUPER + CTRL + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
+        (mkBind "ALT + SHIFT + I" "hl.dsp.exec_cmd(${builtins.toJSON idleToggleCmd})")
         (mkBind "SUPER + SHIFT + I" "hl.dsp.exec_cmd(${builtins.toJSON idleToggleCmd})")
-        (mkBind "CTRL + SUPER + SHIFT + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
-        (mkBind "SUPER + CTRL + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
-        (mkBind "SUPER + ALT + T" ''hl.dsp.exec_cmd("${omarchnixCli} theme toggle")'')
+        (mkBind "ALT + CTRL + T" "hl.dsp.exec_cmd(${builtins.toJSON themePickerCmd})")
+        (mkBind "ALT + SHIFT + T" ''hl.dsp.exec_cmd("${omarchnixCli} theme toggle")'')
 
-        (mkBind "SUPER + mouse_down" ''hl.dsp.focus({ workspace = "e-1" })'')
-        (mkBind "SUPER + mouse_up" ''hl.dsp.focus({ workspace = "e+1" })'')
-        (mkBind "SUPER + ALT + mouse_down" "hl.dsp.group.prev()")
-        (mkBind "SUPER + ALT + mouse_up" "hl.dsp.group.next()")
+        (mkBind "ALT + mouse_down" ''hl.dsp.focus({ workspace = "e-1" })'')
+        (mkBind "ALT + mouse_up" ''hl.dsp.focus({ workspace = "e+1" })'')
+        (mkBind "ALT + SHIFT + mouse_down" "hl.dsp.group.prev()")
+        (mkBind "ALT + SHIFT + mouse_up" "hl.dsp.group.next()")
 
-        (mkBindOpts "SUPER + mouse:272" "hl.dsp.window.drag()" { mouse = true; })
-        (mkBindOpts "SUPER + mouse:273" "hl.dsp.window.resize()" { mouse = true; })
+        (mkBindOpts "ALT + mouse:272" "hl.dsp.window.drag()" { mouse = true; })
+        (mkBindOpts "ALT + mouse:273" "hl.dsp.window.resize()" { mouse = true; })
 
         (mkBindOpts "XF86MonBrightnessUp" ''hl.dsp.exec_cmd("${brightnessctl} -e4 -n2 set 5%+")'' {
           locked = true;
@@ -855,7 +1018,17 @@ in
           locked = true;
         })
         # Apple Silicon MacBooks lack dedicated keyboard backlight keys (F5/F6 are
-        # Dictation / Focus); drive keyboard backlight with Ctrl + F1/F2 or Cmd + F1/F2.
+        # Dictation / Focus); drive keyboard backlight with Option/Ctrl/Cmd + F1/F2.
+        (mkBindOpts "ALT + XF86MonBrightnessUp" "hl.dsp.exec_cmd(${builtins.toJSON kbdBacklightUpCmd})" {
+          locked = true;
+          repeating = true;
+        })
+        (mkBindOpts "ALT + XF86MonBrightnessDown" "hl.dsp.exec_cmd(${builtins.toJSON kbdBacklightDownCmd})"
+          {
+            locked = true;
+            repeating = true;
+          }
+        )
         (mkBindOpts "CTRL + XF86MonBrightnessUp" "hl.dsp.exec_cmd(${builtins.toJSON kbdBacklightUpCmd})" {
           locked = true;
           repeating = true;

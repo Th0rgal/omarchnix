@@ -75,6 +75,16 @@ in
         description = "Open LocalSend v2 `TCP/UDP 53317` in the NixOS firewall.";
       };
     };
+
+    kdeconnect = {
+      enable = lib.mkEnableOption "KDE Connect bidirectional clipboard, file, and phone sync (kdeconnectd)";
+
+      openFirewall = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Open KDE Connect `TCP/UDP 1714–1764` in the NixOS firewall (covers LAN and WireGuard/lean-mesh interfaces).";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable (
@@ -197,6 +207,36 @@ in
         networking.firewall = lib.mkIf sCfg.nearby.openFirewall {
           allowedTCPPorts = [ 53317 ];
           allowedUDPPorts = [ 53317 ];
+        };
+      })
+
+      (lib.mkIf sCfg.kdeconnect.enable {
+        hardware.uinput.enable = lib.mkDefault true;
+
+        services.avahi = {
+          enable = lib.mkDefault true;
+          nssmdns4 = lib.mkDefault true;
+          nssmdns6 = lib.mkDefault true;
+          publish = {
+            enable = lib.mkDefault true;
+            userServices = lib.mkDefault true;
+          };
+        };
+
+        networking.firewall = lib.mkIf sCfg.kdeconnect.openFirewall {
+          allowedUDPPorts = [ 5353 ];
+          allowedTCPPortRanges = [
+            {
+              from = 1714;
+              to = 1764;
+            }
+          ];
+          allowedUDPPortRanges = [
+            {
+              from = 1714;
+              to = 1764;
+            }
+          ];
         };
       })
     ]

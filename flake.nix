@@ -296,6 +296,7 @@
                         airdrop.enable = true;
                         quickshare.enable = true;
                         nearby.enable = true;
+                        kdeconnect.enable = true;
                       };
                     };
                     home-manager.users.alice = {
@@ -335,6 +336,7 @@
             assert standaloneNixos.config.systemd.services ? awdl0;
             assert standaloneNixos.config.systemd.services ? omdrop-awdl-sleep;
             assert aliceHm.systemd.user.services ? omarchy-quickshare;
+            assert aliceHm.systemd.user.services ? kdeconnect;
             assert aliceHm.programs.omarchnix.plugins.locked ? "omarchnix.sharing";
             assert aliceHm.programs.omarchnix.plugins.locked ? "th0rgal.murmure";
             assert aliceHm.programs.omarchnix.plugins.locked ? "io.github.joaovitor2763.mission-control";

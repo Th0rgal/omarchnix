@@ -269,6 +269,7 @@ in
                   airdrop.enable = lib.mkDefault cfg.services.sharing.airdrop.enable;
                   quickshare.enable = lib.mkDefault cfg.services.sharing.quickshare.enable;
                   nearby.enable = lib.mkDefault cfg.services.sharing.nearby.enable;
+                  kdeconnect.enable = lib.mkDefault cfg.services.sharing.kdeconnect.enable;
                 };
               };
             };

@@ -165,11 +165,11 @@ in
       <actions>
         <action>
           <icon>document-send</icon>
-          <name>Share Nearby (AirDrop / Quick Share / LocalSend)…</name>
+          <name>Share Nearby (AirDrop / Phone / Quick Share / LocalSend)…</name>
           <submenu></submenu>
           <unique-id>1730000000000001-1</unique-id>
           <command>${shareFilesScript} %F</command>
-          <description>Stage selected file(s) in the top-bar Share menu to send via AirDrop, Quick Share, or LocalSend</description>
+          <description>Stage selected file(s) in the top-bar Share menu to send via AirDrop, Paired Phone (KDE Connect), Quick Share, or LocalSend</description>
           <range>*</range>
           <patterns>*</patterns>
           <audio-files/>

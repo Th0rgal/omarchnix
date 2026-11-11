@@ -101,6 +101,15 @@ in
       description = "Package providing the `omarchnix` CLI.";
     };
 
+    terminal = lib.mkOption {
+      type = lib.types.enum [
+        "ghostty"
+        "foot"
+      ];
+      default = "ghostty";
+      description = "Primary terminal emulator (`ghostty` for GPU HarfBuzz ligatures like `!=`/`->`, or `foot`).";
+    };
+
     theme = {
       name = lib.mkOption {
         type = lib.types.str;
@@ -159,6 +168,45 @@ in
         default = { };
         description = "Additional top-level fields merged into the initial `~/.config/omarchy/shell.json`.";
       };
+
+      disabledPlugins = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = "Built-in Omarchy plugin IDs disabled in `~/.config/omarchy/shell.json` (e.g. `omarchy.dock`, `omarchy.background`).";
+      };
+
+      purgedPluginIds = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = "Plugin/widget IDs removed from `~/.config/omarchy/plugins/` and from all `bar.layout` sections and `.plugins`.";
+      };
+
+      workspaceWidgetId = lib.mkOption {
+        type = lib.types.str;
+        default = "omarchy.workspaces";
+        description = "Workspace widget ID placed in `bar.layout.left` (replaces `omarchy.workspaces` when overridden).";
+      };
+
+      trayWidgetIds = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [
+          "omarchy.agents"
+          "omarchy.monitor"
+        ];
+        description = "Widget IDs placed inside the collapsible `bar.layout.tray` drawer and deduplicated out of `bar.layout.right`.";
+      };
+
+      elsewhenCities = lib.mkOption {
+        type = lib.types.listOf (lib.types.attrsOf lib.types.anything);
+        default = [ ];
+        description = "Default cities seeded on `omarchy.elsewhen` in `bar.layout.centerEnd` when none are configured yet.";
+      };
+
+      dock = lib.mkOption {
+        type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
+        default = null;
+        description = "Declarative `.dock` defaults merged into `~/.config/omarchy/shell.json` (`position`, `autohide`, `allWorkspaces`).";
+      };
     };
 
     keyboard = {
@@ -172,6 +220,20 @@ in
         type = lib.types.str;
         default = "intl";
         description = "XKB keyboard variant configured in Hyprland (`intl` matches macOS `USInternational-PC`, `\"\"` for plain layout).";
+      };
+
+      backlight = {
+        step = lib.mkOption {
+          type = lib.types.ints.between 1 100;
+          default = 10;
+          description = "Percentage step per keypress for keyboard backlight shortcuts (`Ctrl + F1/F2`, `Cmd + F1/F2`, `XF86KbdBrightnessUp/Down`).";
+        };
+
+        dimOnIdle = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Automatically turn off the keyboard backlight on idle timeout and restore the previous level on resume.";
+        };
       };
     };
 
@@ -249,6 +311,34 @@ in
         ];
         description = "Coding agents for which `omarchnix` provisions skills and live theme hooks.";
       };
+
+      orbSync = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Sync Omarchy's `omarchy.agents` status-bar plugin (`~/.local/state/omarchy/agents/usage/*.json`)
+            bidirectionally with Orb Core (`~/.orb/connection.json`) and Orb Desktop, falling back cleanly
+            to upstream local collectors when Orb is not configured.
+          '';
+        };
+
+        launchInOrb = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Route `omarchy-agent` and `omarchy-agent-prompt` bar/tile actions into Orb Desktop's
+            New Agent composer (pre-selecting the requested harness and prompt), while keeping
+            `--local`, `--local-model`, `--terminal`, and `--inline` on upstream CLI launch.
+          '';
+        };
+
+        pollInterval = lib.mkOption {
+          type = lib.types.str;
+          default = "2m";
+          description = "Background systemd user timer interval for `omarchy-orb-agent usage-update`.";
+        };
+      };
     };
   };
 
@@ -256,11 +346,14 @@ in
     ./hyprland.nix
     ./waybar.nix
     ./omarchy-shell.nix
+    ./macos.nix
     ./murmure.nix
     ./sharing.nix
+    ./thunar.nix
     ./agents.nix
     ./fcitx5.nix
     ./foot.nix
+    ./ghostty.nix
     ./fuzzel.nix
     ./hyprlock.nix
     ./hypridle.nix
@@ -309,11 +402,68 @@ in
           pkgs.playerctl
           pkgs.grim
           pkgs.slurp
+          pkgs.hyprpicker
+          pkgs.wf-recorder
           pkgs.wl-clipboard
           pkgs.libnotify
+          pkgs.xdg-user-dirs
           pkgs.fastfetch
+          pkgs.mission-center
         ];
     };
+
+    xdg.userDirs = {
+      enable = lib.mkDefault true;
+      createDirectories = lib.mkDefault true;
+      setSessionVariables = lib.mkDefault false;
+      download = lib.mkDefault "${config.home.homeDirectory}/Downloads";
+      documents = lib.mkDefault "${config.home.homeDirectory}/Documents";
+      music = lib.mkDefault "${config.home.homeDirectory}/Music";
+      pictures = lib.mkDefault "${config.home.homeDirectory}/Pictures";
+      videos = lib.mkDefault "${config.home.homeDirectory}/Videos";
+      # Match upstream Omarchy: point unused XDG directories at $HOME so
+      # Desktop / Public / Templates clutter folders are not created.
+      desktop = lib.mkDefault config.home.homeDirectory;
+      publicShare = lib.mkDefault config.home.homeDirectory;
+      templates = lib.mkDefault config.home.homeDirectory;
+      extraConfig = {
+        SCREENSHOTS = lib.mkDefault "${config.xdg.userDirs.pictures}/Screenshots";
+      };
+    };
+
+    home.activation.omarchnixUserDirs = config.lib.dag.entryAfter [ "writeBoundary" ] ''
+      mkdir -p \
+        ${lib.escapeShellArg config.xdg.userDirs.download} \
+        ${lib.escapeShellArg config.xdg.userDirs.pictures} \
+        ${lib.escapeShellArg "${config.xdg.userDirs.pictures}/Screenshots"} \
+        ${lib.escapeShellArg config.xdg.userDirs.videos} \
+        "$HOME/.config/gtk-3.0"
+      bookmarks_file="$HOME/.config/gtk-3.0/bookmarks"
+      touch "$bookmarks_file"
+      if [ -s "$bookmarks_file" ]; then
+        tmp_bm="$(mktemp "$bookmarks_file.XXXXXX")"
+        while IFS= read -r line || [ -n "$line" ]; do
+          uri="''${line%% *}"
+          if [ "''${uri#file://}" != "$uri" ]; then
+            bm_path="''${uri#file://}"
+            if [ "$bm_path" = "$HOME" ] || [ ! -d "$bm_path" ]; then
+              continue
+            fi
+          fi
+          printf '%s\n' "$line" >> "$tmp_bm"
+        done < "$bookmarks_file"
+        mv "$tmp_bm" "$bookmarks_file"
+        chmod 0644 "$bookmarks_file"
+      fi
+      for dir in \
+        ${lib.escapeShellArg config.xdg.userDirs.download} \
+        ${lib.escapeShellArg config.xdg.userDirs.pictures} \
+        ${lib.escapeShellArg config.xdg.userDirs.videos}; do
+        [ "$dir" != "$HOME" ] && [ -d "$dir" ] || continue
+        entry="file://$dir $(basename "$dir")"
+        grep -qxF "$entry" "$bookmarks_file" 2>/dev/null || printf '%s\n' "$entry" >> "$bookmarks_file"
+      done
+    '';
 
     fonts.fontconfig = {
       enable = true;
@@ -475,20 +625,50 @@ in
       };
       # Unset gtk-xft-dpi is -1. WebKitGTK 4.1 then multiplies that by the
       # Wayland buffer scale and divides by 96, producing a negative DPR.
-      gtk3.extraConfig.gtk-xft-dpi = 98304;
-      gtk4.extraConfig.gtk-xft-dpi = 98304;
+      # Do NOT set gtk-application-prefer-dark-theme in static settings.ini:
+      # GtkSettings treats keyfile entries as higher priority than live portal/dconf
+      # changes, locking GTK3 and WebKitGTK 4.1 (`Orb`) into dark mode even when
+      # dconf switches `gtk-theme` to `Adwaita` and `color-scheme` to `prefer-light`.
+      # Hide client-side minimize/maximize/close buttons (`:`) across GTK3/4,
+      # Chromium/Brave, PWAs, and Electron on tiling Hyprland (`Cmd+W`/`Cmd+Q` closes).
+      gtk3.extraConfig = {
+        gtk-xft-dpi = 98304;
+        gtk-decoration-layout = ":";
+      };
+      gtk4.extraConfig = {
+        gtk-xft-dpi = 98304;
+        gtk-decoration-layout = ":";
+      };
     };
 
-    dconf.settings."org/gnome/desktop/interface" =
+    dconf.settings =
       let
         isLight = (theme.mode or "dark") == "light";
+        # When omarchy-shell is active, `omarchnix theme sync-mode` / `toggle` /
+        # `set` owns live dark/light dconf keys (`color-scheme`, `gtk-theme`,
+        # `wm/preferences/theme`) so Home Manager's offline `dbus-run-session`
+        # `dconf load` never clobbers runtime mode behind `xdg-desktop-portal-gtk`.
+        dynamicShellTheme = cfg.shell.backend == "omarchy-shell";
       in
       {
-        color-scheme = if isLight then "prefer-light" else "prefer-dark";
-        gtk-theme = if isLight then "Adwaita" else "Adwaita-dark";
-        font-name = "${theme.fonts.sans.name} ${toString theme.fonts.sans.size}";
-        document-font-name = "${theme.fonts.serif.name} ${toString theme.fonts.serif.size}";
-        monospace-font-name = "${theme.fonts.mono.name} ${toString theme.fonts.mono.size}";
+        "org/gnome/desktop/interface" = {
+          font-name = "${theme.fonts.sans.name} ${toString theme.fonts.sans.size}";
+          document-font-name = "${theme.fonts.serif.name} ${toString theme.fonts.serif.size}";
+          monospace-font-name = "${theme.fonts.mono.name} ${toString theme.fonts.mono.size}";
+        }
+        // lib.optionalAttrs (!dynamicShellTheme) {
+          color-scheme = if isLight then "prefer-light" else "prefer-dark";
+          gtk-theme = if isLight then "Adwaita" else "Adwaita-dark";
+        };
+        "org/gnome/desktop/wm/preferences" = {
+          button-layout = ":";
+        }
+        // lib.optionalAttrs (!dynamicShellTheme) {
+          theme = if isLight then "Adwaita" else "Adwaita-dark";
+        };
+        "io/missioncenter/MissionCenter" = {
+          first-time-running = false;
+        };
       };
   };
 }

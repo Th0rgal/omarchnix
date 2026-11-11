@@ -10,11 +10,25 @@ Panel {
   id: root
   moduleName: "omarchnix.sharing"
   ipcTarget: "omarchnix.sharing"
-  manageIpc: true
+  manageIpc: false
 
   readonly property var engine: bar && bar.shell && typeof bar.shell.serviceFor === "function"
     ? bar.shell.serviceFor("omarchnix.sharing")
     : null
+
+  ShellIpc {
+    target: root.ipcTarget
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function show(): void { root.open() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.toggle() }
+    function share(payloadJson: string): string {
+      if (root.engine) root.engine.stageFilesJson(payloadJson)
+      root.open()
+      return "ok"
+    }
+  }
 
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color urgentColor: bar ? bar.urgent : Commons.Color.urgent
@@ -508,6 +522,59 @@ Panel {
           foreground: root.foreground
         }
 
+        // Pre-staged files card (summoned from Thunar's right-click "Share…" action)
+        BorderSurface {
+          visible: !!(root.engine && root.engine.stagedFiles && root.engine.stagedFiles.length > 0)
+          Layout.fillWidth: true
+          implicitHeight: stagedRow.implicitHeight + Style.space(16)
+          color: Style.selectedFillFor(root.foreground, Commons.Color.accent)
+          borderSpec: Border.controlSpec("selected", root.foreground, Commons.Color.accent)
+          radius: Style.cornerRadius
+
+          RowLayout {
+            id: stagedRow
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Style.space(8)
+            spacing: Style.space(8)
+
+            ColumnLayout {
+              Layout.fillWidth: true
+              spacing: Style.space(2)
+
+              Text {
+                Layout.fillWidth: true
+                textFormat: Text.PlainText
+                text: root.engine ? ("Ready to send: " + root.engine.stagedFilesSummary) : ""
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+                elide: Text.ElideRight
+              }
+
+              Text {
+                Layout.fillWidth: true
+                textFormat: Text.PlainText
+                text: "Click a nearby device below to send"
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+              }
+            }
+
+            Button {
+              bordered: true
+              foreground: root.foreground
+              fontSize: Style.font.caption
+              text: "Clear"
+              onClicked: if (root.engine) root.engine.clearStagedFiles()
+            }
+          }
+        }
+
         PanelSectionHeader {
           Layout.fillWidth: true
           foreground: root.foreground
@@ -532,7 +599,9 @@ Panel {
               foreground: root.foreground
               iconText: modelData.icon
               text: modelData.name + "  ·  " + modelData.badge
-              tooltipText: "Click to choose files and send via " + modelData.badge
+              tooltipText: (root.engine && root.engine.stagedFiles && root.engine.stagedFiles.length > 0)
+                ? ("Click to send " + root.engine.stagedFilesSummary + " via " + modelData.badge)
+                : ("Click to choose files and send via " + modelData.badge)
               onClicked: if (root.engine) root.engine.pickAndSend(modelData)
             }
           }

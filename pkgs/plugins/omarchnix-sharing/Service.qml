@@ -605,10 +605,64 @@ Item {
   }
 
   // ------------------------------------------------ File selection & Outgoing
+  property var stagedFiles: []
   property var pendingTargetPeer: null
   property bool pendingQrMode: false
   property string airdropSendStatus: ""
   property bool airdropSending: false
+
+  readonly property string stagedFilesSummary: {
+    if (!stagedFiles || stagedFiles.length === 0) return ""
+    if (stagedFiles.length === 1) {
+      var p = String(stagedFiles[0] || "")
+      var idx = p.lastIndexOf("/")
+      return idx >= 0 ? p.slice(idx + 1) : p
+    }
+    return stagedFiles.length + " files selected"
+  }
+
+  function stageFilesJson(payloadJson) {
+    try {
+      var parsed = JSON.parse(String(payloadJson || "[]"))
+      var raw = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.files) ? parsed.files : [])
+      var clean = []
+      for (var i = 0; i < raw.length; i++) {
+        var s = String(raw[i] || "").trim()
+        if (s !== "") clean.push(s)
+      }
+      if (clean.length === 0) return
+      stagedFiles = clean
+      if (airdropAvailable && !airdropReceiving) setAirdrop(true)
+    } catch (e) {}
+  }
+
+  function clearStagedFiles() {
+    stagedFiles = []
+  }
+
+  function sendFilesToPeer(target, files) {
+    if (!target || !files || files.length === 0) return
+    if (target.protocol === "airdrop") {
+      airdropSending = true
+      airdropSendStatus = "Sending to " + target.name + "…"
+      airdropSendProc.command = [omdropBin, "send", "--to", target.mac].concat(files)
+      airdropSendProc.running = true
+    } else if (target.protocol === "quickshare") {
+      quickshareWantActive = true
+      runQuickshareCmd(["send", target.peerId], files, "send")
+    } else if (target.protocol === "nearby" && target.rawDevice) {
+      nearbySeq++
+      nearbyOutgoingId = "out-" + Date.now() + "-" + nearbySeq
+      nearbyTransferActive = true
+      nearbyStatus = "Sending to " + target.name + "…"
+      sendNearby({
+        command: "send_files",
+        transfer_id: nearbyOutgoingId,
+        device: target.rawDevice,
+        paths: files
+      })
+    }
+  }
 
   readonly property string transientNotice: {
     if (airdropError !== "") return airdropError
@@ -628,7 +682,14 @@ Item {
   }
 
   function pickAndSend(peer) {
-    if (!peer || filePicker.running || fileSelectBin === "" || fileSelectBin.charAt(0) === "@") return
+    if (!peer) return
+    if (stagedFiles && stagedFiles.length > 0) {
+      var directFiles = stagedFiles.slice()
+      stagedFiles = []
+      sendFilesToPeer(peer, directFiles)
+      return
+    }
+    if (filePicker.running || fileSelectBin === "" || fileSelectBin.charAt(0) === "@") return
     pendingTargetPeer = peer
     pendingQrMode = false
     requestCloseForPicker()
@@ -636,7 +697,16 @@ Item {
   }
 
   function pickAndQr() {
-    if (!quickshareAvailable || filePicker.running || fileSelectBin === "" || fileSelectBin.charAt(0) === "@") return
+    if (!quickshareAvailable) return
+    if (stagedFiles && stagedFiles.length > 0) {
+      var directFiles = stagedFiles.slice()
+      stagedFiles = []
+      quickshareWantActive = true
+      qrPending = true
+      runQuickshareCmd(["qr-send"], directFiles, "qr-send")
+      return
+    }
+    if (filePicker.running || fileSelectBin === "" || fileSelectBin.charAt(0) === "@") return
     pendingTargetPeer = null
     pendingQrMode = true
     quickshareWantActive = true
@@ -663,28 +733,7 @@ Item {
         root.runQuickshareCmd(["qr-send"], files, "qr-send")
         return
       }
-      if (!target) return
-
-      if (target.protocol === "airdrop") {
-        root.airdropSending = true
-        root.airdropSendStatus = "Sending to " + target.name + "…"
-        airdropSendProc.command = [root.omdropBin, "send", "--to", target.mac].concat(files)
-        airdropSendProc.running = true
-      } else if (target.protocol === "quickshare") {
-        root.quickshareWantActive = true
-        root.runQuickshareCmd(["send", target.peerId], files, "send")
-      } else if (target.protocol === "nearby" && target.rawDevice) {
-        root.nearbySeq++
-        root.nearbyOutgoingId = "out-" + Date.now() + "-" + root.nearbySeq
-        root.nearbyTransferActive = true
-        root.nearbyStatus = "Sending to " + target.name + "…"
-        root.sendNearby({
-          command: "send_files",
-          transfer_id: root.nearbyOutgoingId,
-          device: target.rawDevice,
-          paths: files
-        })
-      }
+      root.sendFilesToPeer(target, files)
     }
   }
 

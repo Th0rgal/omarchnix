@@ -11,15 +11,20 @@ pkgs.writeShellApplication {
   runtimeInputs = [
     omarchyShell
     pkgs.bash
+    pkgs.brightnessctl
     pkgs.coreutils
     pkgs.curl
+    pkgs.dbus
     pkgs.dconf
     pkgs.findutils
     pkgs.gawk
     pkgs.git
     pkgs.glib
+    pkgs.glib.bin
+    pkgs.gsettings-desktop-schemas
     pkgs.gnugrep
     pkgs.gnused
+    pkgs.hyprland
     pkgs.jq
     pkgs.nix
     pkgs.procps
@@ -30,9 +35,29 @@ pkgs.writeShellApplication {
   text = ''
     set -euo pipefail
 
+    if [[ -z "''${XDG_RUNTIME_DIR:-}" ]]; then
+      uid_runtime_dir="/run/user/$(id -u)"
+      if [[ -d "$uid_runtime_dir" ]]; then
+        XDG_RUNTIME_DIR="$uid_runtime_dir"
+        export XDG_RUNTIME_DIR
+      fi
+    fi
+    if [[ -z "''${DBUS_SESSION_BUS_ADDRESS:-}" && -n "''${XDG_RUNTIME_DIR:-}" && -S "$XDG_RUNTIME_DIR/bus" ]]; then
+      DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+      export DBUS_SESSION_BUS_ADDRESS
+    fi
+
     export OMARCHY_PATH="''${OMARCHY_PATH:-${omarchyShell.sharePath}}"
     export OMARCHY_SHELL_IPC_TIMEOUT="''${OMARCHY_SHELL_IPC_TIMEOUT:-10s}"
     export GIO_EXTRA_MODULES="${pkgs.dconf.lib}/lib/gio/modules''${GIO_EXTRA_MODULES:+:$GIO_EXTRA_MODULES}"
+    if [[ -z "''${GSETTINGS_SCHEMA_DIR:-}" ]]; then
+      for schema_candidate in "${pkgs.gsettings-desktop-schemas}"/share/gsettings-schemas/*/glib-2.0/schemas; do
+        if [[ -d "$schema_candidate" ]]; then
+          export GSETTINGS_SCHEMA_DIR="$schema_candidate"
+          break
+        fi
+      done
+    fi
     MARKETPLACE_REGISTRY_DEFAULT="${registryPath}"
     MARKETPLACE_REGISTRY_URL="https://raw.githubusercontent.com/omacom/omarchy-plugin-marketplace/main/registry.json"
 
@@ -56,6 +81,7 @@ pkgs.writeShellApplication {
       plugin enable <id> [placement...]   Enable an installed Omarchy shell plugin
       plugin disable <id>                 Disable an Omarchy shell plugin
       plugin validate <dir>               Validate a plugin folder against Omarchy manifest schema v1
+      kbd-backlight [get|<N>%|up|down|cycle|off]  Inspect or adjust keyboard backlight brightness
     EOF
     }
 
@@ -262,20 +288,95 @@ pkgs.writeShellApplication {
     run_theme_set() {
       local target="$1"
       local offline="''${2:-0}"
+      local preserve_user_bg="''${3:-0}"
+      local state_bg_file="$HOME/.local/state/omarchy/theme-backgrounds/$target"
+
+      # Drop stale build-time fallback wallpapers (e.g. omarchnix-wallpaper-tokyo-night.png)
+      # accidentally recorded under another theme's remembered background slot.
+      if [[ -f "$state_bg_file" ]]; then
+        local remembered_bg
+        remembered_bg="$(tr -d '\n' < "$state_bg_file" 2>/dev/null || true)"
+        if [[ "$remembered_bg" == /nix/store/*-omarchnix-wallpaper-* && "$remembered_bg" != *"-omarchnix-wallpaper-''${target}.png" ]]; then
+          rm -f "$state_bg_file"
+        fi
+      fi
+
+      local skip_bg=0
+      if (( preserve_user_bg )); then
+        local cur_bg
+        cur_bg="$(readlink -f "$HOME/.local/state/omarchy/current/background" 2>/dev/null || true)"
+        if [[ -n "$cur_bg" && -f "$cur_bg" ]] \
+          && [[ "$cur_bg" != "$HOME/.config/omarchy/themes/"* ]] \
+          && [[ "$cur_bg" != "$HOME/.local/state/omarchy/current/theme/backgrounds/"* ]] \
+          && [[ "$cur_bg" != "$OMARCHY_PATH/themes/"* ]] \
+          && [[ "$cur_bg" != /nix/store/*-omarchnix-wallpaper-* ]] \
+          && [[ "$cur_bg" != /nix/store/*-omarchy-theme-* ]]; then
+          skip_bg=1
+        fi
+      fi
+
       if (( offline )); then
-        OMARCHY_THEME_OFFLINE=1 OMARCHY_THEME_SKIP_BACKGROUND=1 omarchy-theme-set "$target"
-      elif theme_has_background "$target"; then
-        OMARCHY_THEME_WAIT=1 omarchy-theme-set "$target"
+        OMARCHNIX_SYNCING_MODE=1 OMARCHY_THEME_OFFLINE=1 OMARCHY_THEME_SKIP_BACKGROUND=1 omarchy-theme-set "$target"
+      elif (( skip_bg )) || ! theme_has_background "$target"; then
+        OMARCHNIX_SYNCING_MODE=1 OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 omarchy-theme-set "$target"
       else
-        OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 omarchy-theme-set "$target"
+        OMARCHNIX_SYNCING_MODE=1 OMARCHY_THEME_WAIT=1 omarchy-theme-set "$target"
       fi
     }
 
+    pulse_hyprland_global_theme() {
+      local bg_hex="''${1:-}"
+      command -v hyprctl >/dev/null 2>&1 || return 0
+      if [[ -z "''${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+        local sig
+        sig="$(hyprctl instances -j 2>/dev/null | jq -r '.[0].instance // ""' 2>/dev/null || true)"
+        [[ -n "$sig" ]] || return 0
+        export HYPRLAND_INSTANCE_SIGNATURE="$sig"
+      fi
+
+      # On Wayland/Hyprland, windows on non-visible desktops receive zero frame
+      # callbacks by default, leaving inactive desktops frozen in the previous
+      # Light/Dark buffer in Mission Control thumbnails and workspace swipes.
+      # Temporarily enable `render_unfocused` across all windows for 1.8s (15 FPS)
+      # so every desktop repaints immediately with zero idle battery cost.
+      local bg_lua=""
+      if [[ -n "$bg_hex" ]]; then
+        bg_lua="pcall(function() hl.config({ misc = { background_color = 'rgba(' .. \"$bg_hex\" .. 'ff)' } }) end)"
+      fi
+      hyprctl eval "
+        $bg_lua
+        local ok = false
+        if _G.omarchnix_unfocused_repaint_rule then
+          ok = pcall(function() _G.omarchnix_unfocused_repaint_rule:set_enabled(true) end)
+        end
+        if not ok then
+          _G.omarchnix_unfocused_repaint_rule = hl.window_rule({
+            name = 'omarchnix-theme-repaint',
+            match = { class = '.*' },
+            render_unfocused = true,
+          })
+        end
+        pcall(function() hl.exec_scheduled_prop_refresh_immediately() end)
+        _G.omarchnix_unfocused_repaint_seq = (_G.omarchnix_unfocused_repaint_seq or 0) + 1
+        local seq = _G.omarchnix_unfocused_repaint_seq
+        hl.timer(function()
+          if _G.omarchnix_unfocused_repaint_seq == seq and _G.omarchnix_unfocused_repaint_rule then
+            pcall(function() _G.omarchnix_unfocused_repaint_rule:set_enabled(false) end)
+            pcall(function() hl.exec_scheduled_prop_refresh_immediately() end)
+          end
+        end, { timeout = 1800, type = 'oneshot' })
+      " >/dev/null 2>&1 || true
+    }
+
     apply_interface_mode() {
+      local force_signal="''${1:-0}"
       local colors_file="$HOME/.local/state/omarchy/current/theme/colors.toml"
       local mode="dark"
+      local bg_hex=""
       if [[ -f "$colors_file" ]]; then
         mode="$(omarchy-theme-color --file "$colors_file" mode 2>/dev/null || echo dark)"
+        bg_hex="$(omarchy-theme-color --file "$colors_file" background 2>/dev/null | tr -d '#' || true)"
+        [[ "$bg_hex" =~ ^[0-9A-Fa-f]{6}$ ]] || bg_hex=""
       fi
       local scheme="prefer-dark"
       local gtk_theme="Adwaita-dark"
@@ -283,18 +384,121 @@ pkgs.writeShellApplication {
         scheme="prefer-light"
         gtk_theme="Adwaita"
       fi
-      # dconf is authoritative for the xdg-desktop-portal-gtk Settings backend
-      # (Electron apps such as Bitwarden read dark/light preference there), and
-      # it works without the GNOME GSettings schema directory.
-      if command -v dconf >/dev/null 2>&1; then
-        dconf write /org/gnome/desktop/interface/color-scheme "'$scheme'" 2>/dev/null || true
-        dconf write /org/gnome/desktop/interface/gtk-theme "'$gtk_theme'" 2>/dev/null || true
+
+      # Ensure xdg-desktop-portal (+ gtk Settings backend) is D-Bus activated and
+      # subscribed to dconf before writing so SettingChanged is never missed.
+      if [[ -n "''${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gdbus >/dev/null 2>&1; then
+        gdbus call --session --timeout 2 \
+          --dest org.freedesktop.portal.Desktop \
+          --object-path /org/freedesktop/portal/desktop \
+          --method org.freedesktop.portal.Settings.Read \
+          org.freedesktop.appearance color-scheme >/dev/null 2>&1 || true
       fi
-      if command -v gsettings >/dev/null 2>&1 \
+
+      # dconf is authoritative for the xdg-desktop-portal-gtk Settings backend
+      # (Electron, WebKitGTK/Orb, Qt6/Telegram, and Chromium/Brave read dark/light
+      # preference there). When `--force-signal` is requested (login, portal
+      # restart, or HM activation) and dconf already holds `$scheme`, bounce
+      # briefly via `'default'` so dconf-service -> xdg-desktop-portal-gtk emits
+      # a real `org.freedesktop.portal.Settings.SettingChanged` D-Bus signal.
+      if command -v dconf >/dev/null 2>&1; then
+        if [[ -n "''${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+          local cur_dconf_scheme
+          cur_dconf_scheme="$(dconf read /org/gnome/desktop/interface/color-scheme 2>/dev/null || true)"
+          if (( force_signal )) && [[ "$cur_dconf_scheme" == "'$scheme'" ]]; then
+            dconf write /org/gnome/desktop/interface/color-scheme "'default'" 2>/dev/null || true
+            sleep 0.015
+          fi
+          dconf write /org/gnome/desktop/interface/color-scheme "'$scheme'" 2>/dev/null || true
+          dconf write /org/gnome/desktop/interface/gtk-theme "'$gtk_theme'" 2>/dev/null || true
+          dconf write /org/gnome/desktop/wm/preferences/button-layout "':'" 2>/dev/null || true
+          dconf write /org/gnome/desktop/wm/preferences/theme "'$gtk_theme'" 2>/dev/null || true
+          if [[ "$(dconf read /org/gnome/desktop/interface/icon-theme 2>/dev/null || true)" == "'Yaru-blue'" ]]; then
+            dconf write /org/gnome/desktop/interface/icon-theme "'Adwaita'" 2>/dev/null || true
+          fi
+        elif command -v dbus-run-session >/dev/null 2>&1; then
+          dbus-run-session -- sh -c '
+            dconf write /org/gnome/desktop/interface/color-scheme "'"'$scheme'"'" 2>/dev/null || true
+            dconf write /org/gnome/desktop/interface/gtk-theme "'"'$gtk_theme'"'" 2>/dev/null || true
+            dconf write /org/gnome/desktop/wm/preferences/button-layout "'"':'"'" 2>/dev/null || true
+            dconf write /org/gnome/desktop/wm/preferences/theme "'"'$gtk_theme'"'" 2>/dev/null || true
+          ' >/dev/null 2>&1 || true
+        fi
+      fi
+      if [[ -n "''${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v gsettings >/dev/null 2>&1 \
         && gsettings get org.gnome.desktop.interface color-scheme >/dev/null 2>&1; then
         gsettings set org.gnome.desktop.interface color-scheme "$scheme" 2>/dev/null || true
         gsettings set org.gnome.desktop.interface gtk-theme "$gtk_theme" 2>/dev/null || true
+        gsettings set org.gnome.desktop.wm.preferences button-layout ":" 2>/dev/null || true
+        gsettings set org.gnome.desktop.wm.preferences theme "$gtk_theme" 2>/dev/null || true
       fi
+
+      # Ensure Antigravity 2.0 (Hub) & Antigravity IDE follow system color-scheme
+      # instead of defaulting THEME_MODE_UNSPECIFIED (0) -> Dark.
+      local ag_cfg="$HOME/.gemini/config/config.json"
+      if [[ -f "$ag_cfg" && ! -L "$ag_cfg" ]]; then
+        local cur_ag_mode
+        cur_ag_mode="$(jq -r '.userSettings.themeMode // ""' "$ag_cfg" 2>/dev/null || true)"
+        if [[ -z "$cur_ag_mode" || "$cur_ag_mode" == "null" || "$cur_ag_mode" == "0" || "$cur_ag_mode" == "THEME_MODE_UNSPECIFIED" ]]; then
+          local tmp_ag
+          tmp_ag="$(mktemp "$ag_cfg.XXXXXX")"
+          if jq '.userSettings = ((.userSettings // {}) | .themeMode = "THEME_MODE_INHERIT")' "$ag_cfg" > "$tmp_ag" 2>/dev/null; then
+            chmod 0600 "$tmp_ag"
+            mv "$tmp_ag" "$ag_cfg"
+          else
+            rm -f "$tmp_ag"
+          fi
+          local ag_port ag_csrf
+          ag_port="$(grep -Eo 'https://127\.0\.0\.1:[0-9]+' "$HOME/.config/Antigravity/logs/main.log" 2>/dev/null | tail -n 1 | sed 's/.*://' || true)"
+          ag_csrf="$(ps -eo args 2>/dev/null | sed -nE 's/.*language_server .*--csrf_token ([0-9a-fA-F-]+).*/\1/p' | head -n 1 || true)"
+          if [[ -n "$ag_port" && -n "$ag_csrf" ]]; then
+            curl -ksS --max-time 2 \
+              -X POST "https://127.0.0.1:''${ag_port}/exa.language_server_pb.LanguageServerService/JetboxWriteState" \
+              -H "Content-Type: application/json" \
+              -H "Connect-Protocol-Version: 1" \
+              -H "x-codeium-csrf-token: ''${ag_csrf}" \
+              -d '{"userConfig":{"userSettings":{"themeMode":"THEME_MODE_INHERIT"}}}' >/dev/null 2>&1 || true
+          fi
+        fi
+      fi
+
+      local ag_ide_cfg="$HOME/.config/Antigravity IDE/User/settings.json"
+      if [[ -f "$ag_ide_cfg" && ! -L "$ag_ide_cfg" ]]; then
+        if [[ "$(jq -r 'has("window.autoDetectColorScheme") and has("window.controlsStyle")' "$ag_ide_cfg" 2>/dev/null || echo true)" == "false" ]]; then
+          local tmp_ide
+          tmp_ide="$(mktemp "$ag_ide_cfg.XXXXXX")"
+          if jq '
+            .["window.autoDetectColorScheme"] = (if has("window.autoDetectColorScheme") then .["window.autoDetectColorScheme"] else true end)
+            | .["window.controlsStyle"] = (.["window.controlsStyle"] // "hidden")
+          ' "$ag_ide_cfg" > "$tmp_ide" 2>/dev/null; then
+            chmod 0644 "$tmp_ide"
+            mv "$tmp_ide" "$ag_ide_cfg"
+          else
+            rm -f "$tmp_ide"
+          fi
+        fi
+      fi
+
+      # Ensure Brave defaults to "Same as Linux" (`dark_mode = 0`) when unset,
+      # and refresh managed BrowserColorScheme="device" policy if running.
+      local brave_state="$HOME/.config/BraveSoftware/Brave-Browser/Local State"
+      if [[ -f "$brave_state" && ! -L "$brave_state" ]] && ! pgrep -f 'brave-browser|BraveSoftware/Brave-Browser' >/dev/null 2>&1; then
+        if [[ "$(jq -r '.brave.dark_mode // "unset"' "$brave_state" 2>/dev/null || echo 0)" == "unset" ]]; then
+          local tmp_brave
+          tmp_brave="$(mktemp "$brave_state.XXXXXX")"
+          if jq '.brave = ((.brave // {}) | .dark_mode = 0)' "$brave_state" > "$tmp_brave" 2>/dev/null; then
+            chmod 0600 "$tmp_brave"
+            mv "$tmp_brave" "$brave_state"
+          else
+            rm -f "$tmp_brave"
+          fi
+        fi
+      fi
+      if [[ -e /etc/brave/policies/managed ]] && command -v brave >/dev/null 2>&1 && pgrep -f 'brave-browser|BraveSoftware/Brave-Browser' >/dev/null 2>&1; then
+        brave --refresh-platform-policy --no-startup-window </dev/null >/dev/null 2>&1 &
+      fi
+
+      pulse_hyprland_global_theme "$bg_hex"
     }
 
     cmd_theme() {
@@ -317,7 +521,23 @@ pkgs.writeShellApplication {
           omarchy-theme-current
           ;;
         sync-mode)
-          apply_interface_mode
+          local force_signal=1
+          while (( $# > 0 )); do
+            case "$1" in
+              --force-signal)
+                force_signal=1
+                shift
+                ;;
+              --no-force-signal)
+                force_signal=0
+                shift
+                ;;
+              *)
+                shift
+                ;;
+            esac
+          done
+          apply_interface_mode "$force_signal"
           ;;
         set)
           local name=""
@@ -410,7 +630,7 @@ pkgs.writeShellApplication {
             fi
             target="$light_theme"
           fi
-          run_theme_set "$target" "$offline"
+          run_theme_set "$target" "$offline" 1
           apply_interface_mode
           ;;
         palette)
@@ -590,6 +810,63 @@ pkgs.writeShellApplication {
       esac
     }
 
+    cmd_kbd_backlight() {
+      local no_osd=0
+      local want_json=0
+      local args=()
+      while (( $# > 0 )); do
+        case "$1" in
+          --no-osd)
+            no_osd=1
+            shift
+            ;;
+          --json)
+            want_json=1
+            shift
+            ;;
+          *)
+            args+=("$1")
+            shift
+            ;;
+        esac
+      done
+
+      local action="''${args[0]:-get}"
+      if [[ "$action" == "get" || "$action" == "status" ]]; then
+        local device=""
+        for candidate in /sys/class/leds/*kbd_backlight*; do
+          if [[ -e "$candidate" ]]; then
+            device="$(basename "$candidate")"
+            break
+          fi
+        done
+        if [[ -z "$device" ]]; then
+          echo "No keyboard backlight device found" >&2
+          exit 1
+        fi
+        local cur max pct
+        cur="$(brightnessctl -d "$device" get)"
+        max="$(brightnessctl -d "$device" max)"
+        pct=$(( (cur * 100 + max / 2) / max ))
+        if (( want_json )); then
+          jq -nc \
+            --arg device "$device" \
+            --argjson brightness "$cur" \
+            --argjson maxBrightness "$max" \
+            --argjson percent "$pct" \
+            '{ device: $device, brightness: $brightness, maxBrightness: $maxBrightness, percent: $percent }'
+        else
+          printf '%d%%\n' "$pct"
+        fi
+        return 0
+      fi
+
+      local helper_args=()
+      (( no_osd )) && helper_args+=("--no-osd")
+      helper_args+=("''${args[@]}")
+      omarchy-brightness-keyboard "''${helper_args[@]}"
+    }
+
     cmd="''${1:-help}"
     shift || true
     case "$cmd" in
@@ -604,6 +881,9 @@ pkgs.writeShellApplication {
         ;;
       plugin)
         cmd_plugin "$@"
+        ;;
+      kbd-backlight | keyboard-backlight)
+        cmd_kbd_backlight "$@"
         ;;
       -h | --help | help)
         usage

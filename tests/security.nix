@@ -75,6 +75,11 @@ assert hasM2AirGrubBootloader m2airConfig;
 assert hasM2AirGrubBootloader m2airAuroraConfig;
 assert builtins.all (hasInitrdMod m2airConfig) requiredM2AirInitrdMods;
 assert builtins.all (hasInitrdMod m2airAuroraConfig) requiredM2AirInitrdMods;
+assert m2airConfig.systemd.services ? omarchnix-stage-luks-keyring-tty1;
+assert
+  m2airConfig.systemd.services.omarchnix-stage-luks-keyring-tty1.serviceConfig.KeyringMode
+  == "shared";
+assert m2airConfig.systemd.services.hyprland-tty1.serviceConfig.KeyringMode == "shared";
 assert rehearsalConfig.boot.loader.systemd-boot.enable == false;
 assert rehearsalConfig.boot.loader.grub.enable == false;
 assert rehearsalConfig.boot.loader.efi.canTouchEfiVariables == false;

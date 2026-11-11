@@ -45,6 +45,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    folio = {
+      url = "github:Th0rgal/folio";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     turbo-lean = {
       url = "github:Th0rgal/turbo-lean/f240450af444a302a0e02d5a5f8af00351089386";
       flake = false;
@@ -76,7 +81,6 @@
       self,
       nixpkgs,
       apple-silicon-support,
-      nixos-aurora,
       orb,
       ...
     }@inputs:
@@ -92,140 +96,31 @@
         omarchySrc = inputs.omarchy;
       };
 
-      omarchnixOverlay =
-        final: prev:
-        let
-          omarchyShell = import ./pkgs/omarchy-shell.nix {
-            inherit (final) lib;
-            pkgs = final;
-            omarchySrc = inputs.omarchy;
-            marketplaceSrc = inputs.omarchy-plugin-marketplace;
-          };
-          cli = import ./pkgs/omarchnix-cli.nix {
-            pkgs = final;
-            inherit omarchyShell;
-            marketplaceSrc = inputs.omarchy-plugin-marketplace;
-          };
-        in
-        {
-          omarchnix = {
-            inherit cli;
-            omarchy-shell = omarchyShell;
-            omarchySrc = inputs.omarchy;
-            marketplaceSrc = inputs.omarchy-plugin-marketplace;
-            importTheme =
-              arg:
-              omarchyLib.importTheme (
-                if builtins.isAttrs arg && !(arg ? outPath) then
-                  { pkgs = final; } // arg
-                else
-                  {
-                    theme = arg;
-                    pkgs = final;
-                  }
-              );
-            themes = omarchyLib.allBundledThemes final;
-            buildTheme = args: omarchyLib.buildThemePkg ({ pkgs = final; } // args);
-            buildPlugin = args: omarchyLib.buildPlugin ({ pkgs = final; } // args);
-            michelangelus-font = final.michelangelus-font;
-            omdrop = final.omdrop;
-            omarchy-quickshare = final.omarchy-quickshare;
-            omarchy-nearby = final.omarchy-nearby;
-          };
-          michelangelus-font = final.callPackage ./pkgs/michelangelus-font.nix { };
-          turbo-lean = final.callPackage ./pkgs/turbo-lean.nix {
-            turboLeanSrc = inputs.turbo-lean;
-          };
-          crispasr-cohere = final.callPackage ./pkgs/crispasr-cohere.nix { };
-          murmure = final.callPackage ./pkgs/murmure {
-            buildPlugin = final.omarchnix.buildPlugin;
-          };
-          omdrop = final.callPackage ./pkgs/omdrop.nix {
-            omdropAwdlSrc = inputs.omdrop-awdl;
-            omdropPluginSrc = inputs.omdrop-plugin;
-            buildPlugin = final.omarchnix.buildPlugin;
-            inherit omarchyShell;
-          };
-          omarchy-quickshare = final.callPackage ./pkgs/omarchy-quickshare.nix {
-            omarchyQuickshareSrc = inputs.omarchy-quickshare;
-            buildPlugin = final.omarchnix.buildPlugin;
-            inherit omarchyShell;
-          };
-          omarchy-nearby = final.callPackage ./pkgs/omarchy-nearby.nix {
-            omarchyNearbySrc = inputs.omarchy-nearby;
-            buildPlugin = final.omarchnix.buildPlugin;
-          };
-          orb-desktop = final.callPackage ./pkgs/orb-desktop.nix {
-            orbSrc = inputs.orb;
-            sandboxed-sh = final.callPackage "${inputs.orb}/nix/package.nix" {
-              inherit (final) turbo-lean;
-            };
-          };
-          sandboxed-sh = final.orb-desktop.passthru.sandboxed-sh;
-          notion-calendar = final.callPackage ./pkgs/notion-calendar.nix { };
-          # Enable Wayland text-input-v3 IME (fcitx5 dead-key preedit & XCompose) in Antigravity,
-          # matching NixOS's Brave and Bitwarden Electron wrappers without re-running autoPatchelf.
-          antigravity-hub =
-            if prev.stdenv.hostPlatform.isLinux && (prev ? antigravity-hub) then
-              final.symlinkJoin {
-                pname = prev.antigravity-hub.pname;
-                version = prev.antigravity-hub.version;
-                paths = [ prev.antigravity-hub ];
-                nativeBuildInputs = [ final.makeShellWrapper ];
-                postBuild = ''
-                  rm "$out/bin/antigravity"
-                  makeShellWrapper "${prev.antigravity-hub}/bin/antigravity" "$out/bin/antigravity" \
-                    --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--enable-wayland-ime=true --wayland-text-input-version=3}}"
-                '';
-                inherit (prev.antigravity-hub) meta passthru;
-              }
-            else
-              prev.antigravity-hub;
-        }
-        // prev.lib.optionalAttrs (prev ? aurora-sep) {
-          # nixos-aurora already runs Aurora's SEP contract tests (test_interface.py,
-          # test_lockout_reason.py) in postPatch; upstream libfprint's 131 simulated USB
-          # umockdev tests (egis_etu905, aes2550, etc.) fail/timeout under parallel builds.
-          libfprint = prev.libfprint.overrideAttrs {
-            doInstallCheck = false;
-          };
-        };
+      omarchnixOverlay = import ./overlays/default.nix {
+        inherit inputs omarchyLib;
+      };
 
-      mkNixos =
-        {
-          system ? "aarch64-linux",
-          withAsahiOverlay ? true,
-          withAuroraOverlay ? false,
-          modules,
-        }:
-        nixpkgs.lib.nixosSystem {
-          inherit system;
-          specialArgs = {
-            inherit inputs;
-            modulesPath = nixpkgs + "/nixos/modules";
-          };
-          modules = modules ++ [
-            {
-              nixpkgs.overlays =
-                nixpkgs.lib.optionals withAuroraOverlay [
-                  nixos-aurora.inputs.apple-silicon.overlays.default
-                  nixos-aurora.overlays.default
-                ]
-                ++ nixpkgs.lib.optionals (withAsahiOverlay && !withAuroraOverlay) [
-                  apple-silicon-support.overlays.default
-                ]
-                ++ [
-                  orb.overlays.default
-                  omarchnixOverlay
-                ];
-              nix.registry.nixpkgs.flake = nixpkgs;
-            }
-          ];
-        };
+      omarchnixModule = import ./modules/omarchnix.nix;
+
+      mkHost = import ./lib/mkHost.nix {
+        inherit inputs omarchnixOverlay omarchnixModule;
+      };
+
+      mkInternalHost =
+        args:
+        mkHost (
+          {
+            includeOmarchnixModule = false;
+            includeHomeManager = false;
+            includeSops = false;
+          }
+          // args
+        );
     in
     {
       lib = {
         omarchy = omarchyLib;
+        inherit mkHost;
       };
 
       overlays = {
@@ -234,7 +129,7 @@
       };
 
       nixosModules = {
-        omarchnix = import ./modules/omarchnix.nix;
+        omarchnix = omarchnixModule;
         default = self.nixosModules.omarchnix;
       };
 
@@ -244,23 +139,17 @@
       };
 
       nixosConfigurations = {
-        # Target machine: MacBook Air M2 (daily driver after cutover).
-        # Initial cutover boots on stock nixos-apple-silicon + alx.sh Stage 2;
-        # use m2air-aurora once ordinary NixOS boot is verified.
-        m2air = mkNixos {
+        m2air = mkInternalHost {
+          platform = "m2air-asahi";
           modules = [
-            apple-silicon-support.nixosModules.apple-silicon-support
             ./hosts/common.nix
             ./hosts/m2air.nix
           ];
         };
 
-        # Stage-2 Aurora SEP / Touch ID / FIDO2 configuration for MacBook Air M2
-        # (apply after validating ordinary m2air NixOS boot).
-        m2air-aurora = mkNixos {
-          withAuroraOverlay = true;
+        m2air-aurora = mkInternalHost {
+          platform = "m2air-aurora";
           modules = [
-            nixos-aurora.inputs.apple-silicon.nixosModules.default
             ./hosts/common.nix
             ./hosts/m2air.nix
             {
@@ -273,40 +162,30 @@
           ];
         };
 
-        # ARM64 UEFI server/workstation: NVIDIA Grace / DGX Spark.
-        spark = mkNixos {
-          system = "aarch64-linux";
-          withAsahiOverlay = false;
+        spark = mkInternalHost {
+          platform = "spark";
           modules = [
             ./hosts/spark.nix
           ];
         };
 
-        # Generic x86_64-linux UEFI workstation/VM.
-        workstation = mkNixos {
-          system = "x86_64-linux";
-          withAsahiOverlay = false;
+        workstation = mkInternalHost {
+          platform = "workstation";
           modules = [
             ./hosts/workstation.nix
           ];
         };
 
-        # Rehearsal machine: rented Mac mini M2 (Scaleway). Same hardware
-        # module, deliberately minimal — it exists to validate the boot
-        # chain, install flow, and nixos-rebuild path on real BootROM
-        # before touching the Air. No user data, no secrets.
-        rehearsal = mkNixos {
+        rehearsal = mkInternalHost {
+          platform = "m2air-asahi";
           modules = [
-            apple-silicon-support.nixosModules.apple-silicon-support
             ./hosts/common.nix
             ./hosts/rehearsal.nix
           ];
         };
 
-        # Pure-software test target: plain aarch64 QEMU guest, no Asahi
-        # bits. Used to iterate on hosts/common.nix and the installer
-        # flow without hardware.
-        vm = mkNixos {
+        vm = mkInternalHost {
+          platform = "vm";
           modules = [
             ./hosts/common.nix
             ./hosts/vm.nix
@@ -314,9 +193,6 @@
         };
       };
 
-      # Asahi/NixOS installer ISO (via nixos-apple-silicon's
-      # mkInstallerBootstrapCustom; built natively on ubuntu-24.04-arm in CI
-      # using the nixos-apple-silicon binary cache) + Omarchy compatibility packages.
       packages = forAllSystems (
         system:
         let
@@ -331,14 +207,17 @@
         rec {
           omarchy-shell = pkgs.omarchnix.omarchy-shell;
           omarchnix = pkgs.omarchnix.cli;
-          turbo-lean = pkgs.turbo-lean;
           crispasr-cohere = pkgs.crispasr-cohere;
           murmure = pkgs.murmure;
           omdrop = pkgs.omdrop;
           omarchy-quickshare = pkgs.omarchy-quickshare;
           omarchy-nearby = pkgs.omarchy-nearby;
+          orb-agent-sync = pkgs.orb-agent-sync;
+          turbo-lean = pkgs.turbo-lean;
           orb-desktop = pkgs.orb-desktop;
+          folio-desktop = pkgs.folio-desktop;
           notion-calendar = pkgs.notion-calendar;
+          michelangelus-font = pkgs.michelangelus-font;
           plugin-opencode-model-usage = pkgs.omarchnix.buildPlugin {
             src = inputs.omarchy-plugin-opencode-usage;
           };
@@ -378,7 +257,7 @@
           omarchy-compat = import ./tests/omarchy-compat.nix {
             inherit pkgs inputs omarchyLib;
             inherit (nixpkgs) lib;
-            self = self;
+            inherit self;
           };
 
           aurora-sep = import ./tests/aurora-sep.nix {
@@ -390,13 +269,9 @@
 
           modules-eval =
             let
-              standaloneNixos = nixpkgs.lib.nixosSystem {
-                inherit system;
-                specialArgs = { inherit inputs; };
+              standaloneNixos = mkHost {
+                platform = if system == "aarch64-linux" then "spark" else "workstation";
                 modules = [
-                  { nixpkgs.overlays = [ omarchnixOverlay ]; }
-                  self.nixosModules.omarchnix
-                  inputs.home-manager.nixosModules.home-manager
                   {
                     networking.hostName = "standalone-consumer";
                     omarchnix = {
@@ -408,6 +283,14 @@
                         theme = "catppuccin";
                         shellBackend = "omarchy-shell";
                         murmure.enable = true;
+                        macos = {
+                          enable = true;
+                          touchIdHud = true;
+                          wallpapers = {
+                            default = "/tmp/default.webp";
+                            workspaces."1" = "/tmp/ws1.webp";
+                          };
+                        };
                       };
                       services.sharing = {
                         airdrop.enable = true;
@@ -440,23 +323,27 @@
                   }
                 ];
               };
+              aliceHm = standaloneNixos.config.home-manager.users.alice;
             in
             assert standaloneNixos.config.programs.hyprland.enable == true;
             assert standaloneNixos.config.boot.loader.systemd-boot.enable == true;
-            assert
-              standaloneNixos.config.home-manager.users.alice.wayland.windowManager.hyprland.enable == true;
-            assert standaloneNixos.config.home-manager.users.alice.programs.waybar.enable == false;
-            assert standaloneNixos.config.home-manager.users.alice.systemd.user.services ? omarchy-shell;
+            assert aliceHm.wayland.windowManager.hyprland.enable == true;
+            assert aliceHm.programs.waybar.enable == false;
+            assert aliceHm.systemd.user.services ? omarchy-shell;
+            assert aliceHm.systemd.user.services ? omarchy-orb-agent-sync;
+            assert aliceHm.systemd.user.services ? murmure;
             assert standaloneNixos.config.systemd.services ? awdl0;
             assert standaloneNixos.config.systemd.services ? omdrop-awdl-sleep;
-            assert standaloneNixos.config.home-manager.users.alice.systemd.user.services ? omarchy-quickshare;
-            assert standaloneNixos.config.home-manager.users.alice.systemd.user.services ? murmure;
-            assert
-              standaloneNixos.config.home-manager.users.alice.programs.omarchnix.plugins.locked
-                ? "omarchnix.sharing";
-            assert
-              standaloneNixos.config.home-manager.users.alice.programs.omarchnix.plugins.locked
-                ? "th0rgal.murmure";
+            assert aliceHm.systemd.user.services ? omarchy-quickshare;
+            assert aliceHm.programs.omarchnix.plugins.locked ? "omarchnix.sharing";
+            assert aliceHm.programs.omarchnix.plugins.locked ? "th0rgal.murmure";
+            assert aliceHm.programs.omarchnix.plugins.locked ? "io.github.joaovitor2763.mission-control";
+            assert aliceHm.programs.omarchnix.plugins.locked ? "th0rgal.macos-dock";
+            assert aliceHm.programs.omarchnix.plugins.locked ? "th0rgal.spotlight";
+            assert aliceHm.programs.omarchnix.plugins.locked ? "th0rgal.touchid";
+            assert aliceHm.programs.omarchnix.plugins.locked ? "th0rgal.workspaces";
+            assert aliceHm.programs.omarchnix.plugins.locked ? "th0rgal.workspace-wallpapers";
+            assert aliceHm.services.hyprpaper.enable == false;
             assert self.nixosConfigurations.spark.pkgs.stdenv.hostPlatform.system == "aarch64-linux";
             assert self.nixosConfigurations.workstation.pkgs.stdenv.hostPlatform.system == "x86_64-linux";
             pkgs.runCommand "omarchnix-modules-eval" { } ''
@@ -465,8 +352,6 @@
         }
       );
 
-      # Wrapper: recent nixfmt chokes when 'nix fmt' invokes it with no
-      # positional args, so collect the .nix files ourselves.
       formatter = forAllSystems (
         system:
         nixpkgs.legacyPackages.${system}.writeShellScriptBin "nix-fmt" ''

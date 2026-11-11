@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "th0rgal.spotlight",
+  "name": "Search",
+  "version": "1.0.0",
+  "author": "Thomas Marchand",
+  "license": "MIT",
+  "description": "macOS Spotlight-inspired frosted-glass application launcher overlay.",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Spotlight.qml"
+  }
+}

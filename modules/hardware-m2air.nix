@@ -52,6 +52,30 @@ in
       description = "Apple SMC battery charge start threshold (%) written to macsmc-battery when present.";
     };
 
+    keyboardBacklight = {
+      defaultBrightness = lib.mkOption {
+        type = lib.types.nullOr (lib.types.ints.between 0 100);
+        default = 50;
+        description = ''
+          Default keyboard backlight brightness (%) seeded on MacBook Air M2
+          (`/sys/class/leds/kbd_backlight`) when uninitialized or when this
+          declarative value changes. Runtime adjustments persist across normal
+          reboots via `systemd-backlight`, unless `enforceOnBoot = true`.
+          Set to `null` to leave keyboard backlight boot state untouched.
+        '';
+      };
+
+      enforceOnBoot = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          When `true`, always set `/sys/class/leds/kbd_backlight` to
+          `defaultBrightness` on every boot instead of preserving the previous
+          session's `systemd-backlight` level.
+        '';
+      };
+    };
+
     isoLayout = lib.mkOption {
       type = lib.types.nullOr (
         lib.types.enum [
@@ -229,7 +253,55 @@ in
 
       services.udev.extraRules = ''
         SUBSYSTEM=="power_supply", KERNEL=="macsmc-battery", RUN+="${pkgs.coreutils}/bin/chgrp wheel /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold", RUN+="${pkgs.coreutils}/bin/chmod 0664 /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold"
+        SUBSYSTEM=="leds", KERNEL=="*kbd_backlight*", RUN+="${pkgs.coreutils}/bin/chgrp wheel /sys%p/brightness", RUN+="${pkgs.coreutils}/bin/chmod 0664 /sys%p/brightness"
       '';
+
+      systemd.services.m2air-kbd-backlight = lib.mkIf (cfg.keyboardBacklight.defaultBrightness != null) {
+        description = "Seed or enforce MacBook Air M2 keyboard backlight brightness";
+        wantedBy = [ "multi-user.target" ];
+        after = [
+          "multi-user.target"
+          "systemd-backlight@leds:kbd_backlight.service"
+        ];
+        unitConfig.ConditionPathExistsGlob = "/sys/class/leds/*kbd_backlight*/brightness";
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script =
+          let
+            desiredPct = cfg.keyboardBacklight.defaultBrightness;
+            enforce = if cfg.keyboardBacklight.enforceOnBoot then "1" else "0";
+          in
+          ''
+            state_dir="/var/lib/omarchnix"
+            stamp="$state_dir/configured-kbd-backlight"
+            desired="${toString desiredPct}"
+            prev=""
+            if [ -f "$stamp" ]; then
+              prev="$(cat "$stamp" 2>/dev/null || true)"
+            fi
+
+            if [ "${enforce}" = "1" ] || [ ! -f "$stamp" ] || [ "$prev" != "$desired" ]; then
+              for led in /sys/class/leds/*kbd_backlight*; do
+                [ -f "$led/brightness" ] && [ -f "$led/max_brightness" ] || continue
+                max_b="$(cat "$led/max_brightness" 2>/dev/null || echo 255)"
+                case "$max_b" in
+                  ""|*[!0-9]*) max_b=255 ;;
+                esac
+                raw=$(( (desired * max_b + 50) / 100 ))
+                [ "$raw" -gt "$max_b" ] && raw="$max_b"
+                [ "$raw" -lt 0 ] && raw=0
+                echo "$raw" > "$led/brightness" || true
+                for saved in /var/lib/systemd/backlight/*:"$(basename "$led")"; do
+                  [ -f "$saved" ] && echo "$raw" > "$saved" || true
+                done
+              done
+              mkdir -p "$state_dir"
+              printf '%s\n' "$desired" > "$stamp"
+            fi
+          '';
+      };
 
       systemd.services.macsmc-battery-thresholds = {
         description = "Configure Apple SMC battery charge thresholds on MacBook Air M2";

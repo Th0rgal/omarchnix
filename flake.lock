@@ -74,6 +74,26 @@
         "type": "github"
       }
     },
+    "folio": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794334419,
+        "narHash": "sha256-uL0JJOhLjORwXlpmylqjp4jtXNloSe6UZ1aZcJcoAMg=",
+        "owner": "Th0rgal",
+        "repo": "folio",
+        "rev": "d06218ef45a2db7e00354b0b9f04818b96af5ba5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "folio",
+        "type": "github"
+      }
+    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -290,6 +310,7 @@
     "root": {
       "inputs": {
         "apple-silicon-support": "apple-silicon-support",
+        "folio": "folio",
         "home-manager": "home-manager",
         "nixos-aurora": "nixos-aurora",
         "nixpkgs": "nixpkgs",

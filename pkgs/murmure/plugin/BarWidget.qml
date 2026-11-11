@@ -9,6 +9,13 @@ BarWidget {
   moduleName: "th0rgal.murmure"
 
   readonly property string murmureBin: "@MURMURE_BIN@"
+  readonly property string murmureSocketPath: {
+    var explicitSock = Quickshell.env("MURMURE_SOCKET")
+    if (explicitSock && explicitSock !== "") return explicitSock
+    var rt = Quickshell.env("XDG_RUNTIME_DIR")
+    if (rt && rt !== "") return rt + "/murmure.sock"
+    return Quickshell.env("HOME") + "/.local/share/murmure/murmure.sock"
+  }
   readonly property var service: (bar && bar.shell && bar.shell.serviceFor) ? bar.shell.serviceFor("th0rgal.murmure") : null
   property string fallbackDictState: "idle"
   property string fallbackLangCode: "en"
@@ -35,22 +42,35 @@ BarWidget {
     id: watchRestart
     interval: 2500
     onTriggered: {
-      if (!root.service && !barWatchProc.running) barWatchProc.running = true
+      if (!root.service && !barWatchSock.connected) barWatchSock.connected = true
     }
   }
 
   onServiceChanged: {
-    if (root.service && barWatchProc.running) {
-      barWatchProc.running = false
-    } else if (!root.service && !barWatchProc.running) {
-      barWatchProc.running = true
+    if (root.service && barWatchSock.connected) {
+      barWatchSock.connected = false
+    } else if (!root.service && !barWatchSock.connected) {
+      barWatchSock.connected = true
     }
   }
 
-  Process {
-    id: barWatchProc
-    command: [root.murmureBin, "watch"]
-    stdout: SplitParser {
+  Socket {
+    id: barWatchSock
+    path: root.murmureSocketPath
+    connected: !root.service
+    onConnectedChanged: {
+      if (connected) {
+        write('{"op":"watch"}\n')
+        flush()
+      } else if (!root.service) {
+        watchRestart.restart()
+      }
+    }
+    onError: function(_err) {
+      connected = false
+      if (!root.service) watchRestart.restart()
+    }
+    parser: SplitParser {
       onRead: function(line) {
         var s = String(line || "").trim()
         if (!s || s.indexOf('"state"') === -1) return
@@ -64,13 +84,6 @@ BarWidget {
         } catch (e) {}
       }
     }
-    onExited: {
-      if (!root.service) watchRestart.restart()
-    }
-  }
-
-  Component.onCompleted: {
-    if (!root.service) barWatchProc.running = true
   }
 
   // Subtle 5-bar macOS Murmure waveform icon

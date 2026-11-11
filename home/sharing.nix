@@ -201,29 +201,11 @@ in
           section = sCfg.barSection;
         };
 
-        home.activation.omarchnixUnifiedSharingCleanup =
-          config.lib.dag.entryAfter [ "writeBoundary" "omarchnixStateAndPlugins" ]
-            ''
-              rm -rf \
-                "$HOME/.config/omarchy/plugins/netmojo.omdrop" \
-                "$HOME/.config/omarchy/plugins/macondo.quickshare" \
-                "$HOME/.config/omarchy/plugins/oma.nearby"
-
-              if [ -f "$HOME/.config/omarchy/shell.json" ] && [ ! -L "$HOME/.config/omarchy/shell.json" ]; then
-                tmp_json="$(mktemp "$HOME/.config/omarchy/shell.json.XXXXXX")"
-                ${pkgs.jq}/bin/jq '
-                  def strip_legacy:
-                    map(select(((.id // .) | IN("netmojo.omdrop", "macondo.quickshare", "oma.nearby")) | not));
-                  .version = 1
-                  | .bar.layout = (
-                      (.bar.layout // {})
-                      | with_entries(.value = ((.value // []) | strip_legacy))
-                    )
-                  | .plugins = (((.plugins // []) | strip_legacy))
-                ' "$HOME/.config/omarchy/shell.json" > "$tmp_json" && mv "$tmp_json" "$HOME/.config/omarchy/shell.json"
-                chmod 0644 "$HOME/.config/omarchy/shell.json"
-              fi
-            '';
+        programs.omarchnix.shell.purgedPluginIds = [
+          "netmojo.omdrop"
+          "macondo.quickshare"
+          "oma.nearby"
+        ];
       })
 
       (lib.mkIf airdropActive {

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.joaovitor2763.mission-control",
+  "name": "Mission Control",
+  "version": "0.1.0",
+  "author": "joaovitor2763",
+  "description": "macOS-style Mission Control: spread out the windows of the current workspace with live previews and a Spaces bar.",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "MissionControl.qml"
+  }
+}

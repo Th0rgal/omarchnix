@@ -580,6 +580,283 @@ let
         lqml = lqml.replace(old_ipc, new_ipc, 1)
 
         lock_svc.write_text(lqml, encoding="utf-8")
+
+    # Fast-path Apple Silicon Asahi speaker-safety voicing sinks (`sgv2.voicing.*`,
+    # `effect_output.j*`) and Bluetooth sinks (`bluez_output.*`) directly in
+    # Quickshell's media service & audio panel so Mac volume keys respond in <0.2ms
+    # with zero subprocess forks, never unwrap into internal speaker-protection
+    # nodes, and send semantic speaker/headphone/mute/zero states to the frosted OSD.
+    media_model = out / "shell" / "plugins" / "services" / "media" / "MediaModel.js"
+    if media_model.is_file():
+        mmjs = media_model.read_text(encoding="utf-8")
+        old_vol_icon = "\n".join([
+            "function volumeOsdIcon(percent, muted) {",
+            '  return muted || percent === 0 ? "volume-muted" : "volume-high"',
+            "}",
+        ])
+        new_vol_icon = "\n".join([
+            "function volumeOsdIcon(percent, muted, headphones) {",
+            '  if (headphones) return muted ? "headphones-muted" : "headphones"',
+            '  if (muted) return "volume-muted"',
+            '  if (percent <= 0) return "volume-zero"',
+            '  return "volume"',
+            "}",
+        ])
+        assert old_vol_icon in mmjs, "MediaModel.js volumeOsdIcon block not found"
+        media_model.write_text(mmjs.replace(old_vol_icon, new_vol_icon, 1), encoding="utf-8")
+
+    media_svc = out / "shell" / "plugins" / "services" / "media" / "Service.qml"
+    if media_svc.is_file():
+        msqml = media_svc.read_text(encoding="utf-8")
+        old_vsink = '  readonly property var volumeSink: defaultSink && String(defaultSink.name).indexOf("alsa_output.") === 0 ? defaultSink : null'
+        new_vsink = "\n".join([
+            '  readonly property var volumeSink: defaultSink && /^(alsa_output\\.|bluez_output\\.|sgv2\\.voicing\\.|effect_output\\.j)/.test(String(defaultSink.name)) ? defaultSink : null',
+            '  readonly property bool volumeSinkHeadphones: {',
+            '    if (!volumeSink) return false',
+            '    var blob = String([volumeSink.name || "", volumeSink.description || "", volumeSink.nickname || ""].join(" ")).toLowerCase()',
+            '    return /headphone|headset|earbud|earphone|airpod/.test(blob)',
+            '  }',
+        ])
+        assert old_vsink in msqml, "media/Service.qml volumeSink line not found"
+        msqml = msqml.replace(old_vsink, new_vsink, 1)
+
+        old_osd_call = "      icon: MediaModel.volumeOsdIcon(step.percent, step.muted),"
+        new_osd_call = "      icon: MediaModel.volumeOsdIcon(step.percent, step.muted, root.volumeSinkHeadphones),"
+        assert old_osd_call in msqml, "media/Service.qml volumeOsdIcon call not found"
+        msqml = msqml.replace(old_osd_call, new_osd_call, 1)
+        media_svc.write_text(msqml, encoding="utf-8")
+
+    audio_panel = out / "shell" / "plugins" / "panels" / "audio" / "Panel.qml"
+    if audio_panel.is_file():
+        apqml = audio_panel.read_text(encoding="utf-8")
+        old_ap_fast = '    if (sink && String(sink.name).indexOf("alsa_output.") === 0) {'
+        new_ap_fast = '    if (sink && /^(alsa_output\\.|bluez_output\\.|sgv2\\.voicing\\.|effect_output\\.j)/.test(String(sink.name))) {'
+        assert old_ap_fast in apqml, "audio/Panel.qml resolveVolumeSink fast path not found"
+        audio_panel.write_text(apqml.replace(old_ap_fast, new_ap_fast, 1), encoding="utf-8")
+
+    sink_script = out / "bin" / "omarchy-audio-output-sink"
+    if sink_script.is_file():
+        stxt = sink_script.read_text(encoding="utf-8")
+        old_sink_fast = "if [[ -z $sink || $sink == alsa_output.* ]]; then"
+        new_sink_fast = "if [[ -z $sink || $sink == alsa_output.* || $sink == bluez_output.* || $sink == sgv2.voicing.* || $sink == effect_output.j* ]]; then"
+        assert old_sink_fast in stxt, "omarchy-audio-output-sink fast path not found"
+        sink_script.write_text(stxt.replace(old_sink_fast, new_sink_fast, 1), encoding="utf-8")
+
+    vol_script = out / "bin" / "omarchy-audio-output-volume"
+    if vol_script.is_file():
+        vtxt = vol_script.read_text(encoding="utf-8")
+        old_vol_tail = "\n".join([
+            "percent=$(volume_percent)",
+            "if volume_muted || ((''${percent:-0} == 0)); then",
+            '  icon="volume-muted"',
+            "else",
+            '  icon="volume-high"',
+            "fi",
+            "",
+            'omarchy-osd -i "$icon" -p "''${percent:-0}"',
+        ])
+        new_vol_tail = "\n".join([
+            "percent=$(volume_percent)",
+            'sink_lc="''${sink,,}"',
+            "is_hp=0",
+            'if [[ $sink_lc == *headphone* || $sink_lc == *headset* || $sink_lc == *earbud* || $sink_lc == *airpod* ]]; then',
+            "  is_hp=1",
+            "fi",
+            "if volume_muted; then",
+            '  icon=$( (( is_hp )) && echo "headphones-muted" || echo "volume-muted" )',
+            "elif (( ''${percent:-0} <= 0 )); then",
+            '  icon=$( (( is_hp )) && echo "headphones" || echo "volume-zero" )',
+            "else",
+            '  icon=$( (( is_hp )) && echo "headphones" || echo "volume" )',
+            "fi",
+            "",
+            'omarchy-osd -i "$icon" -p "''${percent:-0}"',
+        ])
+        assert old_vol_tail in vtxt, "omarchy-audio-output-volume OSD tail not found"
+        vol_script.write_text(vtxt.replace(old_vol_tail, new_vol_tail, 1), encoding="utf-8")
+
+    # macOS-style 0% screen-off luminosity:
+    # 1. Step brightness down to 0% (instead of clamping at 1%).
+    # 2. On Apple Silicon (`apple-panel-bl`), `appledrm`'s `calculate_dac(0)` still
+    #    leaves the panel backlight at `min_nits` (`actual_brightness = 2`) unless
+    #    CRTC DPMS is disabled. At 0%, power off the internal panel via DPMS while
+    #    holding `key_press_enables_dpms` / `mouse_move_enables_dpms` false so mouse
+    #    movement or volume keys keep the screen completely off until Brightness Up
+    #    (`F2`), slider raise, Power key, or system/lock wake restores >0%.
+    bmodel_js = out / "shell" / "services" / "BrightnessModel.js"
+    if bmodel_js.is_file():
+        bmtxt = bmodel_js.read_text(encoding="utf-8")
+        old_bm = "  return Math.max(current <= 5 ? current - 1 : current - 5, 1)"
+        new_bm = "  return Math.max(current <= 5 ? current - 1 : current - 5, 0)"
+        assert old_bm in bmtxt, "BrightnessModel.js lower clamp not found"
+        bmodel_js.write_text(bmtxt.replace(old_bm, new_bm, 1), encoding="utf-8")
+
+    bkeys_qml = out / "shell" / "services" / "BrightnessKeys.qml"
+    if bkeys_qml.is_file():
+        bktxt = bkeys_qml.read_text(encoding="utf-8")
+        old_bk = "\n".join([
+            "  property string device: \"\"",
+            "  readonly property string devicePath: device ? \"/sys/class/backlight/\" + device : \"\"",
+        ])
+        new_bk = old_bk + "\n  property bool panelBlanked: false"
+        assert old_bk in bktxt, "BrightnessKeys.qml device property block not found"
+        bktxt = bktxt.replace(old_bk, new_bk, 1)
+
+        old_bk_handle = "\n".join([
+            "    var current = Math.round(100 * readNumber(brightnessFile) / max)",
+            "",
+            '    setProc.command = ["brightnessctl", "-q", "-d", device, "set", BrightnessModel.brightnessKeyTarget(action, current) + "%"]',
+            "    setProc.running = true",
+            "    return true",
+        ])
+        new_bk_handle = "\n".join([
+            "    var current = Math.round(100 * readNumber(brightnessFile) / max)",
+            "    var target = BrightnessModel.brightnessKeyTarget(action, current)",
+            "",
+            '    if (action === "lower" && current <= 0 && root.panelBlanked) return true',
+            "    if (target <= 0) {",
+            "      root.panelBlanked = true",
+            '      setProc.command = ["omarchy-brightness-display", "--no-osd", "--monitor", name, "0%"]',
+            "    } else if (current <= 0 || root.panelBlanked) {",
+            "      root.panelBlanked = false",
+            '      setProc.command = ["omarchy-brightness-display", "--no-osd", "--monitor", name, target + "%"]',
+            "    } else {",
+            '      setProc.command = ["brightnessctl", "-q", "-d", device, "set", target + "%"]',
+            "    }",
+            "    setProc.running = true",
+            "    return true",
+        ])
+        assert old_bk_handle in bktxt, "BrightnessKeys.qml handle block not found"
+        bktxt = bktxt.replace(old_bk_handle, new_bk_handle, 1)
+
+        old_bk_exit = "\n".join([
+            "    onExited: {",
+            "      root.showOsd()",
+            "      if (!deviceProc.running) deviceProc.running = true",
+            "    }",
+        ])
+        new_bk_exit = "\n".join([
+            "    onExited: {",
+            "      if (!root.panelBlanked) root.showOsd()",
+            "      if (!deviceProc.running) deviceProc.running = true",
+            "    }",
+        ])
+        assert old_bk_exit in bktxt, "BrightnessKeys.qml onExited block not found"
+        bkeys_qml.write_text(bktxt.replace(old_bk_exit, new_bk_exit, 1), encoding="utf-8")
+
+    bdisp_bin = out / "bin" / "omarchy-brightness-display"
+    if bdisp_bin.is_file():
+        bdtxt = bdisp_bin.read_text(encoding="utf-8")
+        old_bd_on = "\n".join([
+            'elif [[ $step == "on" ]]; then',
+            "  # Skip the dispatch when every active display is already lit: a redundant",
+            "  # DPMS enable right after system resume forces another modeset, which blanks",
+            "  # the panel for a beat (visible flash at the unlock screen).",
+            "  hyprctl monitors -j 2>/dev/null | jq -e '[.[] | select(.disabled == false)] | length > 0 and all(.dpmsStatus)' >/dev/null 2>&1 && exit 0",
+            "  hyprctl dispatch 'hl.dsp.dpms({ action = \"enable\" })' >/dev/null 2>&1",
+            "  exit 0",
+            "fi",
+        ])
+        new_bd_on = "\n".join([
+            'elif [[ $step == "on" ]]; then',
+            '  rm -f "''${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero"',
+            "  hyprctl eval 'hl.config({ misc = { key_press_enables_dpms = true, mouse_move_enables_dpms = true } })' >/dev/null 2>&1 || true",
+            '  wake_dev="$(omarchy-hw-display 2>/dev/null || true)"',
+            '  if [[ -n $wake_dev ]]; then',
+            '    wake_pct="$(backlight_brightness "$wake_dev" 2>/dev/null || echo 5)"',
+            '    if (( ''${wake_pct:-5} <= 0 )); then',
+            '      brightnessctl -q -d "$wake_dev" set 5% >/dev/null 2>&1 || true',
+            "    fi",
+            "  fi",
+            "  hyprctl monitors -j 2>/dev/null | jq -e '[.[] | select(.disabled == false)] | length > 0 and all(.dpmsStatus)' >/dev/null 2>&1 && exit 0",
+            "  hyprctl dispatch 'hl.dsp.dpms({ action = \"enable\" })' >/dev/null 2>&1",
+            "  exit 0",
+            "fi",
+        ])
+        assert old_bd_on in bdtxt, "omarchy-brightness-display 'on' block not found"
+        bdtxt = bdtxt.replace(old_bd_on, new_bd_on, 1)
+
+        old_bd_tail = "\n".join([
+            "    (( target < 1 )) && target=1",
+            '    step="$target%"',
+            "  fi",
+            "",
+            "  # Set brightness of the display device.",
+            '  brightnessctl -d "$device" set "$step" >/dev/null',
+            "",
+            "  # Show the new brightness in OSD",
+            '  (( no_osd )) || omarchy-osd -i brightness -p "$(backlight_brightness "$device")"',
+        ])
+        new_bd_tail = "\n".join([
+            "    (( target < 0 )) && target=0",
+            '    step="$target%"',
+            "  fi",
+            "",
+            "  # Set brightness of the display device.",
+            '  brightnessctl -d "$device" set "$step" >/dev/null',
+            '  new_pct="$(backlight_brightness "$device")"',
+            '  target_mon="''${monitor:-$(omarchy-hyprland-monitor-laptop 2>/dev/null || true)}"',
+            '  if (( ''${new_pct:-1} <= 0 )); then',
+            '    printf \'%s\\n\' "$target_mon" > "''${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero"',
+            "    hyprctl eval 'hl.config({ misc = { key_press_enables_dpms = false, mouse_move_enables_dpms = false } })' >/dev/null 2>&1 || true",
+            '    [[ -n $target_mon ]] && hyprctl dispatch "hl.dsp.dpms({ action = \\"disable\\", monitor = \\"$target_mon\\" })" >/dev/null 2>&1 || true',
+            "  else",
+            '    if [[ -f "''${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero" ]]; then',
+            '      rm -f "''${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero"',
+            '      [[ -n $target_mon ]] && hyprctl dispatch "hl.dsp.dpms({ action = \\"enable\\", monitor = \\"$target_mon\\" })" >/dev/null 2>&1 || true',
+            "      hyprctl eval 'hl.config({ misc = { key_press_enables_dpms = true, mouse_move_enables_dpms = true } })' >/dev/null 2>&1 || true",
+            '    elif [[ -n $target_mon ]]; then',
+            '      hyprctl monitors -j 2>/dev/null | jq -e --arg m "$target_mon" \'.[] | select(.name == $m) | .dpmsStatus == true\' >/dev/null 2>&1 \\',
+            '        || hyprctl dispatch "hl.dsp.dpms({ action = \\"enable\\", monitor = \\"$target_mon\\" })" >/dev/null 2>&1 || true',
+            "    fi",
+            "    (( no_osd )) || omarchy-osd -i brightness -p \"$new_pct\"",
+            "  fi",
+        ])
+        assert old_bd_tail in bdtxt, "omarchy-brightness-display tail block not found"
+        bdisp_bin.write_text(bdtxt.replace(old_bd_tail, new_bd_tail, 1), encoding="utf-8")
+
+    mon_model_js = out / "shell" / "plugins" / "panels" / "monitor" / "Model.js"
+    if mon_model_js.is_file():
+        mm_txt = mon_model_js.read_text(encoding="utf-8")
+        old_clamp = "\n".join([
+            "function clampBrightness(value) {",
+            "  var n = Number(value)",
+            "  if (!isFinite(n)) return 1",
+            "  return Math.max(1, Math.min(100, Math.round(n)))",
+            "}",
+        ])
+        new_clamp = "\n".join([
+            "function clampBrightness(value) {",
+            "  var n = Number(value)",
+            "  if (!isFinite(n)) return 0",
+            "  return Math.max(0, Math.min(100, Math.round(n)))",
+            "}",
+        ])
+        assert old_clamp in mm_txt, "monitor/Model.js clampBrightness not found"
+        mm_txt = mm_txt.replace(old_clamp, new_clamp, 1)
+
+        old_bname = '  return t("monitor.level.nightOwl", "Night owl")'
+        new_bname = '  if (p <= 0) return t("monitor.level.screenOff", "Screen off")\n  return t("monitor.level.nightOwl", "Night owl")'
+        assert old_bname in mm_txt, "monitor/Model.js nightOwl line not found"
+        mon_model_js.write_text(mm_txt.replace(old_bname, new_bname, 1), encoding="utf-8")
+
+    mon_panel_qml = out / "shell" / "plugins" / "panels" / "monitor" / "Panel.qml"
+    if mon_panel_qml.is_file():
+        mp_txt = mon_panel_qml.read_text(encoding="utf-8")
+        old_bslider = "\n".join([
+            "                minimum: 1",
+            "                maximum: 100",
+            "                step: 1",
+            "                value: Math.max(1, root.currentBrightness)",
+        ])
+        new_bslider = "\n".join([
+            "                minimum: 0",
+            "                maximum: 100",
+            "                step: 1",
+            "                value: Math.max(0, root.currentBrightness)",
+        ])
+        assert old_bslider in mp_txt, "monitor/Panel.qml brightnessSlider minimum block not found"
+        mon_panel_qml.write_text(mp_txt.replace(old_bslider, new_bslider, 1), encoding="utf-8")
   '';
 
   omarchyShare =
@@ -623,6 +900,10 @@ let
         ''}
 
         sed -i '1{/^\/\/@ pragma OmarchyLoadPatch$/d;}' "$out/shell/shell.qml"
+
+        chmod -R u+w "$out/shell/plugins/osd"
+        cp --remove-destination --no-preserve=mode "${./osd/OsdModel.js}" "$out/shell/plugins/osd/OsdModel.js"
+        cp --remove-destination --no-preserve=mode "${./osd/Osd.qml}" "$out/shell/plugins/osd/Osd.qml"
 
         substituteInPlace "$out/shell/Commons/InputMethodState.qml" \
           --replace-fail 'command: ["/usr/bin/python3", Quickshell.env("OMARCHY_PATH") + "/default/input-methods/indicator.py"]' 'command: ["${fcitxIndicatorBin}/bin/fcitx-indicator"]'

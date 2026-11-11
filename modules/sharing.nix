@@ -217,9 +217,10 @@ in
           enable = lib.mkDefault true;
           nssmdns4 = lib.mkDefault true;
           nssmdns6 = lib.mkDefault true;
-          publish = {
-            enable = lib.mkDefault true;
-            userServices = lib.mkDefault true;
+          settings.publish = {
+            disable-publishing = lib.mkDefault false;
+            disable-user-service-publishing = lib.mkDefault false;
+            publish-addresses = lib.mkDefault true;
           };
         };
 

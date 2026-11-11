@@ -84,6 +84,19 @@ in
         description = "Enable sops-nix age secret decryption wiring.";
       };
 
+      defaultTimeZone = lib.mkOption {
+        type = lib.types.str;
+        default = "UTC";
+        example = "Europe/Lisbon";
+        description = ''
+          Default IANA timezone seeded into `/etc/localtime` when `time.timeZone`
+          is left `null` (imperative timezone mode), so Omarchy's World Clock
+          (`omarchy.elsewhen`) and `omarchy-menu-timezone` (`timedatectl set-timezone`)
+          can switch timezones live at runtime while still applying declarative
+          default timezone updates.
+        '';
+      };
+
       desktop = {
         enable = lib.mkEnableOption "omarchnix Hyprland Wayland desktop stack";
 
@@ -120,6 +133,20 @@ in
             default = "intl";
             description = "Default XKB keyboard variant passed into Home Manager (`intl` matches macOS `USInternational-PC`, `\"\"` for plain layout).";
           };
+
+          backlight = {
+            step = lib.mkOption {
+              type = lib.types.ints.between 1 100;
+              default = 10;
+              description = "Default percentage step per keypress for keyboard backlight shortcuts passed into Home Manager.";
+            };
+
+            dimOnIdle = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = "Default keyboard backlight idle blanking toggle passed into Home Manager.";
+            };
+          };
         };
 
         touchpad = {
@@ -140,6 +167,36 @@ in
           enable = lib.mkEnableOption "Murmure on-device Wayland dictation (`Fn + Right Shift` + shared `voiced` Cohere Transcribe daemon)";
         };
 
+        macos = {
+          enable = lib.mkEnableOption "macOS-style desktop suite (Mission Control & contiguous Spaces, auto-hide Dock, Spotlight, slanted Workspaces, minimal bar, and per-Space preloaded Wallpapers)";
+
+          gestures = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Enable 3-finger trackpad swipe up/down gestures for Mission Control when `omarchnix.desktop.macos.enable` is active.";
+          };
+
+          touchIdHud = lib.mkOption {
+            type = lib.types.nullOr lib.types.bool;
+            default = null;
+            description = "Enable the Touch ID HUD overlay (`null` auto-enables when `omarchnix.hardware.m2air.touchId.enable` is true).";
+          };
+
+          wallpapers = {
+            default = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Default fallback wallpaper file path passed into Home Manager.";
+            };
+
+            workspaces = lib.mkOption {
+              type = lib.types.attrsOf lib.types.str;
+              default = { };
+              description = "Per-Space wallpaper file paths passed into Home Manager.";
+            };
+          };
+        };
+
         autostartTty = {
           enable = lib.mkEnableOption "autostart the Hyprland session on a bare TTY (no display manager)";
 
@@ -147,6 +204,17 @@ in
             type = lib.types.str;
             default = "tty1";
             description = "TTY (without `/dev/`) that hosts the autostarted Hyprland session.";
+          };
+
+          unlockKeyringFromLuks = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = ''
+              Automatically unlock GNOME Keyring (`login.keyring`) at session
+              start using the Stage-1 `systemd-cryptsetup` LUKS passphrase
+              cached in the kernel keyring when `services.gnome.gnome-keyring.enable`
+              is active.
+            '';
           };
         };
       };
@@ -159,10 +227,7 @@ in
         home-manager = {
           useGlobalPkgs = lib.mkDefault true;
           useUserPackages = lib.mkDefault true;
-          # Keep pre-existing (hand-written) dotfiles instead of aborting
-          # activation: a machine that already has ~/.config/hypr or ~/.zshrc
-          # otherwise fails with "Existing file ... would be clobbered".
-          backupFileExtension = lib.mkDefault "hm-backup";
+          backupFileExtension = lib.mkDefault "hm-bak";
           extraSpecialArgs = lib.optionalAttrs (inputs != { }) {
             inherit inputs;
           };
@@ -176,12 +241,30 @@ in
                 keyboard = {
                   layout = lib.mkDefault cfg.desktop.keyboard.layout;
                   variant = lib.mkDefault cfg.desktop.keyboard.variant;
+                  backlight = {
+                    step = lib.mkDefault cfg.desktop.keyboard.backlight.step;
+                    dimOnIdle = lib.mkDefault cfg.desktop.keyboard.backlight.dimOnIdle;
+                  };
                 };
                 touchpad = {
                   naturalScroll = lib.mkDefault cfg.desktop.touchpad.naturalScroll;
                   scrollFactor = lib.mkDefault cfg.desktop.touchpad.scrollFactor;
                 };
                 murmure.enable = lib.mkDefault cfg.desktop.murmure.enable;
+                macos = {
+                  enable = lib.mkDefault cfg.desktop.macos.enable;
+                  missionControl.gestures = lib.mkDefault cfg.desktop.macos.gestures;
+                  touchIdHud.enable = lib.mkDefault (
+                    if cfg.desktop.macos.touchIdHud != null then
+                      cfg.desktop.macos.touchIdHud
+                    else
+                      cfg.desktop.macos.enable && cfg.hardware.m2air.touchId.enable
+                  );
+                  wallpapers = {
+                    default = lib.mkDefault cfg.desktop.macos.wallpapers.default;
+                    workspaces = lib.mkDefault cfg.desktop.macos.wallpapers.workspaces;
+                  };
+                };
                 sharing = {
                   airdrop.enable = lib.mkDefault cfg.services.sharing.airdrop.enable;
                   quickshare.enable = lib.mkDefault cfg.services.sharing.quickshare.enable;
@@ -197,27 +280,93 @@ in
       let
         tty = cfg.desktop.autostartTty.tty;
         user = if cfg.desktop.user != null then cfg.desktop.user else "thomas";
+        userGroup = config.users.users.${user}.group;
         runtimeDir = "/run/user/${toString config.users.users.${user}.uid}";
-        sessionScript = pkgs.writeShellScript "hyprland-${tty}-session" ''
-          export XDG_RUNTIME_DIR="${runtimeDir}"
-          export XDG_SESSION_TYPE=wayland
-          export XDG_CURRENT_DESKTOP=Hyprland
-          exec ${lib.getExe pkgs.uwsm} start -e -D Hyprland hyprland.desktop
+        unlockKeyring =
+          cfg.desktop.autostartTty.unlockKeyringFromLuks && config.services.gnome.gnome-keyring.enable;
+        keyctl = lib.getExe' pkgs.keyutils "keyctl";
+        setpriv = lib.getExe' pkgs.util-linux "setpriv";
+        gnomeKeyringWrapper = "${config.security.wrapperDir}/gnome-keyring-daemon";
+
+        stageLuksKeyringScript = pkgs.writeShellScript "omarchnix-stage-luks-keyring-${tty}" ''
+          set -euo pipefail
+          key_id="$(${keyctl} request user cryptsetup 2>/dev/null || ${keyctl} search @u user cryptsetup 2>/dev/null || true)"
+          if [[ -z "$key_id" ]]; then
+            exit 0
+          fi
+
+          last_pw=""
+          while IFS= read -r -d "" entry || [[ -n "$entry" ]]; do
+            if [[ -n "$entry" ]]; then
+              last_pw="$entry"
+            fi
+          done < <(${keyctl} pipe "$key_id" 2>/dev/null || true)
+
+          if [[ -z "$last_pw" ]]; then
+            exit 0
+          fi
+
+          printf '%s' "$last_pw" | ${setpriv} --reuid "${user}" --regid "${userGroup}" --clear-groups \
+            ${keyctl} session - ${pkgs.runtimeShell} -euo pipefail -c '
+              kid="$(${keyctl} padd user omarchnix-login-keyring @s)"
+              ${keyctl} setperm "$kid" 0x3f3f0000
+              ${keyctl} timeout "$kid" 60
+              ${keyctl} link "$kid" @u
+            '
         '';
+
+        sessionScript = pkgs.writeShellScript "hyprland-${tty}-session" (
+          ''
+            export XDG_RUNTIME_DIR="${runtimeDir}"
+            export XDG_SESSION_TYPE=wayland
+            export XDG_CURRENT_DESKTOP=Hyprland
+          ''
+          + lib.optionalString unlockKeyring ''
+            if kid="$(${keyctl} search @u user omarchnix-login-keyring 2>/dev/null)"; then
+              export GNOME_KEYRING_CONTROL="${runtimeDir}/keyring"
+              if unlock_env="$(${keyctl} pipe "$kid" 2>/dev/null | ${gnomeKeyringWrapper} --daemonize --replace --unlock 2>/dev/null)"; then
+                eval "$unlock_env"
+                export GNOME_KEYRING_CONTROL
+              fi
+              ${keyctl} revoke "$kid" 2>/dev/null || true
+              ${keyctl} unlink "$kid" @u 2>/dev/null || true
+            fi
+          ''
+          + ''
+            exec ${lib.getExe pkgs.uwsm} start -e -D Hyprland hyprland.desktop
+          ''
+        );
       in
       {
         # getty.target pulls in autovt@tty1, which `switch-to-configuration`
         # starts on every activation and thereby kills the live session.
         systemd.targets.getty.wants = lib.mkForce [ ];
 
+        systemd.services."omarchnix-stage-luks-keyring-${tty}" = lib.mkIf unlockKeyring {
+          description = "Stage LUKS passphrase for automatic GNOME Keyring unlock on ${tty}";
+          wantedBy = [ "hyprland-${tty}.service" ];
+          before = [ "hyprland-${tty}.service" ];
+          after = [ "systemd-user-sessions.service" ];
+          restartIfChanged = false;
+          stopIfChanged = false;
+          serviceConfig = {
+            Type = "oneshot";
+            KeyringMode = "shared";
+            ExecStart = stageLuksKeyringScript;
+          };
+        };
+
         systemd.services."hyprland-${tty}" = {
           description = "Hyprland (uwsm) session on /dev/${tty}";
           wantedBy = [ "multi-user.target" ];
+          wants = lib.optional unlockKeyring "omarchnix-stage-luks-keyring-${tty}.service";
           after = [
             "systemd-user-sessions.service"
             "nss-lookup.target"
             "network.target"
-          ];
+            "home-manager-${user}.service"
+          ]
+          ++ lib.optional unlockKeyring "omarchnix-stage-luks-keyring-${tty}.service";
           conflicts = [ "autovt@${tty}.service" ];
           # A rebuild must never take the running desktop down.
           restartIfChanged = false;
@@ -230,6 +379,7 @@ in
             User = user;
             Type = "exec";
             PAMName = "login";
+            KeyringMode = "shared";
             TTYPath = "/dev/${tty}";
             TTYReset = true;
             TTYVHangup = true;
@@ -251,9 +401,30 @@ in
     ))
 
     (lib.mkIf cfg.enable {
-      time.timeZone = lib.mkDefault "Europe/Paris";
+      time.timeZone = lib.mkDefault null;
       i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
       console.keyMap = lib.mkDefault "us";
+
+      system.activationScripts.omarchnixDefaultTimeZone = lib.mkIf (config.time.timeZone == null) {
+        deps = [ "etc" ];
+        text = ''
+          state_dir="/var/lib/omarchnix"
+          stamp="$state_dir/configured-default-timezone"
+          desired=${lib.escapeShellArg cfg.defaultTimeZone}
+          zone_target="/etc/zoneinfo/$desired"
+          if [ -e "$zone_target" ]; then
+            prev=""
+            if [ -f "$stamp" ]; then
+              prev="$(cat "$stamp")"
+            fi
+            if [ ! -e /etc/localtime ] || [ "$prev" != "$desired" ]; then
+              ln -sfn "$zone_target" /etc/localtime
+              mkdir -p "$state_dir"
+              printf '%s\n' "$desired" > "$stamp"
+            fi
+          fi
+        '';
+      };
 
       services.openssh = {
         enable = lib.mkDefault true;
@@ -271,6 +442,7 @@ in
         pkgs.helix
         pkgs.jq
         pkgs.ripgrep
+        pkgs.ghostty.terminfo
       ]
       ++ lib.optional (omarchnixCliPkg != null) omarchnixCliPkg;
 
@@ -323,6 +495,15 @@ in
           else
             pkgs.callPackage ../pkgs/michelangelus-font.nix { };
 
+        chromiumDeviceColorPolicyDir = pkgs.runCommand "omarchnix-chromium-managed-policies" { } ''
+          mkdir -p "$out"
+          cat > "$out/10-omarchnix-color-scheme.json" <<'EOF'
+          {
+            "BrowserColorScheme": "device"
+          }
+          EOF
+        '';
+
         chromiumRecommendedPolicyDir = pkgs.runCommand "omarchnix-chromium-recommended-policies" { } ''
           mkdir -p "$out"
           cat > "$out/10-omarchnix-performance.json" <<'EOF'
@@ -336,10 +517,15 @@ in
       {
         hardware.graphics.enable = lib.mkDefault true;
 
-        # Enable Balanced Memory Saver by default via `recommended` policies so
-        # background tabs free inactive heap while keeping the UI toggle unlocked
-        # in `brave://settings/performance` and `chrome://settings/performance`.
+        # Managed policy directories as `/etc` symlinks so Chromium & Brave
+        # follow the XDG Settings portal (`prefer-dark` / `prefer-light`)
+        # globally across all desktops without triggering upstream
+        # `omarchy-theme-set-browser-policy` root prompts (`[[ ! -L $dir ]]`).
+        # Recommended policy directories enable Balanced Memory Saver by default
+        # while keeping the UI toggle unlocked in `brave://settings/performance`.
         environment.etc = {
+          "brave/policies/managed".source = lib.mkDefault chromiumDeviceColorPolicyDir;
+          "chromium/policies/managed".source = lib.mkDefault chromiumDeviceColorPolicyDir;
           "brave/policies/recommended".source = lib.mkDefault chromiumRecommendedPolicyDir;
           "chromium/policies/recommended".source = lib.mkDefault chromiumRecommendedPolicyDir;
         };
@@ -391,6 +577,21 @@ in
         };
 
         programs.dconf.enable = lib.mkDefault true;
+        programs.xfconf.enable = lib.mkDefault true;
+
+        programs.thunar = {
+          enable = lib.mkDefault true;
+          plugins = [
+            pkgs.thunar-archive-plugin
+            pkgs.thunar-volman
+          ];
+        };
+
+        services.gvfs = {
+          enable = lib.mkDefault true;
+          package = lib.mkDefault pkgs.gvfs;
+        };
+        services.tumbler.enable = lib.mkDefault true;
 
         programs.hyprland = {
           enable = true;
@@ -399,8 +600,26 @@ in
         };
 
         environment.systemPackages = [
+          pkgs.adwaita-icon-theme
+          pkgs.xarchiver
           pkgs.hyprsunset
+          pkgs.lm_sensors
+          pkgs.mission-center
         ];
+
+        # Declaratively satisfy Mission Center's "Additional Setup" requirements on NixOS:
+        # 1. Capability-wrapped `nethogs` (wheel-only) for live per-process Network bandwidth
+        #    without imperative `setcap` on read-only `/nix/store`.
+        # 2. `powercap` udev rule for CPU energy readings on RAPL-capable hosts.
+        # 3. Setuid `pkexec` wrapper (`enablePkexecWrapper`) so killing root processes and
+        #    controlling systemd units in Mission Center prompts via `omarchy.polkit`.
+        security.wrappers.nethogs = {
+          source = lib.getExe pkgs.nethogs;
+          capabilities = "cap_net_admin,cap_net_raw,cap_dac_read_search,cap_sys_ptrace+eip";
+          owner = "root";
+          group = "wheel";
+          permissions = "u+rx,g+x";
+        };
 
         xdg.portal = {
           enable = lib.mkDefault true;
@@ -425,9 +644,24 @@ in
           ''
         );
 
+        services.udev.extraRules = ''
+          SUBSYSTEM=="powercap", KERNEL=="intel-rapl*", RUN+="${pkgs.coreutils}/bin/chmod a+r /sys/%p/energy_uj"
+        '';
+
         security.pam.services.hyprlock = { };
         security.pam.services.omarchy-lock-password = { };
         security.polkit.enable = true;
+        security.polkit.enablePkexecWrapper = lib.mkDefault true;
+        security.polkit.extraConfig = ''
+          polkit.addRule(function(action, subject) {
+            if (action.id === "org.freedesktop.timedate1.set-timezone"
+                && subject.isInGroup("wheel")
+                && subject.local
+                && subject.active) {
+              return polkit.Result.YES;
+            }
+          });
+        '';
       }
     ))
   ];

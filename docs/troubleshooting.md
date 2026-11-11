@@ -58,8 +58,8 @@ Existing file '/home/<user>/.config/hypr/hypridle.conf' would be clobbered by ba
 **Cause:** the file already exists and is not a Home Manager symlink (hand-written
 or produced by another tool).
 
-**Fix:** omarchnix sets `home-manager.backupFileExtension = "hm-backup"` by
-default, so pre-existing files are renamed to `<file>.hm-backup` on activation.
+**Fix:** omarchnix sets `home-manager.backupFileExtension = "hm-bak"` by
+default, so pre-existing files are renamed to `<file>.hm-bak` on activation.
 If you override `home-manager` options yourself, keep that setting (or use
 `home-manager.backupFileExtension`/`force = true`) rather than deleting the files.
 

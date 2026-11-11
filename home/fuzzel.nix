@@ -1,4 +1,12 @@
-{ pkgs, theme, ... }:
+{
+  config,
+  pkgs,
+  theme,
+  ...
+}:
+let
+  cfg = config.programs.omarchnix;
+in
 {
   programs.fuzzel = {
     enable = true;
@@ -7,7 +15,11 @@
         font = "${theme.fonts.sans.name}:size=${toString (theme.fonts.sans.size + 1)}";
         dpi-aware = "no";
         prompt = "> ";
-        terminal = "${pkgs.foot}/bin/foot -e";
+        terminal =
+          if (cfg.terminal or "foot") == "ghostty" then
+            "${pkgs.ghostty}/bin/ghostty -e"
+          else
+            "${pkgs.foot}/bin/foot -e";
         layer = "overlay";
         width = 42;
         lines = 12;

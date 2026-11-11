@@ -33,6 +33,13 @@ assert
 assert
   m2airConfig.home-manager.users.thomas.dconf.settings."org/gnome/desktop/interface".monospace-font-name
   == "Lilex Nerd Font 11";
+assert m2airConfig.home-manager.users.thomas.gtk.gtk3.extraConfig.gtk-decoration-layout == ":";
+assert m2airConfig.home-manager.users.thomas.gtk.gtk4.extraConfig.gtk-decoration-layout == ":";
+assert
+  m2airConfig.home-manager.users.thomas.dconf.settings."org/gnome/desktop/wm/preferences".button-layout
+  == ":";
+assert m2airConfig.environment.etc ? "brave/policies/managed";
+assert m2airConfig.environment.etc ? "chromium/policies/managed";
 assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.kb_layout
   == "us";
@@ -59,6 +66,10 @@ assert m2airConfig.home-manager.users.thomas.programs.fuzzel.enable == true;
 assert m2airConfig.home-manager.users.thomas.programs.hyprlock.enable == true;
 assert m2airConfig.home-manager.users.thomas.services.hypridle.enable == true;
 assert m2airConfig.home-manager.users.thomas.services.hyprpaper.enable == true;
+assert m2airConfig.home-manager.users.thomas.xdg.userDirs.enable == true;
+assert m2airConfig.home-manager.users.thomas.xdg.userDirs.createDirectories == true;
+assert m2airConfig.home-manager.users.thomas.xdg.userDirs.videos == "/home/thomas/Videos";
+assert m2airConfig.home-manager.users.thomas.xdg.userDirs.pictures == "/home/thomas/Pictures";
 # The internal panel must not pin an absolute timing: appledrm only exposes the
 # modes the Apple DCP reports (e.g. 2560x1600 on J413 / Linux Asahi 7.2.15), and
 # requesting a non-existent mode breaks the atomic commit and page-flip path.

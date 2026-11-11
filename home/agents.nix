@@ -148,9 +148,29 @@ let
         inherit text;
       };
     }) skillFiles;
+
+  orbAgentSyncPkg =
+    if pkgs ? orb-agent-sync then
+      pkgs.orb-agent-sync
+    else if (pkgs ? omarchnix) && (pkgs.omarchnix ? orb-agent-sync) then
+      pkgs.omarchnix.orb-agent-sync
+    else
+      pkgs.callPackage ../pkgs/orb-agent-sync.nix { };
+
+  mkAgentOverride = subcmd: {
+    executable = true;
+    text = ''
+      #!/usr/bin/env bash
+      exec "${orbAgentSyncPkg}/bin/omarchy-orb-agent" ${subcmd} "$@"
+    '';
+  };
 in
 {
   config = lib.mkIf (cfg.enable && cfg.agents.enable) {
+    home.packages = lib.optionals cfg.agents.orbSync.enable [
+      orbAgentSyncPkg
+    ];
+
     home.file =
       (mkSkillFilesFor ".agents/skills/omarchnix")
       // lib.optionalAttrs (builtins.elem "claude" cfg.agents.targets) (
@@ -166,21 +186,61 @@ in
         mkSkillFilesFor ".config/opencode/skills/omarchnix"
       );
 
-    xdg.configFile = lib.mkIf (builtins.elem "opencode" cfg.agents.targets) {
-      "opencode/opencode.json".text =
-        builtins.toJSON {
-          "$schema" = "https://opencode.ai/config.json";
-          update = "disable";
+    xdg.configFile = lib.mkMerge [
+      (lib.mkIf (builtins.elem "opencode" cfg.agents.targets) {
+        "opencode/opencode.json".text =
+          builtins.toJSON {
+            "$schema" = "https://opencode.ai/config.json";
+            update = "disable";
+          }
+          + "\n";
+        "opencode/cli.json".text =
+          builtins.toJSON {
+            "$schema" = "https://opencode.ai/v2/cli.json";
+            theme = {
+              name = "system";
+            };
+          }
+          + "\n";
+      })
+      (lib.mkIf cfg.agents.orbSync.enable (
+        {
+          "omarchy/agent-overrides/omarchy-agent-usage-update" = mkAgentOverride "usage-update";
+          "omarchy/agent-overrides/omarchy-agent-account-use" = mkAgentOverride "account-use";
+          "omarchy/agent-overrides/omarchy-agent-account-mode" = mkAgentOverride "account-mode";
+          "omarchy/agent-overrides/omarchy-agent-account-rename" = mkAgentOverride "account-rename";
+          "omarchy/agent-overrides/omarchy-agent-account-add" = mkAgentOverride "account-add";
         }
-        + "\n";
-      "opencode/cli.json".text =
-        builtins.toJSON {
-          "$schema" = "https://opencode.ai/v2/cli.json";
-          theme = {
-            name = "system";
-          };
+        // lib.optionalAttrs cfg.agents.orbSync.launchInOrb {
+          "omarchy/agent-overrides/omarchy-agent" = mkAgentOverride "launch";
+          "omarchy/agent-overrides/omarchy-agent-prompt" = mkAgentOverride "prompt";
         }
-        + "\n";
+      ))
+    ];
+
+    systemd.user.services.omarchy-orb-agent-sync = lib.mkIf cfg.agents.orbSync.enable {
+      Unit = {
+        Description = "Sync Omarchy agent usage bar with Orb Core";
+        After = [ "graphical-session.target" ];
+      };
+      Service = {
+        Type = "oneshot";
+        ExecStart = "${orbAgentSyncPkg}/bin/omarchy-orb-agent usage-update";
+      };
+    };
+
+    systemd.user.timers.omarchy-orb-agent-sync = lib.mkIf cfg.agents.orbSync.enable {
+      Unit = {
+        Description = "Periodic Orb Core usage sync for Omarchy agent bar";
+      };
+      Timer = {
+        OnBootSec = "15s";
+        OnUnitActiveSec = cfg.agents.orbSync.pollInterval;
+        Persistent = false;
+      };
+      Install = {
+        WantedBy = [ "timers.target" ];
+      };
     };
   };
 }

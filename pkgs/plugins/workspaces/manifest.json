@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "th0rgal.workspaces",
+  "name": "Slanted Workspaces",
+  "version": "1.0.0",
+  "author": "Thomas Marchand",
+  "license": "MIT",
+  "description": "Slightly tilted parallelogram workspace indicators (1-5) inspired by classic polybar geometry with frosted monochrome styling.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Workspaces",
+    "description": "Switch Hyprland workspaces (click active or right-click for Mission Control).",
+    "defaultSection": "left"
+  }
+}

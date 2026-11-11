@@ -29,7 +29,8 @@ stdenvNoCC.mkDerivation {
 
     makeWrapper ${brave}/bin/brave "$out/bin/notion-calendar" \
       --add-flags "--ozone-platform=wayland" \
-      --add-flags "--enable-features=UseOzonePlatform,WebRTCPipeWireCapturer" \
+      --add-flags "--enable-features=UseOzonePlatform,WaylandWindowDecorations,WebRTCPipeWireCapturer,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoEncoder" \
+      --add-flags "--enable-wayland-ime=true --wayland-text-input-version=3" \
       --add-flags "--app=https://calendar.notion.so"
 
     cat > "$out/share/applications/notion-calendar.desktop" <<EOF

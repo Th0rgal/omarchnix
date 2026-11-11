@@ -10,7 +10,10 @@ let
   inherit (lib.generators) mkLuaInline;
 
   foot = "${pkgs.foot}/bin/foot";
+  ghostty = "${pkgs.ghostty}/bin/ghostty";
+  defaultTerminal = if (cfg.terminal or "foot") == "ghostty" then ghostty else foot;
   fuzzel = "${pkgs.fuzzel}/bin/fuzzel";
+  missionCenter = "${pkgs.mission-center}/bin/missioncenter";
   orb = if pkgs ? orb-desktop then "${pkgs.orb-desktop}/bin/orb" else "orb";
   shellLock =
     if cfg.shell.package != null then
@@ -50,6 +53,27 @@ let
       "${omarchyShellBin}/omarchy-shell idle toggle"
     else
       "mkdir -p \"$HOME/.local/state/omarchy/indicators\"; if [ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ]; then rm -f \"$HOME/.local/state/omarchy/indicators/stay-awake\"; else touch \"$HOME/.local/state/omarchy/indicators/stay-awake\"; fi";
+  captureMenuCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-capture-screenrecording --stop-recording || ${omarchyShellBin}/omarchy-menu toggle trigger.capture"
+    else
+      "${regionScreenshot}";
+  kbdStep = toString (cfg.keyboard.backlight.step or 10);
+  kbdBacklightUpCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-brightness-keyboard up ${kbdStep}"
+    else
+      "${brightnessctl} -d '*kbd_backlight*' set ${kbdStep}%+";
+  kbdBacklightDownCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-brightness-keyboard down ${kbdStep}"
+    else
+      "${brightnessctl} -d '*kbd_backlight*' set ${kbdStep}%-";
+  kbdBacklightCycleCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-brightness-keyboard cycle ${kbdStep}"
+    else
+      "${brightnessctl} -d '*kbd_backlight*' set ${kbdStep}%+";
 
   mkBind = keys: dsp: {
     _args = [
@@ -102,6 +126,180 @@ let
     end
   '';
 
+  # macOS-style Cmd+W: close the active tab/surface in browsers, code editors, and
+  # tabbed terminals (which natively close the window when closing the last tab),
+  # and close the window directly in single-window apps. Cmd+Shift+Q always closes
+  # the whole window.
+  smartCloseBind = ''
+    function()
+      local w = hl.get_active_window()
+      if not w then return end
+      local cls = (w.class or w.initial_class or ""):lower()
+      local mods = nil
+      if cls:match("^(brave%-browser|chromium|chromium%-browser|google%-chrome.*|firefox.*|librewolf.*|zen.*|vivaldi.*|epiphany|code|code%-url%-handler|codium|vscodium|cursor|dev%.zed%.zed|zed|thunar)$") then
+        mods = "CTRL"
+      elseif cls:match("^(.*ghostty.*|kitty|org%.wezfurlong%.wezterm|wezterm)$") then
+        mods = "CTRL SHIFT"
+      end
+      if mods then
+        hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = "W", state = "down" }))
+        hl.timer(function()
+          hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = "W", state = "up" }))
+        end, { timeout = 50, type = "oneshot" })
+      else
+        hl.dispatch(hl.dsp.window.close())
+      end
+    end
+  '';
+
+  # Float & center active window at 84%x85% of usable workarea so a clean wallpaper
+  # frame remains visible around it; pressing again when already centered returns
+  # the window to normal WM tiling.
+  centerShowcaseBind = ''
+    function()
+      local w = hl.get_active_window()
+      if not w then return end
+      local m = w.monitor or hl.get_active_monitor()
+      if not m then return end
+
+      local state = rawget(_G, "__omarchnix_showcase")
+      if not state then
+        state = { seq = {}, geom = {} }
+        rawset(_G, "__omarchnix_showcase", state)
+      end
+      local addr = tostring(w.address or "")
+
+      local function compute_targets(mon)
+        local scale = (mon.scale and mon.scale > 0) and mon.scale or 1.0
+        local phys_w, phys_h = mon.width, mon.height
+        if ((mon.transform or 0) % 2) == 1 then
+          phys_w, phys_h = phys_h, phys_w
+        end
+        local mon_w = math.floor(phys_w / scale + 0.5)
+        local mon_h = math.floor(phys_h / scale + 0.5)
+
+        local res = mon.reserved or {}
+        local res_l = res.left or 0
+        local res_r = res.right or 0
+        local res_t = res.top or 0
+        local res_b = res.bottom or 0
+
+        local avail_w = mon_w - res_l - res_r
+        local avail_h = mon_h - res_t - res_b
+
+        local target_w = math.floor(avail_w * 0.84 + 0.5)
+        local target_h = math.floor(avail_h * 0.85 + 0.5)
+        local target_x = math.floor(mon.x + res_l + (avail_w - target_w) / 2 + 0.5)
+        local target_y = math.floor(mon.y + res_t + (avail_h - target_h) / 2 + 0.5)
+
+        return {
+          res_l = res_l,
+          res_t = res_t,
+          avail_w = avail_w,
+          avail_h = avail_h,
+          target_w = target_w,
+          target_h = target_h,
+          target_x = target_x,
+          target_y = target_y,
+          center_x = mon.x + res_l + avail_w / 2,
+          center_y = mon.y + res_t + avail_h / 2,
+        }
+      end
+
+      local t = compute_targets(m)
+
+      if w.floating and (w.fullscreen or 0) == 0 then
+        local wx = (w.at and w.at.x) or 0
+        local wy = (w.at and w.at.y) or 0
+        local ww = (w.size and w.size.x) or 0
+        local wh = (w.size and w.size.y) or 0
+        local is_centered = math.abs((wx + ww / 2) - t.center_x) <= 28
+          and math.abs((wy + wh / 2) - t.center_y) <= 28
+        local prev = state.geom[addr]
+        local is_showcase_size = (math.abs(ww - t.target_w) <= 36 and math.abs(wh - t.target_h) <= 36)
+          or (prev and math.abs(ww - prev.w) <= 12 and math.abs(wh - prev.h) <= 12)
+        if is_centered and is_showcase_size then
+          state.seq[addr] = (state.seq[addr] or 0) + 1
+          state.geom[addr] = nil
+          hl.dispatch(hl.dsp.window.float({ action = "disable", window = w }))
+          return
+        end
+      end
+
+      local my_seq = (state.seq[addr] or 0) + 1
+      state.seq[addr] = my_seq
+
+      if (w.fullscreen or 0) ~= 0 then
+        local fs_mode = (w.fullscreen == 1) and "maximized" or "fullscreen"
+        hl.dispatch(hl.dsp.window.fullscreen({ mode = fs_mode, action = "unset", window = w }))
+      end
+      if not w.floating then
+        hl.dispatch(hl.dsp.window.float({ action = "enable", window = w }))
+      end
+      hl.dispatch(hl.dsp.window.resize({ x = t.target_w, y = t.target_h, relative = false, window = w }))
+      hl.dispatch(hl.dsp.window.move({ x = t.target_x, y = t.target_y, relative = false, window = w }))
+      state.geom[addr] = { w = t.target_w, h = t.target_h }
+
+      -- GTK4 Wayland clients (such as Ghostty) ignore the configure width/height on
+      -- the exact transition out of tiled/maximized/fullscreen state and commit their
+      -- saved pre-tiled floating size on the next frame instead. Re-assert the target
+      -- showcase size once floating settles and center using actual committed size.
+      local function settle(reassert_size)
+        if state.seq[addr] ~= my_seq then return end
+        local ok_mapped, is_mapped = pcall(function() return w.mapped end)
+        if not ok_mapped or not is_mapped then return end
+        if not w.floating or (w.fullscreen or 0) ~= 0 then return end
+        local cur_m = w.monitor or hl.get_active_monitor()
+        if not cur_m then return end
+        local ct = compute_targets(cur_m)
+        local ww = (w.size and w.size.x) or 0
+        local wh = (w.size and w.size.y) or 0
+        if reassert_size and (math.abs(ww - ct.target_w) > 2 or math.abs(wh - ct.target_h) > 2) then
+          hl.dispatch(hl.dsp.window.resize({ x = ct.target_w, y = ct.target_h, relative = false, window = w }))
+          ww = (w.size and w.size.x) or ct.target_w
+          wh = (w.size and w.size.y) or ct.target_h
+        end
+        local cx = math.floor(cur_m.x + ct.res_l + (ct.avail_w - ww) / 2 + 0.5)
+        local cy = math.floor(cur_m.y + ct.res_t + (ct.avail_h - wh) / 2 + 0.5)
+        local wx = (w.at and w.at.x) or 0
+        local wy = (w.at and w.at.y) or 0
+        if math.abs(wx - cx) > 2 or math.abs(wy - cy) > 2 then
+          hl.dispatch(hl.dsp.window.move({ x = cx, y = cy, relative = false, window = w }))
+        end
+        state.geom[addr] = { w = ww, h = wh }
+      end
+
+      hl.timer(function() settle(true) end, { timeout = 30, type = "oneshot" })
+      hl.timer(function() settle(true) end, { timeout = 80, type = "oneshot" })
+      hl.timer(function() settle(false) end, { timeout = 150, type = "oneshot" })
+    end
+  '';
+
+  # Toggle/summon Mission Center (Windows Task Manager / macOS Force Quit style):
+  # closes if already focused, brings to current Space & centers if open elsewhere,
+  # or launches fresh as a centered floating window.
+  taskManagerBind = ''
+    function()
+      local active = hl.get_active_window()
+      if active and active.class == "io.missioncenter.MissionCenter" then
+        hl.dispatch(hl.dsp.window.close())
+        return
+      end
+      for _, w in ipairs(hl.get_windows()) do
+        if w.class == "io.missioncenter.MissionCenter" then
+          local ws = hl.get_active_workspace()
+          if ws and ws.id and (not w.workspace or w.workspace.id ~= ws.id) then
+            hl.dispatch(hl.dsp.window.move({ workspace = ws.id, window = w }))
+          end
+          hl.dispatch(hl.dsp.focus({ window = w }))
+          hl.dispatch(hl.dsp.window.center({ window = w }))
+          return
+        end
+      end
+      hl.dispatch(hl.dsp.exec_cmd(${builtins.toJSON missionCenter}))
+    end
+  '';
+
   workspaceIndices = lib.range 1 10;
 
   workspaceBinds = lib.concatMap (
@@ -135,11 +333,15 @@ in
       };
 
       terminal = {
-        _var = foot;
+        _var = defaultTerminal;
       };
 
       launcher = {
         _var = fuzzel;
+      };
+
+      appLauncher = {
+        _var = lib.mkDefault config.wayland.windowManager.hyprland.settings.launcher._var;
       };
 
       monitor = [
@@ -182,6 +384,24 @@ in
             (toString theme.cursor.size)
           ];
         }
+        {
+          _args = [
+            "GTK_USE_PORTAL"
+            "1"
+          ];
+        }
+        {
+          _args = [
+            "QT_QPA_PLATFORMTHEME"
+            "xdgdesktopportal"
+          ];
+        }
+        {
+          _args = [
+            "QT_WAYLAND_DISABLE_WINDOWDECORATION"
+            "1"
+          ];
+        }
       ];
 
       config = {
@@ -212,7 +432,7 @@ in
           rounding = theme.ui.rounding;
           rounding_power = 2;
           active_opacity = 1.0;
-          inactive_opacity = 0.96;
+          inactive_opacity = 1.0;
           dim_special = 0.25;
           shadow = {
             enabled = true;
@@ -222,16 +442,16 @@ in
           };
           blur = {
             enabled = true;
-            size = 8;
+            size = 10;
             passes = 3;
             new_optimizations = true;
             xray = false;
             ignore_opacity = true;
-            contrast = 1.0;
-            brightness = 0.85;
-            noise = 0.01;
-            vibrancy = 0.35;
-            vibrancy_darkness = 0.2;
+            contrast = 0.85;
+            brightness = 0.98;
+            noise = 0.014;
+            vibrancy = 0.25;
+            vibrancy_darkness = 0.25;
             popups = true;
             popups_ignorealpha = 0.2;
             special = true;
@@ -281,6 +501,7 @@ in
           focus_on_activate = true;
           key_press_enables_dpms = true;
           mouse_move_enables_dpms = true;
+          allow_session_lock_restore = true;
         };
 
         binds = {
@@ -411,14 +632,40 @@ in
           float = true;
           size = "75% 70%";
           center = true;
-          opacity = 0.94;
+        }
+        {
+          name = "mission-center";
+          match = {
+            class = "^io\\.missioncenter\\.MissionCenter$";
+          };
+          float = true;
+          size = "75% 75%";
+          center = true;
+        }
+        {
+          name = "mission-center-gl-probe";
+          match = {
+            class = "^missioncenter$";
+            title = "^$";
+          };
+          float = true;
+          no_initial_focus = true;
+          opacity = "0.0 0.0";
+        }
+        {
+          name = "thunar-dialogs";
+          match = {
+            class = "^(thunar|Thunar)$";
+            title = "^(File Operation Progress|Confirm to replace files|Rename .*)$";
+          };
+          float = true;
+          center = true;
         }
         {
           name = "orb-vibrancy";
           match = {
             class = "^(orb-desktop|\\.orb-desktop-unwrapped|orb)$";
           };
-          opacity = "0.86 0.86";
           rounding = theme.ui.rounding;
           border_size = theme.ui.borderSize;
         }
@@ -429,6 +676,59 @@ in
           };
           opacity = "0.97 0.97";
           rounding = theme.ui.rounding;
+        }
+        {
+          name = "webcam-overlay";
+          match = {
+            class = "^WebcamOverlay-(small|medium|large)$";
+            title = "^WebcamOverlay$";
+          };
+          float = true;
+          pin = true;
+          no_initial_focus = true;
+          no_dim = true;
+        }
+        {
+          name = "webcam-overlay-small";
+          match = {
+            class = "^WebcamOverlay-small$";
+          };
+          size = [
+            "(monitor_h*4/25)"
+            "(monitor_h*9/50)"
+          ];
+          move = [
+            "(monitor_w-monitor_h*4/25-40)"
+            "(monitor_h-monitor_h*9/50-40)"
+          ];
+        }
+        {
+          name = "webcam-overlay-medium";
+          match = {
+            class = "^WebcamOverlay-medium$";
+          };
+          size = [
+            "(monitor_h*2/9)"
+            "(monitor_h/4)"
+          ];
+          move = [
+            "(monitor_w-monitor_h*2/9-40)"
+            "(monitor_h-monitor_h/4-40)"
+          ];
+        }
+        {
+          name = "webcam-overlay-large";
+          match = {
+            class = "^WebcamOverlay-large$";
+          };
+          size = [
+            "(monitor_h*3/10)"
+            "(monitor_h*27/80)"
+          ];
+          move = [
+            "(monitor_w-monitor_h*3/10-40)"
+            "(monitor_h-monitor_h*27/80-40)"
+          ];
         }
       ];
 
@@ -463,11 +763,11 @@ in
         (mkBind "SUPER + Return" "hl.dsp.exec_cmd(terminal)")
         (mkBind "CTRL + SUPER + O" ''hl.dsp.exec_cmd("${orb}")'')
         (mkBind "SUPER + SPACE" "hl.dsp.exec_cmd(launcher)")
-        (mkBind "CTRL + SUPER + SPACE" "hl.dsp.exec_cmd(launcher)")
-        (mkBind "SUPER + ALT + SPACE" "hl.dsp.exec_cmd(launcher)")
-        (mkBind "SUPER + Q" "hl.dsp.window.close()")
-        (mkBind "SUPER + W" "hl.dsp.window.close()")
-        (mkBind "SUPER + SHIFT + Q" "hl.dsp.window.kill()")
+        (mkBind "CTRL + SUPER + SPACE" "hl.dsp.exec_cmd(appLauncher)")
+        (mkBind "SUPER + ALT + SPACE" "hl.dsp.exec_cmd(appLauncher)")
+        (mkBind "SUPER + SHIFT + Q" "hl.dsp.window.close()")
+        (mkBind "SUPER + W" smartCloseBind)
+        (mkBind "CTRL + SUPER + SHIFT + Q" "hl.dsp.window.kill()")
 
         # macOS-style universal Copy / Paste / Cut / Select All / Undo / Redo
         (mkBind "SUPER + C" (mkUniversalClipboardBind "CTRL" "C" "CTRL SHIFT" "C"))
@@ -480,11 +780,15 @@ in
         # Window management uses CTRL + SUPER (Ctrl + Cmd) so bare Cmd+<letter> stays free for apps
         (mkBind "CTRL + SUPER + SHIFT + F" ''hl.dsp.window.float({ action = "toggle" })'')
         (mkBind "SUPER + ALT + V" ''hl.dsp.window.float({ action = "toggle" })'')
+        (mkBind "CTRL + SUPER + C" centerShowcaseBind)
+        (mkBind "SUPER + ALT + C" centerShowcaseBind)
         (mkBind "CTRL + SUPER + F" ''hl.dsp.window.fullscreen({ mode = "fullscreen" })'')
         (mkBind "SUPER + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')
         (mkBind "CTRL + SUPER + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')
         (mkBind "CTRL + SUPER + P" "hl.dsp.window.pseudo()")
         (mkBind "CTRL + SUPER + E" ''hl.dsp.layout("togglesplit")'')
+        (mkBind "CTRL + SHIFT + ESCAPE" taskManagerBind)
+        (mkBind "SUPER + ALT + ESCAPE" taskManagerBind)
         (mkBind "SUPER + ESCAPE" "hl.dsp.exec_cmd(${builtins.toJSON shellLock})")
         (mkBind "CTRL + ALT + SUPER + Q" "hl.dsp.exit()")
         (mkBind "CTRL + SUPER + R" "hl.dsp.reload_config()")
@@ -514,6 +818,8 @@ in
         (mkBind "CTRL + SUPER + SHIFT + P" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
         (mkBind "CTRL + SUPER + SHIFT + code:13" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
         (mkBind "SUPER + SHIFT + code:13" "hl.dsp.exec_cmd(${builtins.toJSON "${regionScreenshot}"})")
+        (mkBind "CTRL + SUPER + SHIFT + code:14" "hl.dsp.exec_cmd(${builtins.toJSON captureMenuCmd})")
+        (mkBind "SUPER + SHIFT + code:14" "hl.dsp.exec_cmd(${builtins.toJSON captureMenuCmd})")
         (mkBind "SUPER + SHIFT + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
         (mkBind "SUPER + CTRL + V" "hl.dsp.exec_cmd(${builtins.toJSON clipboardCmd})")
         (mkBind "SUPER + SHIFT + I" "hl.dsp.exec_cmd(${builtins.toJSON idleToggleCmd})")
@@ -537,15 +843,35 @@ in
           locked = true;
           repeating = true;
         })
-        (mkBindOpts "XF86KbdBrightnessUp"
-          ''hl.dsp.exec_cmd("${brightnessctl} -d '*kbd_backlight' set 10%+")''
+        (mkBindOpts "XF86KbdBrightnessUp" "hl.dsp.exec_cmd(${builtins.toJSON kbdBacklightUpCmd})" {
+          locked = true;
+          repeating = true;
+        })
+        (mkBindOpts "XF86KbdBrightnessDown" "hl.dsp.exec_cmd(${builtins.toJSON kbdBacklightDownCmd})" {
+          locked = true;
+          repeating = true;
+        })
+        (mkBindOpts "XF86KbdLightOnOff" "hl.dsp.exec_cmd(${builtins.toJSON kbdBacklightCycleCmd})" {
+          locked = true;
+        })
+        # Apple Silicon MacBooks lack dedicated keyboard backlight keys (F5/F6 are
+        # Dictation / Focus); drive keyboard backlight with Ctrl + F1/F2 or Cmd + F1/F2.
+        (mkBindOpts "CTRL + XF86MonBrightnessUp" "hl.dsp.exec_cmd(${builtins.toJSON kbdBacklightUpCmd})" {
+          locked = true;
+          repeating = true;
+        })
+        (mkBindOpts "CTRL + XF86MonBrightnessDown" "hl.dsp.exec_cmd(${builtins.toJSON kbdBacklightDownCmd})"
           {
             locked = true;
             repeating = true;
           }
         )
-        (mkBindOpts "XF86KbdBrightnessDown"
-          ''hl.dsp.exec_cmd("${brightnessctl} -d '*kbd_backlight' set 10%-")''
+        (mkBindOpts "SUPER + XF86MonBrightnessUp" "hl.dsp.exec_cmd(${builtins.toJSON kbdBacklightUpCmd})" {
+          locked = true;
+          repeating = true;
+        })
+        (mkBindOpts "SUPER + XF86MonBrightnessDown"
+          "hl.dsp.exec_cmd(${builtins.toJSON kbdBacklightDownCmd})"
           {
             locked = true;
             repeating = true;
@@ -591,4 +917,22 @@ in
       ++ workspaceBinds;
     };
   };
+
+  # Hyprland in Lua configuration mode (`hyprland.lua`) does not auto-reload when
+  # Home Manager updates the `~/.config/hypr/hyprland.lua` symlink during
+  # `nixos-rebuild switch`, and `home-manager-thomas.service` runs without
+  # `HYPRLAND_INSTANCE_SIGNATURE`. Discover all live compositor sockets in
+  # `$XDG_RUNTIME_DIR/hypr` and trigger `hyprctl reload` automatically.
+  home.activation.omarchnixReloadHyprland = config.lib.dag.entryAfter [ "linkGeneration" ] ''
+    runtime_dir="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    hyprctl_bin="$(PATH="/run/current-system/sw/bin:$PATH" command -v hyprctl 2>/dev/null || true)"
+    if [ -n "$hyprctl_bin" ] && [ -d "$runtime_dir/hypr" ]; then
+      for sock_dir in "$runtime_dir"/hypr/*; do
+        [ -S "$sock_dir/.socket.sock" ] || continue
+        sig="$(basename "$sock_dir")"
+        XDG_RUNTIME_DIR="$runtime_dir" HYPRLAND_INSTANCE_SIGNATURE="$sig" \
+          "$hyprctl_bin" reload >/dev/null 2>&1 || true
+      done
+    fi
+  '';
 }

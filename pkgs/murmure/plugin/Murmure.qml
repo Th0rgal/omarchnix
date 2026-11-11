@@ -13,6 +13,13 @@ Item {
   property var manifest: null
 
   readonly property string murmureBin: "@MURMURE_BIN@"
+  readonly property string murmureSocketPath: {
+    var explicitSock = Quickshell.env("MURMURE_SOCKET")
+    if (explicitSock && explicitSock !== "") return explicitSock
+    var rt = Quickshell.env("XDG_RUNTIME_DIR")
+    if (rt && rt !== "") return rt + "/murmure.sock"
+    return Quickshell.env("HOME") + "/.local/share/murmure/murmure.sock"
+  }
   readonly property string uiFont: Commons.Style.font.menuFamily || "IBM Plex Sans"
   readonly property string monoFont: Commons.Style.font.monoFamily || "Lilex Nerd Font"
 
@@ -77,7 +84,7 @@ Item {
     id: watchRestartTimer
     interval: 1500
     onTriggered: {
-      if (!watchProc.running) watchProc.running = true
+      if (!watchSock.connected) watchSock.connected = true
     }
   }
 
@@ -129,19 +136,25 @@ Item {
     }
   }
 
-  Process {
-    id: watchProc
-    command: [root.murmureBin, "watch"]
-    stdout: SplitParser {
-      onRead: function(line) { root.handleWatchLine(line) }
+  Socket {
+    id: watchSock
+    path: root.murmureSocketPath
+    connected: true
+    onConnectedChanged: {
+      if (connected) {
+        write('{"op":"watch"}\n')
+        flush()
+      } else {
+        watchRestartTimer.restart()
+      }
     }
-    onExited: {
+    onError: function(_err) {
+      connected = false
       watchRestartTimer.restart()
     }
-  }
-
-  Component.onCompleted: {
-    watchProc.running = true
+    parser: SplitParser {
+      onRead: function(line) { root.handleWatchLine(line) }
+    }
   }
 
   ShellIpc {

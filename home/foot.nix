@@ -25,7 +25,7 @@
       };
 
       colors-dark = {
-        alpha = "0.82";
+        alpha = "0.35";
         blur = "yes";
         background = theme.colors.bg;
         foreground = theme.colors.fg;

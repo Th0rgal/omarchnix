@@ -7,9 +7,9 @@
   fetchPnpmDeps,
   python3,
   pkg-config,
-  gtk3,
-  webkitgtk_4_1,
-  wrapGAppsHook3,
+  gtk4,
+  webkitgtk_6_0,
+  wrapGAppsHook4,
   makeWrapper,
   git,
   openssh,
@@ -18,6 +18,9 @@
   xdg-utils,
   cacert,
   clang,
+  gst_all_1,
+  pipewire,
+  murmure,
   sandboxed-sh,
   orbSrc,
   autoPatchelfHook,
@@ -28,10 +31,12 @@ let
 
   # Upstream `orb` (`nix/package.nix`) stages `lean-sys` offline and compiles
   # all Lean 4 modules once via `turbo-lean` + `clang`/`lld`; add `autoPatchelfHook`
-  # + `glibc` so linked ELF binaries always carry the Nixpkgs dynamic loader.
+  # + `glibc` so linked ELF binaries carry the Nixpkgs dynamic loader, and wire
+  # Linux GGUF Speech-to-Text (`cstr/cohere-transcribe-03-2026-GGUF`) into `Rpc.lean`.
   sandboxedShOffline = sandboxed-sh.overrideAttrs (old: {
     nativeBuildInputs =
       (old.nativeBuildInputs or [ ])
+      ++ [ python3 ]
       ++ lib.optionals stdenv.hostPlatform.isLinux [
         autoPatchelfHook
       ];
@@ -40,6 +45,33 @@ let
       ++ lib.optionals stdenv.hostPlatform.isLinux [
         glibc
       ];
+    postPatch = (old.postPatch or "") + ''
+      python3 - <<'PY'
+      import pathlib
+
+      rpc = pathlib.Path("lean/OrbLocald/OrbLocald/Rpc.lean")
+      rpc_txt = rpc.read_text()
+      for old_s, new_s in [
+          (
+              'private def pinnedVoiceModelRevision : String :=\n  "553445e84959f9ec3fcd43443bce75ea05c400f3"',
+              'private def pinnedVoiceModelRevision : String :=\n  "553445e84959f9ec3fcd43443bce75ea05c400f3"\n\nprivate def pinnedLinuxVoiceModelRepo : String :=\n  "cstr/cohere-transcribe-03-2026-GGUF"\n\nprivate def pinnedLinuxVoiceModelRevision : String :=\n  "4e98a8c31c95a92d651e60e3bfae4fe29fc6e026"',
+          ),
+          (
+              'private def resolveVoiceModelDir (st : LocaldState) : IO String := do\n  if let some envDir ← OrbBin.PosixExt.getEnvNonEmpty "ORB_VOICE_MODEL_DIR" then\n    return envDir\n  if let some hfCache ← OrbBin.PosixExt.getEnvNonEmpty "HF_HUB_CACHE" then\n    return (System.FilePath.mk hfCache / "models--MarkChen1214--cohere-transcribe-03-2026-MLX-Mixed-2bit3bit4bit" / "snapshots" / pinnedVoiceModelRevision).toString\n  let home := if st.homeDir.trimAscii.toString.isEmpty then "/tmp" else st.homeDir.trimAscii.toString\n  return (System.FilePath.mk home / ".cache" / "huggingface" / "hub" / "models--MarkChen1214--cohere-transcribe-03-2026-MLX-Mixed-2bit3bit4bit" / "snapshots" / pinnedVoiceModelRevision).toString\n\nprivate def isVoiceModelPresent (modelDir : String) : IO Bool := do\n  let d := System.FilePath.mk modelDir\n  return (← (d / "config.json").pathExists) && (← (d / "model.safetensors").pathExists)',
+              'private def resolveVoiceModelDir (st : LocaldState) : IO String := do\n  if let some envDir ← OrbBin.PosixExt.getEnvNonEmpty "ORB_VOICE_MODEL_DIR" then\n    return envDir\n  let repoSlug := if st.hostOs == "linux" then "models--cstr--cohere-transcribe-03-2026-GGUF" else "models--MarkChen1214--cohere-transcribe-03-2026-MLX-Mixed-2bit3bit4bit"\n  let rev := if st.hostOs == "linux" then pinnedLinuxVoiceModelRevision else pinnedVoiceModelRevision\n  if let some hfCache ← OrbBin.PosixExt.getEnvNonEmpty "HF_HUB_CACHE" then\n    return (System.FilePath.mk hfCache / repoSlug / "snapshots" / rev).toString\n  let home := if st.homeDir.trimAscii.toString.isEmpty then "/tmp" else st.homeDir.trimAscii.toString\n  return (System.FilePath.mk home / ".cache" / "huggingface" / "hub" / repoSlug / "snapshots" / rev).toString\n\nprivate def isVoiceModelPresent (modelDir : String) : IO Bool := do\n  let d := System.FilePath.mk modelDir\n  if (← (d / "config.json").pathExists) && (← (d / "model.safetensors").pathExists) then\n    return true\n  for fn in #["cohere-transcribe-q4_k.gguf", "cohere-transcribe-q5_0.gguf", "cohere-transcribe-q8_0.gguf", "cohere-transcribe-f16.gguf"] do\n    if (← (d / fn).pathExists) then\n      return true\n  return false',
+          ),
+          (
+              '    let hasLinuxCohere ← (OrbBin.PosixExt.getEnvNonEmpty "VOICED_COHERE_LIB").map Option.isSome\n    let supported := fakeMode || (st.hostOs == "macos" && arch == "aarch64") || (st.hostOs == "linux" && hasLinuxCohere)\n    let reasonVal : JVal :=\n      if !supported then .str "Speech-to-text requires Orb Desktop on Apple Silicon (macOS arm64)."\n      else .null\n    let pyReady := py?.isSome && script?.isSome\n    return .ok (.obj #[\n      ("supported", .bool supported),\n      ("reason", reasonVal),\n      ("platform", .str st.hostOs),\n      ("arch", .str arch),\n      ("python", match py? with | some p => .str p | none => .null),\n      ("python_ready", .bool pyReady),\n      ("model_repo", .str pinnedVoiceModelRepo),\n      ("model_revision", .str pinnedVoiceModelRevision),',
+              '    let hasLinuxCohere ← (OrbBin.PosixExt.getEnvNonEmpty "VOICED_COHERE_LIB").map Option.isSome\n    let supported := fakeMode || (st.hostOs == "macos" && arch == "aarch64") || (st.hostOs == "linux" && (hasLinuxCohere || arch == "aarch64" || arch == "x86_64"))\n    let reasonVal : JVal :=\n      if !supported then .str "Speech-to-text requires Orb Desktop on Apple Silicon or Linux (aarch64/x86_64)."\n      else .null\n    let pyReady := py?.isSome && script?.isSome\n    let effRepo := if st.hostOs == "linux" then pinnedLinuxVoiceModelRepo else pinnedVoiceModelRepo\n    let effRev := if st.hostOs == "linux" then pinnedLinuxVoiceModelRevision else pinnedVoiceModelRevision\n    return .ok (.obj #[\n      ("supported", .bool supported),\n      ("reason", reasonVal),\n      ("platform", .str st.hostOs),\n      ("arch", .str arch),\n      ("python", match py? with | some p => .str p | none => .null),\n      ("python_ready", .bool pyReady),\n      ("model_repo", .str effRepo),\n      ("model_revision", .str effRev),',
+          ),
+      ]:
+          if old_s in rpc_txt:
+              rpc_txt = rpc_txt.replace(old_s, new_s, 1)
+          else:
+              assert new_s in rpc_txt, f"missing Rpc.lean snippet: {old_s!r}"
+      rpc.write_text(rpc_txt)
+      PY
+    '';
   });
 
   pnpmDeps = fetchPnpmDeps {
@@ -59,7 +91,77 @@ let
       nodejs
       pnpm
       pnpmConfigHook
+      python3
     ];
+
+    postPatch = ''
+      python3 - <<'PY'
+      import pathlib
+
+      theme_ts = pathlib.Path("src/theme.ts")
+      theme_txt = theme_ts.read_text()
+      if "dataset.platform" not in theme_txt:
+          helper = (
+              'function detectPlatform(): string {\n'
+              '  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent || "";\n'
+              '  const raw = typeof navigator === "undefined" ? "" : navigator.platform || ua;\n'
+              '  if (/mac|iphone|ipad|ipod/i.test(raw)) return "macos";\n'
+              '  if (/linux/i.test(raw) && !/android/i.test(ua)) return "linux";\n'
+              '  return "other";\n'
+              '}\n\n'
+              'function apply(pref: ThemePref) {\n'
+              '  if (!document.documentElement.dataset.platform) {\n'
+              '    document.documentElement.dataset.platform = detectPlatform();\n'
+              '  }'
+          )
+          assert "function apply(pref: ThemePref) {" in theme_txt
+          theme_ts.write_text(theme_txt.replace("function apply(pref: ThemePref) {", helper, 1))
+
+      styles_css = pathlib.Path("src/styles.css")
+      css_txt = styles_css.read_text()
+      if 'data-platform="linux"' not in css_txt:
+          css_txt = css_txt.replace(
+              ".settings-view .sidebar { background: var(--bg-sidebar); }\n",
+              "",
+          ).replace(
+              "linear-gradient(90deg, var(--bg-code), var(--bg-active), var(--bg-code))",
+              "linear-gradient(90deg, var(--bg-code), var(--hover-1), var(--bg-code))",
+          )
+          css_txt += (
+              '\n:root[data-platform="linux"] {\n'
+              '  --sidebar-opacity: 78%;\n'
+              '  --surface-opacity: 92%;\n'
+              '  --bg-hover: color-mix(in srgb, var(--fg) 4.5%, transparent);\n'
+              '  --bg-active: color-mix(in srgb, var(--fg) 7.5%, transparent);\n'
+              '}\n'
+              ':root[data-platform="linux"][data-theme="light"] {\n'
+              '  --sidebar-opacity: 72%;\n'
+              '  --surface-opacity: 94%;\n'
+              '  --bg-hover: color-mix(in srgb, var(--fg) 4%, transparent);\n'
+              '  --bg-active: color-mix(in srgb, var(--fg) 6.5%, transparent);\n'
+              '}\n'
+          )
+      if "--tb-traffic-left" not in css_txt:
+          css_txt += (
+              '\n:root[data-platform="linux"] .app:not(.sb-hidden) .tb-left { left: 8px; width: calc(var(--sb-w) - 16px); }\n'
+              ':root[data-platform="linux"] .app.sb-hidden .tb-left,\n'
+              ':root[data-platform="linux"] .app[data-files-split="true"] .tb-left { margin-left: 0; }\n'
+              '@media (max-width: 720px) { :root[data-platform="linux"] .app:not(.sb-hidden) .titlebar .tb-left { padding-left: 0; } }\n'
+              ':root[data-platform="linux"] .app.sb-hidden .file-panel.maximized .file-header { padding-left: 10px; }\n'
+              '@media (max-width: 720px) { :root[data-platform="linux"] .file-panel.maximized .file-header { padding-left: 10px; } }\n'
+              ':root[data-platform="linux"] .dlg-fullscreen > .dlg-head { padding-left: 14px; }\n'
+          )
+      styles_css.write_text(css_txt)
+
+      vb_tsx = pathlib.Path("src/VoiceButton.tsx")
+      if vb_tsx.exists():
+          vb_txt = vb_tsx.read_text()
+          old_mm = 'return "Speech model not downloaded — run orb/voice/install.sh --download-model.";'
+          new_mm = 'return (typeof navigator !== "undefined" && /linux/i.test(navigator.platform || navigator.userAgent)) ? "Speech model not downloaded — run murmure download-model." : "Speech model not downloaded — run orb/voice/install.sh --download-model.";'
+          if old_mm in vb_txt:
+              vb_tsx.write_text(vb_txt.replace(old_mm, new_mm, 1))
+      PY
+    '';
 
     buildPhase = ''
       runHook preBuild
@@ -75,78 +177,8 @@ let
     '';
   };
 
-  staticServer = ''
-    import os, sys
-    from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
-
-    ROOT = sys.argv[1]
-    os.chdir(ROOT)
-
-    MIME = {
-        ".html": "text/html; charset=utf-8",
-        ".js": "text/javascript; charset=utf-8",
-        ".mjs": "text/javascript; charset=utf-8",
-        ".css": "text/css; charset=utf-8",
-        ".wasm": "application/wasm",
-        ".json": "application/json; charset=utf-8",
-        ".svg": "image/svg+xml",
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-        ".ico": "image/x-icon",
-        ".woff2": "font/woff2",
-        ".woff": "font/woff",
-        ".ttf": "font/ttf",
-        ".map": "application/json; charset=utf-8",
-    }
-
-    class Handler(SimpleHTTPRequestHandler):
-        def log_message(self, fmt, *args):
-            return
-
-        def end_headers(self):
-            origin = self.headers.get("Origin") or ""
-            if not origin.startswith("http://127.0.0.1") and not origin.startswith("http://localhost"):
-                host = self.headers.get("Host", "127.0.0.1")
-                origin = "http://" + host
-            self.send_header("Access-Control-Allow-Origin", origin)
-            self.send_header("Vary", "Origin")
-            req_p = getattr(self, "path", "").split("?", 1)[0]
-            if req_p.startswith(("/assets/", "/provider-icons/")) or req_p.endswith((".woff2", ".wasm")):
-                self.send_header("Cache-Control", "public, max-age=31536000, immutable")
-            else:
-                self.send_header("Cache-Control", "no-cache")
-            super().end_headers()
-
-        def guess_type(self, path):
-            ext = os.path.splitext(path)[1].lower()
-            return MIME.get(ext, "application/octet-stream")
-
-        def translate_path(self, path):
-            rel = path.split("?", 1)[0].split("#", 1)[0]
-            while rel.startswith("/"):
-                rel = rel[1:]
-            if rel == "":
-                rel = "index.html"
-            candidate = os.path.normpath(os.path.join(ROOT, rel))
-            if not (candidate == ROOT or candidate.startswith(ROOT + os.sep)):
-                return os.path.join(ROOT, "__missing__")
-            if os.path.isfile(candidate):
-                return candidate
-            if os.path.splitext(rel)[1] == "":
-                return os.path.join(ROOT, "index.html")
-            return os.path.join(ROOT, "__missing__")
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    port = server.server_address[1]
-    sys.stdout.write(str(port) + "\n")
-    sys.stdout.flush()
-    server.serve_forever()
-  '';
-
   linuxSigner = ''
-    import base64, getpass, json, os, shutil, subprocess, sys, tempfile, time, uuid
+    import base64, getpass, json, os, shutil, subprocess, sys, time, uuid
 
     OPENSSL = "${openssl}/bin/openssl"
     NOTIFY = "${libnotify}/bin/notify-send"
@@ -187,26 +219,58 @@ let
         ok, fpverify = fprintd_enrolled()
         if not ok or not fpverify:
             return False, 3, "Touch ID sensor or enrolled fingerprint is not available"
+        prompt_text = reason or "Touch sensor to authenticate"
+        proc = None
         try:
-            if os.path.exists(NOTIFY):
-                subprocess.Popen(
-                    [NOTIFY, "-a", "Orb", "-t", "8000", "Orb — Touch ID", reason or "Touch sensor to authenticate"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-        except Exception:
-            pass
-        try:
-            r = subprocess.run([fpverify], capture_output=True, text=True, timeout=35)
-            out = (r.stdout or "") + "\n" + (r.stderr or "")
-            if r.returncode == 0 and "verify-match" in out:
+            proc = subprocess.Popen(
+                [fpverify],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            overlay_shown = False
+            omarchy_shell = shutil.which("omarchy-shell") or "/etc/profiles/per-user/" + getpass.getuser() + "/bin/omarchy-shell"
+            if os.path.exists(omarchy_shell):
+                try:
+                    ipc_payload = json.dumps({
+                        "app": "Orb",
+                        "subtitle": prompt_text,
+                        "pid": proc.pid,
+                    })
+                    clean_env = {k: v for k, v in os.environ.items() if k != "OMARCHY_PATH"}
+                    ipc = subprocess.run(
+                        [omarchy_shell, "touchid", "begin", ipc_payload],
+                        capture_output=True,
+                        text=True,
+                        timeout=0.6,
+                        env=clean_env,
+                    )
+                    overlay_shown = ipc.returncode == 0 and "ok" in (ipc.stdout or "")
+                except Exception:
+                    overlay_shown = False
+            if not overlay_shown and os.path.exists(NOTIFY):
+                try:
+                    subprocess.Popen(
+                        [NOTIFY, "-a", "Orb", "-t", "8000", "Orb — Touch ID", prompt_text],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                except Exception:
+                    pass
+            out_s, err_s = proc.communicate(timeout=35)
+            out = (out_s or "") + "\n" + (err_s or "")
+            if proc.returncode == 0 and "verify-match" in out:
                 return True, 0, ""
             if "verify-no-match" in out:
                 return False, 1, "Touch ID: fingerprint did not match"
             return False, 2, "Touch ID: authentication cancelled"
         except subprocess.TimeoutExpired:
+            if proc is not None and proc.poll() is None:
+                proc.kill()
             return False, 2, "Touch ID: timed out"
         except Exception as exc:
+            if proc is not None and proc.poll() is None:
+                proc.kill()
             return False, 1, f"Touch ID: {exc}"
 
     if cmd == "status":
@@ -346,31 +410,35 @@ stdenv.mkDerivation {
   nativeBuildInputs = [
     clang
     pkg-config
-    wrapGAppsHook3
+    wrapGAppsHook4
     makeWrapper
   ];
 
   buildInputs = [
-    gtk3
-    webkitgtk_4_1
+    gtk4
+    webkitgtk_6_0
+    gst_all_1.gstreamer
+    gst_all_1.gst-plugins-base
+    gst_all_1.gst-plugins-good
+    gst_all_1.gst-plugins-bad
+    pipewire
   ];
 
   dontWrapGApps = true;
 
-  # "http://127.0.0.1/*" matches host without port, and a colon in the host
-  # makes UserContentURLPattern::parse drop the pattern. NULL allow_list
-  # injects on every top frame; navigation policy (`on_decide_policy` +
-  # `is_confined_shell_uri`) still confines the top frame to loopback and file://.
+  # Support both locked GTK3 orbSrc revisions and the new GTK4 + WebKitGTK 6.0 shell (`tauri://localhost/`).
   postPatch = ''
-    substituteInPlace main.c \
-      --replace-fail \
-      'static const gchar *const allow_list[] = { "http://127.0.0.1/*", "http://localhost/*", "file:///*", NULL };' \
-      'static const gchar *const allow_list[] = { NULL };'
+    if ! grep -q '<webkit/webkit.h>' main.c; then
+      cp ${./orb-shell-gtk4.c} main.c
+      substituteInPlace Makefile \
+        --replace-fail 'gtk+-3.0 webkit2gtk-4.1' 'gtk4 webkitgtk-6.0'
+    fi
   '';
 
   buildPhase = ''
     runHook preBuild
     make CC="${clang}/bin/clang" HAS_WEBKIT=1 orb-desktop
+    ./orb-desktop --self-test
     runHook postBuild
   '';
 
@@ -393,10 +461,6 @@ stdenv.mkDerivation {
     Categories=Development;Utility;
     StartupWMClass=orb-desktop
     EOF
-    cat > "$out/bin/.orb-static-server" <<'PY'
-    ${staticServer}
-    PY
-    chmod 0755 "$out/bin/.orb-static-server"
     cat > "$out/bin/.orb-signer" <<'PY'
     #!${python3}/bin/python3
     ${linuxSigner}
@@ -408,6 +472,7 @@ stdenv.mkDerivation {
   postFixup = ''
     makeWrapper "$out/bin/.orb-desktop-unwrapped" "$out/bin/orb" \
       "''${gappsWrapperArgs[@]}" \
+      --set-default GTK_USE_PORTAL 1 \
       --prefix PATH : "/run/current-system/sw/bin:${
         lib.makeBinPath [
           sandboxedShOffline
@@ -421,10 +486,11 @@ stdenv.mkDerivation {
       }" \
       --set ORB_LOCALD_BIN "${sandboxedShOffline}/bin/orb-locald" \
       --set ORB_SIGNER_BIN "$out/bin/.orb-signer" \
+      --set-default ORB_VOICE_PYTHON "${python3}/bin/python3" \
+      --set-default ORB_VOICE_WORKER "${murmure}/libexec/murmure/voiced/orb_voice_bridge.py" \
+      --set-default VOICED_COHERE_LIB "${murmure.crispasr-cohere}/lib/libcohere_asr.so" \
       --set-default SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
       --set-default NIX_SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
-      --set ORB_UNWRAPPED "$out/bin/.orb-desktop-unwrapped" \
-      --set ORB_STATIC_SERVER "$out/bin/.orb-static-server" \
       --set ORB_UI_ROOT "$out/share/orb" \
       --run ${lib.escapeShellArg ''
         if [ -d /run/opengl-driver/share ]; then
@@ -442,31 +508,6 @@ stdenv.mkDerivation {
         if [ -d /run/opengl-driver/share/glvnd/egl_vendor.d ]; then
           export __EGL_VENDOR_LIBRARY_DIRS="/run/opengl-driver/share/glvnd/egl_vendor.d"
         fi
-        case " $* " in
-          *" --self-test "*) ;;
-          *)
-            if [ -z "''${ORB_DEV_URL:-}" ]; then
-              fifo=$(mktemp -u)
-              mkfifo "$fifo"
-              ${python3}/bin/python3 "$ORB_STATIC_SERVER" "$ORB_UI_ROOT" >"$fifo" &
-              server_pid=$!
-              IFS= read -r port <"$fifo" || true
-              rm -f "$fifo"
-              if [ -z "$port" ]; then
-                echo "orb: static UI server failed to start" >&2
-                kill "$server_pid" 2>/dev/null || true
-                exit 1
-              fi
-              export ORB_DEV_URL="http://127.0.0.1:$port/"
-              if [ -z "''${ORB_LOCALD_PORT:-}" ]; then
-                export ORB_LOCALD_PORT=$(${python3}/bin/python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
-              fi
-              trap 'kill "$server_pid" 2>/dev/null || true' EXIT HUP INT TERM
-              "$ORB_UNWRAPPED" "$@"
-              exit $?
-            fi
-            ;;
-        esac
       ''}
   '';
 
@@ -476,7 +517,7 @@ stdenv.mkDerivation {
   };
 
   meta = {
-    description = "Orb desktop client (GTK3 + WebKitGTK shell + orb-locald)";
+    description = "Orb desktop client (GTK4 + WebKitGTK 6.0 shell + orb-locald)";
     mainProgram = "orb";
     platforms = lib.platforms.linux;
   };

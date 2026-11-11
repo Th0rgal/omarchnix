@@ -86,8 +86,8 @@ $ nix build .#installer-bootstrap
 ### Adopting an existing machine
 
 Home Manager activation never overwrites files you already have: the module sets
-`home-manager.backupFileExtension = "hm-backup"`, so a hand-written
-`~/.config/hypr/hyprland.lua` or `~/.zshrc` is renamed to `<file>.hm-backup`
+`home-manager.backupFileExtension = "hm-bak"`, so a hand-written
+`~/.config/hypr/hyprland.lua` or `~/.zshrc` is renamed to `<file>.hm-bak`
 instead of aborting activation.
 
 ### Deploying to another machine

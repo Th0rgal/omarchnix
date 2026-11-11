@@ -21,6 +21,14 @@ assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.syst
 assert builtins.any (p: (p.pname or "") == "orb-desktop") m2airConfig.environment.systemPackages;
 assert
   (m2airConfig.xdg.portal.config.hyprland."org.freedesktop.impl.portal.Settings" or null) == "gtk";
+assert builtins.elem "pipewire.service" m2airConfig.systemd.user.services.xdg-desktop-portal.after;
+assert builtins.elem "wireplumber.service"
+  m2airConfig.systemd.user.services.xdg-desktop-portal.after;
+assert builtins.elem "pipewire.service"
+  m2airConfig.systemd.user.services.xdg-desktop-portal-hyprland.after;
+assert builtins.elem "pipewire.service"
+  m2airConfig.systemd.user.services.xdg-desktop-portal-hyprland.partOf;
+assert m2airConfig.home-manager.users.thomas.xdg.configFile ? "hypr/xdph.conf";
 assert m2airConfig.fonts.enableDefaultPackages == false;
 assert m2airConfig.home-manager.users.thomas.gtk.font.name == "IBM Plex Sans";
 assert m2airConfig.home-manager.users.thomas.gtk.font.size == 9;

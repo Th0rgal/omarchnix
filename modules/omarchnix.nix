@@ -496,6 +496,16 @@ in
           else
             pkgs.callPackage ../pkgs/michelangelus-font.nix { };
 
+        hyprlandPortalPkg =
+          if (pkgs ? omarchnix) && (pkgs.omarchnix ? xdg-desktop-portal-hyprland) then
+            pkgs.omarchnix.xdg-desktop-portal-hyprland
+          else
+            pkgs.xdg-desktop-portal-hyprland.overrideAttrs (old: {
+              patches = (old.patches or [ ]) ++ [
+                ../pkgs/patches/xdg-desktop-portal-hyprland-screencopy.patch
+              ];
+            });
+
         chromiumDeviceColorPolicyDir = pkgs.runCommand "omarchnix-chromium-managed-policies" { } ''
           mkdir -p "$out"
           cat > "$out/10-omarchnix-color-scheme.json" <<'EOF'
@@ -598,6 +608,7 @@ in
           enable = true;
           withUWSM = true;
           xwayland.enable = true;
+          portalPackage = lib.mkDefault hyprlandPortalPkg;
         };
 
         environment.systemPackages = [
@@ -634,6 +645,33 @@ in
             ];
             "org.freedesktop.impl.portal.Settings" = [ "gtk" ];
           };
+        };
+
+        # Keep portal daemons ordered after PipeWire + WirePlumber so screen
+        # sharing never hits "No node factory discovered" at startup, and bind
+        # xdg-desktop-portal-hyprland to pipewire.service so a PipeWire restart
+        # cleanly restarts the screencopy portal alongside its internal reconnect.
+        systemd.user.services.xdg-desktop-portal = {
+          wants = [
+            "pipewire.service"
+            "wireplumber.service"
+          ];
+          after = [
+            "pipewire.service"
+            "wireplumber.service"
+          ];
+        };
+
+        systemd.user.services.xdg-desktop-portal-hyprland = {
+          wants = [
+            "pipewire.service"
+            "wireplumber.service"
+          ];
+          after = [
+            "pipewire.service"
+            "wireplumber.service"
+          ];
+          partOf = [ "pipewire.service" ];
         };
 
         # Grant the active local seat user read access to hardware keyboard evdev

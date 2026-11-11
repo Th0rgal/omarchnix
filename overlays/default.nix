@@ -59,6 +59,7 @@ in
     omarchy-quickshare = final.omarchy-quickshare;
     omarchy-nearby = final.omarchy-nearby;
     orb-agent-sync = final.orb-agent-sync;
+    xdg-desktop-portal-hyprland = final.xdg-desktop-portal-hyprland;
     plugins = {
       mission-control = final.omarchnix.buildPlugin {
         src = ../pkgs/plugins/mission-control;
@@ -121,6 +122,11 @@ in
   folio = final.folio-desktop;
   folio-locald = final.folio-desktop.passthru.folio-locald;
   notion-calendar = final.callPackage ../pkgs/notion-calendar.nix { };
+  xdg-desktop-portal-hyprland = prev.xdg-desktop-portal-hyprland.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [
+      ../pkgs/patches/xdg-desktop-portal-hyprland-screencopy.patch
+    ];
+  });
   antigravity-hub =
     if prev ? antigravity-hub then
       final.callPackage ../pkgs/antigravity-hub.nix {

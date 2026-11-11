@@ -1,0 +1,215 @@
+diff --git a/hyprland-share-picker/Picker.cpp b/hyprland-share-picker/Picker.cpp
+index 7368798..9c2a39c 100644
+--- a/hyprland-share-picker/Picker.cpp
++++ b/hyprland-share-picker/Picker.cpp
+@@ -30,7 +30,8 @@ static CDynamicSize    fullSize() {
+ }
+ 
+ static CSharedPointer<CTextElement> makeText(const CSharedPointer<IBackend>& backend, std::string text, CFontSize fontSize = {CFontSize::HT_FONT_TEXT}) {
+-    return CTextBuilder::begin()->text(std::move(text))->fontSize(std::move(fontSize))->color([backend] { return backend->getPalette()->m_colors.text; })->commence();
++    const auto RAW_BACKEND = backend.get();
++    return CTextBuilder::begin()->text(std::move(text))->fontSize(std::move(fontSize))->color([RAW_BACKEND] { return RAW_BACKEND->getPalette()->m_colors.text; })->commence();
+ }
+ 
+ CPicker::CPicker(const CSharedPointer<IBackend>& backend, std::vector<SOutputEntry> outputs, std::vector<SWindowEntry> windows, std::vector<SWorkspaceEntry> workspaces,
+@@ -345,16 +346,35 @@ void CPicker::beginRegionSelection() {
+     });
+ }
+ 
++void CPicker::teardown() {
++    if (m_window)
++        m_window->close();
++
++    m_sourceButtons.clear();
++    m_tabButtons.clear();
++    m_shareButton.reset();
++    m_allowToken.reset();
++    if (m_contentHost)
++        m_contentHost->clearChildren();
++    m_contentHost.reset();
++    if (m_mainLayout)
++        m_mainLayout->clearChildren();
++    m_mainLayout.reset();
++    if (m_window && m_window->m_rootElement)
++        m_window->m_rootElement->clearChildren();
++    m_window.reset();
++}
++
+ void CPicker::submit() {
+     if (!m_selection)
+         return;
+ 
+     std::cout << formatSelection(*m_selection, m_allowToken->state()) << std::flush;
+-    m_window->close();
++    teardown();
+     m_backend->destroy();
+ }
+ 
+ void CPicker::cancel() {
+-    m_window->close();
++    teardown();
+     m_backend->destroy();
+ }
+diff --git a/hyprland-share-picker/Picker.hpp b/hyprland-share-picker/Picker.hpp
+index 5f9ba52..a5445ac 100644
+--- a/hyprland-share-picker/Picker.hpp
++++ b/hyprland-share-picker/Picker.hpp
+@@ -49,6 +49,7 @@ class CPicker {
+     void                                                                        selectWindow(size_t index);
+     void                                                                        selectWorkspace(size_t index);
+     void                                                                        beginRegionSelection();
++    void                                                                        teardown();
+     void                                                                        submit();
+     void                                                                        cancel();
+ 
+diff --git a/hyprland-share-picker/main.cpp b/hyprland-share-picker/main.cpp
+index 36c102c..b6a9d8b 100644
+--- a/hyprland-share-picker/main.cpp
++++ b/hyprland-share-picker/main.cpp
+@@ -38,5 +38,7 @@ int main(int argc, char** argv) {
+     }
+ 
+     picker.run();
+-    return 0;
++    std::cout.flush();
++    std::cerr.flush();
++    std::_Exit(0);
+ }
+diff --git a/src/main.cpp b/src/main.cpp
+index e5c3ed3..4805ee8 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -1,3 +1,4 @@
++#include <cstdio>
+ #include <sdbus-c++/sdbus-c++.h>
+ 
+ #include "helpers/Log.hpp"
+@@ -14,6 +15,9 @@ void printHelp() {
+ }
+ 
+ int main(int argc, char** argv, char** envp) {
++    std::setvbuf(stdout, nullptr, _IOLBF, 0);
++    std::setvbuf(stderr, nullptr, _IOLBF, 0);
++
+     g_pPortalManager = std::make_unique<CPortalManager>();
+ 
+     for (int i = 1; i < argc; ++i) {
+diff --git a/src/portals/Screencopy.cpp b/src/portals/Screencopy.cpp
+index c5b0baf..45c4c63 100644
+--- a/src/portals/Screencopy.cpp
++++ b/src/portals/Screencopy.cpp
+@@ -829,7 +829,7 @@ void CScreencopyPortal::appendHLWorkspace(SP<CCHyprlandWorkspaceImageCaptureSour
+ }
+ 
+ bool CPipewireConnection::good() {
+-    return m_pContext && m_pCore;
++    return m_pContext && m_pCore && !m_bCoreDead;
+ }
+ 
+ CPipewireConnection::CPipewireConnection() {
+@@ -840,14 +840,61 @@ CPipewireConnection::CPipewireConnection() {
+         return;
+     }
+ 
++    connectCore();
++}
++
++bool CPipewireConnection::connectCore() {
++    if (!m_pContext)
++        return false;
++
++    disconnectCore();
++
+     m_pCore = pw_context_connect(m_pContext, nullptr, 0);
+ 
+     if (!m_pCore) {
+         Debug::log(ERR, "[pipewire] pw didn't allow for a context connection");
+-        return;
++        return false;
+     }
+ 
++    static const pw_core_events pwCoreEvents = {
++        .version = PW_VERSION_CORE_EVENTS,
++        .error =
++            [](void* data, uint32_t id, int seq, int res, const char* message) {
++                auto* self = static_cast<CPipewireConnection*>(data);
++                Debug::log(ERR, "[pipewire] core error on id {} (seq {}, res {}): {}", id, seq, res, message ? message : "unknown");
++                if (id == PW_ID_CORE && (res == -EPIPE || res == -ECONNRESET || res == -ENOTCONN || res == -ESHUTDOWN))
++                    self->m_bCoreDead = true;
++            },
++    };
++
++    m_bCoreDead = false;
++    spa_zero(m_coreListener);
++    pw_core_add_listener(m_pCore, &m_coreListener, &pwCoreEvents, this);
++
+     Debug::log(LOG, "[pipewire] connected");
++    return true;
++}
++
++void CPipewireConnection::disconnectCore() {
++    if (!m_pCore)
++        return;
++
++    while (!m_vStreams.empty()) {
++        const auto SESSION = m_vStreams.back()->pSession;
++        if (SESSION && SESSION->sharingData.active)
++            destroyStream(SESSION);
++        else {
++            if (m_vStreams.back()->stream)
++                pw_stream_destroy(m_vStreams.back()->stream);
++            m_vStreams.pop_back();
++        }
++    }
++
++    spa_hook_remove(&m_coreListener);
++    spa_zero(m_coreListener);
++    pw_core_disconnect(m_pCore);
++    m_pCore     = nullptr;
++    m_bCoreDead = false;
+ }
+ 
+ void CPipewireConnection::removeSessionFrameCallbacks(CScreencopyPortal::SSession* pSession) {
+@@ -867,8 +914,7 @@ void CPipewireConnection::removeSessionFrameCallbacks(CScreencopyPortal::SSessio
+ }
+ 
+ CPipewireConnection::~CPipewireConnection() {
+-    if (m_pCore)
+-        pw_core_disconnect(m_pCore);
++    disconnectCore();
+     if (m_pContext)
+         pw_context_destroy(m_pContext);
+ }
+@@ -1269,6 +1315,13 @@ static const pw_stream_events pwStreamEvents = {
+ // ------------------------------------------------------- //
+ 
+ bool CPipewireConnection::createStream(CScreencopyPortal::SSession* pSession) {
++    pw_loop_iterate(g_pPortalManager->m_sPipewire.loop, 0);
++    if (!good()) {
++        Debug::log(WARN, "[pipewire] core connection missing or disconnected, attempting reconnect");
++        if (!connectCore())
++            return false;
++    }
++
+     const auto PSTREAM = m_vStreams.emplace_back(std::make_unique<SPWStream>(pSession)).get();
+ 
+     pw_loop_enter(g_pPortalManager->m_sPipewire.loop);
+diff --git a/src/portals/Screencopy.hpp b/src/portals/Screencopy.hpp
+index f57e83a..0207b87 100644
+--- a/src/portals/Screencopy.hpp
++++ b/src/portals/Screencopy.hpp
+@@ -195,8 +195,12 @@ class CPipewireConnection {
+   private:
+     std::vector<std::unique_ptr<SPWStream>> m_vStreams;
+ 
++    bool                                    connectCore();
++    void                                    disconnectCore();
+     bool                                    buildModListFor(SPWStream* stream, uint32_t drmFmt, uint64_t** mods, uint32_t* modCount);
+ 
+-    pw_context*                             m_pContext = nullptr;
+-    pw_core*                                m_pCore    = nullptr;
++    pw_context*                             m_pContext  = nullptr;
++    pw_core*                                m_pCore     = nullptr;
++    spa_hook                                m_coreListener{};
++    bool                                    m_bCoreDead = false;
+ };

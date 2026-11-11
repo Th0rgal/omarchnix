@@ -816,6 +816,16 @@ in
           center = true;
         }
         {
+          name = "hyprland-share-picker";
+          match = {
+            class = "^hyprland-share-picker$";
+          };
+          float = true;
+          center = true;
+          stay_focused = true;
+          size = "620 440";
+        }
+        {
           name = "orb-vibrancy";
           match = {
             class = "^(orb-desktop|\\.orb-desktop-unwrapped|orb)$";
@@ -1090,6 +1100,13 @@ in
       ++ workspaceBinds;
     };
   };
+
+  xdg.configFile."hypr/xdph.conf".text = ''
+    screencopy {
+      max_fps = 60
+      allow_token_by_default = true
+    }
+  '';
 
   # Hyprland in Lua configuration mode (`hyprland.lua`) does not auto-reload when
   # Home Manager updates the `~/.config/hypr/hyprland.lua` symlink during

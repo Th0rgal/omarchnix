@@ -88,6 +88,18 @@ let
       exit 0
     fi
 
+    # When the screen was dimmed to 0% (backlight + DPMS off), tapping the Power
+    # button wakes the display back up (to 5%) rather than locking in the dark.
+    if [ -f "''${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero" ] || { [ -n "$hyprctl_bin" ] && "$hyprctl_bin" monitors -j 2>/dev/null | ${jq} -e '[.[] | select(.disabled == false)] | length > 0 and all(.dpmsStatus == false)' >/dev/null 2>&1; }; then
+      ${
+        if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+          "${omarchyShellBin}/omarchy-brightness-display on"
+        else
+          ''rm -f "''${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero"; "$hyprctl_bin" dispatch 'hl.dsp.dpms("on")' ''
+      } >/dev/null 2>&1 || true
+      exit 0
+    fi
+
     exec ${shellLock}
   '';
   themePickerCmd =
@@ -126,6 +138,66 @@ let
       "${omarchyShellBin}/omarchy-brightness-keyboard cycle ${kbdStep}"
     else
       "${brightnessctl} -d '*kbd_backlight*' set ${kbdStep}%+";
+  displayBrightnessUpDsp =
+    if cfg.shell.backend == "omarchy-shell" then
+      ''hl.dsp.global("omarchy:brightness.raise")''
+    else
+      ''hl.dsp.exec_cmd("${brightnessctl} -e4 set 5%+")'';
+  displayBrightnessDownDsp =
+    if cfg.shell.backend == "omarchy-shell" then
+      ''hl.dsp.global("omarchy:brightness.lower")''
+    else
+      ''hl.dsp.exec_cmd("${brightnessctl} -e4 set 5%-")'';
+  audioRaiseDsp =
+    if cfg.shell.backend == "omarchy-shell" then
+      ''hl.dsp.global("omarchy:audio.raise")''
+    else
+      ''hl.dsp.exec_cmd("${wpctl} set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+")'';
+  audioLowerDsp =
+    if cfg.shell.backend == "omarchy-shell" then
+      ''hl.dsp.global("omarchy:audio.lower")''
+    else
+      ''hl.dsp.exec_cmd("${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%-")'';
+  audioRaiseFineCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-audio-output-volume +1"
+    else
+      "${wpctl} set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 1%+";
+  audioLowerFineCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-audio-output-volume -1"
+    else
+      "${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 1%-";
+  audioMuteDsp =
+    if cfg.shell.backend == "omarchy-shell" then
+      ''hl.dsp.global("omarchy:audio.mute-toggle")''
+    else
+      ''hl.dsp.exec_cmd("${wpctl} set-mute @DEFAULT_AUDIO_SINK@ toggle")'';
+  audioOutputSwitchCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-audio-output-switch"
+    else
+      "${wpctl} set-mute @DEFAULT_AUDIO_SINK@ toggle";
+  audioMicMuteCmd =
+    if cfg.shell.backend == "omarchy-shell" && omarchyShellBin != "" then
+      "${omarchyShellBin}/omarchy-audio-input-mute"
+    else
+      "${wpctl} set-mute @DEFAULT_AUDIO_SOURCE@ toggle";
+  mediaPlayPauseDsp =
+    if cfg.shell.backend == "omarchy-shell" then
+      ''hl.dsp.global("omarchy:ipc.media.playPause")''
+    else
+      ''hl.dsp.exec_cmd("${playerctl} play-pause")'';
+  mediaNextDsp =
+    if cfg.shell.backend == "omarchy-shell" then
+      ''hl.dsp.global("omarchy:ipc.media.next")''
+    else
+      ''hl.dsp.exec_cmd("${playerctl} next")'';
+  mediaPrevDsp =
+    if cfg.shell.backend == "omarchy-shell" then
+      ''hl.dsp.global("omarchy:ipc.media.previous")''
+    else
+      ''hl.dsp.exec_cmd("${playerctl} previous")'';
 
   mkBind = keys: dsp: {
     _args = [
@@ -898,10 +970,20 @@ in
         {
           name = "omarchy-glass";
           match = {
-            namespace = "^(omarchy-bar|omarchy-dock|omarchy-menu|omarchy-notifications|omarchy-osd|omarchy-polkit|omarchy-reminders|omarchy-clipboard|omarchy-emojis|omarchy-image-selector|omarchy-keyboard-panel|omarchy-network-qr|fuzzel)$";
+            namespace = "^(omarchy-bar|omarchy-dock|omarchy-menu|omarchy-notifications|omarchy-polkit|omarchy-reminders|omarchy-clipboard|omarchy-emojis|omarchy-image-selector|omarchy-keyboard-panel|omarchy-network-qr|fuzzel)$";
           };
           blur = true;
           ignore_alpha = 0.15;
+        }
+        {
+          name = "omarchy-osd-layer";
+          match = {
+            namespace = "^omarchy-osd$";
+          };
+          blur = true;
+          ignore_alpha = 0.05;
+          no_anim = true;
+          animation = "none";
         }
         {
           name = "selection-layer";
@@ -998,11 +1080,11 @@ in
         (mkBindOpts "ALT + mouse:272" "hl.dsp.window.drag()" { mouse = true; })
         (mkBindOpts "ALT + mouse:273" "hl.dsp.window.resize()" { mouse = true; })
 
-        (mkBindOpts "XF86MonBrightnessUp" ''hl.dsp.exec_cmd("${brightnessctl} -e4 -n2 set 5%+")'' {
+        (mkBindOpts "XF86MonBrightnessUp" displayBrightnessUpDsp {
           locked = true;
           repeating = true;
         })
-        (mkBindOpts "XF86MonBrightnessDown" ''hl.dsp.exec_cmd("${brightnessctl} -e4 -n2 set 5%-")'' {
+        (mkBindOpts "XF86MonBrightnessDown" displayBrightnessDownDsp {
           locked = true;
           repeating = true;
         })
@@ -1051,39 +1133,54 @@ in
           }
         )
 
-        (mkBindOpts "XF86AudioRaiseVolume"
-          ''hl.dsp.exec_cmd("${wpctl} set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+")''
-          {
-            locked = true;
-            repeating = true;
-          }
-        )
-        (mkBindOpts "XF86AudioLowerVolume"
-          ''hl.dsp.exec_cmd("${wpctl} set-volume @DEFAULT_AUDIO_SINK@ 5%-")''
-          {
-            locked = true;
-            repeating = true;
-          }
-        )
-        (mkBindOpts "XF86AudioMute" ''hl.dsp.exec_cmd("${wpctl} set-mute @DEFAULT_AUDIO_SINK@ toggle")'' {
+        (mkBindOpts "XF86AudioRaiseVolume" audioRaiseDsp {
           locked = true;
           repeating = true;
         })
-        (mkBindOpts "XF86AudioMicMute"
-          ''hl.dsp.exec_cmd("${wpctl} set-mute @DEFAULT_AUDIO_SOURCE@ toggle")''
+        (mkBindOpts "XF86AudioLowerVolume" audioLowerDsp {
+          locked = true;
+          repeating = true;
+        })
+        # macOS-style fine 1% volume steps with Option (+ Shift) + Volume Up/Down
+        (mkBindOpts "ALT + XF86AudioRaiseVolume" "hl.dsp.exec_cmd(${builtins.toJSON audioRaiseFineCmd})" {
+          locked = true;
+          repeating = true;
+        })
+        (mkBindOpts "ALT + XF86AudioLowerVolume" "hl.dsp.exec_cmd(${builtins.toJSON audioLowerFineCmd})" {
+          locked = true;
+          repeating = true;
+        })
+        (mkBindOpts "ALT + SHIFT + XF86AudioRaiseVolume"
+          "hl.dsp.exec_cmd(${builtins.toJSON audioRaiseFineCmd})"
           {
             locked = true;
             repeating = true;
           }
         )
-        (mkBindOpts "XF86AudioPlay" ''hl.dsp.exec_cmd("${playerctl} play-pause")'' {
+        (mkBindOpts "ALT + SHIFT + XF86AudioLowerVolume"
+          "hl.dsp.exec_cmd(${builtins.toJSON audioLowerFineCmd})"
+          {
+            locked = true;
+            repeating = true;
+          }
+        )
+        (mkBindOpts "XF86AudioMute" audioMuteDsp {
           locked = true;
         })
-        (mkBindOpts "XF86AudioPause" ''hl.dsp.exec_cmd("${playerctl} play-pause")'' {
+        (mkBindOpts "SHIFT + XF86AudioMute" "hl.dsp.exec_cmd(${builtins.toJSON audioOutputSwitchCmd})" {
           locked = true;
         })
-        (mkBindOpts "XF86AudioNext" ''hl.dsp.exec_cmd("${playerctl} next")'' { locked = true; })
-        (mkBindOpts "XF86AudioPrev" ''hl.dsp.exec_cmd("${playerctl} previous")'' {
+        (mkBindOpts "XF86AudioMicMute" "hl.dsp.exec_cmd(${builtins.toJSON audioMicMuteCmd})" {
+          locked = true;
+        })
+        (mkBindOpts "XF86AudioPlay" mediaPlayPauseDsp {
+          locked = true;
+        })
+        (mkBindOpts "XF86AudioPause" mediaPlayPauseDsp {
+          locked = true;
+        })
+        (mkBindOpts "XF86AudioNext" mediaNextDsp { locked = true; })
+        (mkBindOpts "XF86AudioPrev" mediaPrevDsp {
           locked = true;
         })
       ]

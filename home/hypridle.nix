@@ -58,13 +58,13 @@ in
       listener = [
         {
           timeout = 180;
-          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || { ${brightnessctl} -s set 10%${lib.optionalString dimKbd "; ${kbdOffCmd}"}; }";
-          on-resume = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || { ${brightnessctl} -r${lib.optionalString dimKbd "; ${kbdRestoreCmd}"}; }";
+          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || [ -f \"\${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero\" ] || { ${brightnessctl} -s set 10%${lib.optionalString dimKbd "; ${kbdOffCmd}"}; }";
+          on-resume = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || [ -f \"\${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero\" ] || { ${brightnessctl} -r${lib.optionalString dimKbd "; ${kbdRestoreCmd}"}; }";
         }
         {
           timeout = 360;
-          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || ${hyprctl} dispatch 'hl.dsp.dpms(\"off\")'";
-          on-resume = "${hyprctl} dispatch 'hl.dsp.dpms(\"on\")'";
+          on-timeout = "[ -f \"$HOME/.local/state/omarchy/indicators/stay-awake\" ] || [ -f \"\${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero\" ] || ${hyprctl} dispatch 'hl.dsp.dpms(\"off\")'";
+          on-resume = "[ -f \"\${XDG_RUNTIME_DIR:-/tmp}/omarchy-brightness-zero\" ] || ${hyprctl} dispatch 'hl.dsp.dpms(\"on\")'";
         }
         {
           timeout = 900;

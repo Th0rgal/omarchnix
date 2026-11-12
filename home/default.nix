@@ -349,7 +349,7 @@ in
     ./macos.nix
     ./murmure.nix
     ./sharing.nix
-    ./thunar.nix
+    ./flea.nix
     ./agents.nix
     ./fcitx5.nix
     ./foot.nix

@@ -20,8 +20,9 @@ assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.extr
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.systemd.enable == false;
 assert builtins.any (p: (p.pname or "") == "orb-desktop") m2airConfig.environment.systemPackages;
 assert m2airConfig.programs.thunar.enable == false;
+assert m2airConfig.services.tumbler.enable == false;
 assert builtins.any (p: (p.pname or "") == "flea") m2airConfig.xdg.portal.extraPortals;
-assert m2airConfig.home-manager.users.thomas.programs.omarchnix.fileManager.backend == "flea";
+assert m2airConfig.home-manager.users.thomas.programs.omarchnix.flea.enable == true;
 assert
   m2airConfig.home-manager.users.thomas.xdg.mimeApps.defaultApplications."inode/directory"
   == [ "com.thisisgm.flea.desktop" ];

@@ -602,21 +602,11 @@ in
         };
 
         programs.dconf.enable = lib.mkDefault true;
-        programs.xfconf.enable = lib.mkDefault true;
-
-        programs.thunar = {
-          enable = lib.mkDefault false;
-          plugins = [
-            pkgs.thunar-archive-plugin
-            pkgs.thunar-volman
-          ];
-        };
 
         services.gvfs = {
           enable = lib.mkDefault true;
           package = lib.mkDefault pkgs.gvfs;
         };
-        services.tumbler.enable = lib.mkDefault true;
 
         programs.hyprland = {
           enable = true;

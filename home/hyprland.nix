@@ -297,7 +297,6 @@ let
         ["dev.zed.zed"] = true,
         ["zed"] = true,
         ["com.thisisgm.flea"] = true,
-        ["thunar"] = true,
       }
       local ctrl_shift_w_exact = {
         ["kitty"] = true,
@@ -889,15 +888,6 @@ in
           float = true;
           center = true;
           size = "720 440";
-        }
-        {
-          name = "thunar-dialogs";
-          match = {
-            class = "^(thunar|Thunar)$";
-            title = "^(File Operation Progress|Confirm to replace files|Rename .*)$";
-          };
-          float = true;
-          center = true;
         }
         {
           name = "hyprland-share-picker";

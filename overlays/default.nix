@@ -59,6 +59,7 @@ in
     omarchy-quickshare = final.omarchy-quickshare;
     omarchy-nearby = final.omarchy-nearby;
     orb-agent-sync = final.orb-agent-sync;
+    flea = final.flea;
     xdg-desktop-portal-hyprland = final.xdg-desktop-portal-hyprland;
     plugins = {
       mission-control = final.omarchnix.buildPlugin {
@@ -108,6 +109,9 @@ in
     buildPlugin = final.omarchnix.buildPlugin;
   };
   orb-agent-sync = final.callPackage ../pkgs/orb-agent-sync.nix { };
+  flea = final.callPackage ../pkgs/flea.nix {
+    omarchySrc = inputs.omarchy;
+  };
   turbo-lean = final.callPackage ../pkgs/turbo-lean.nix {
     turboLeanSrc = inputs.turbo-lean;
   };

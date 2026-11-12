@@ -296,6 +296,7 @@ let
         ["cursor"] = true,
         ["dev.zed.zed"] = true,
         ["zed"] = true,
+        ["com.thisisgm.flea"] = true,
         ["thunar"] = true,
       }
       local ctrl_shift_w_exact = {
@@ -879,6 +880,15 @@ in
           float = true;
           no_initial_focus = true;
           opacity = "0.0 0.0";
+        }
+        {
+          name = "flea-picker";
+          match = {
+            class = "^com\\.thisisgm\\.flea\\.picker$";
+          };
+          float = true;
+          center = true;
+          size = "720 440";
         }
         {
           name = "thunar-dialogs";

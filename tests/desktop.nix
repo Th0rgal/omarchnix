@@ -19,6 +19,12 @@ assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.extr
 # or the generated startup exec stops the compositor a few seconds after login.
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.systemd.enable == false;
 assert builtins.any (p: (p.pname or "") == "orb-desktop") m2airConfig.environment.systemPackages;
+assert m2airConfig.programs.thunar.enable == false;
+assert builtins.any (p: (p.pname or "") == "flea") m2airConfig.xdg.portal.extraPortals;
+assert m2airConfig.home-manager.users.thomas.programs.omarchnix.fileManager.backend == "flea";
+assert
+  m2airConfig.home-manager.users.thomas.xdg.mimeApps.defaultApplications."inode/directory"
+  == [ "com.thisisgm.flea.desktop" ];
 assert
   (m2airConfig.xdg.portal.config.hyprland."org.freedesktop.impl.portal.Settings" or null) == "gtk";
 assert builtins.elem "pipewire.service" m2airConfig.systemd.user.services.xdg-desktop-portal.after;

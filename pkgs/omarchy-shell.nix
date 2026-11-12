@@ -581,6 +581,16 @@ let
 
         lock_svc.write_text(lqml, encoding="utf-8")
 
+    # Configure `[flea]` frosted-glass surface opacity in `shell.toml.tpl` across all bundled themes.
+    shell_tpl = out / "default" / "themed" / "shell.toml.tpl"
+    if shell_tpl.is_file():
+        stpl = shell_tpl.read_text(encoding="utf-8")
+        if "[flea]" not in stpl:
+            shell_tpl.write_text(
+                stpl.rstrip() + "\n\n[flea]\nbackground-alpha = 0.45\n",
+                encoding="utf-8",
+            )
+
     # Fast-path Apple Silicon Asahi speaker-safety voicing sinks (`sgv2.voicing.*`,
     # `effect_output.j*`) and Bluetooth sinks (`bluez_output.*`) directly in
     # Quickshell's media service & audio panel so Mac volume keys respond in <0.2ms

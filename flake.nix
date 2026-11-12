@@ -213,6 +213,7 @@
           omarchy-quickshare = pkgs.omarchy-quickshare;
           omarchy-nearby = pkgs.omarchy-nearby;
           orb-agent-sync = pkgs.orb-agent-sync;
+          flea = pkgs.flea;
           turbo-lean = pkgs.turbo-lean;
           orb-desktop = pkgs.orb-desktop;
           folio-desktop = pkgs.folio-desktop;

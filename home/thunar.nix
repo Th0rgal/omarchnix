@@ -102,174 +102,470 @@ let
       <property name="misc-date-style" type="string" value="THUNAR_DATE_STYLE_SHORT"/>
     </channel>
   '';
+
+  fleaSharingManifest = pkgs.writeText "omarchnix-flea-sharing-manifest.json" (
+    builtins.toJSON {
+      schemaVersion = 1;
+      id = "omarchnix.sharing";
+      name = "Nearby Sharing";
+      version = "1.0.0";
+      author = "Omarchnix";
+      license = "MIT";
+      description = "Stage selected files or folders in Omarchy's top-bar Share menu for AirDrop, Paired Phone, Quick Share, or LocalSend.";
+      kinds = [ "menu-action" ];
+      entryPoints = {
+        run = "plugin.py";
+      };
+      menuActions = [
+        {
+          id = "share-nearby";
+          label = "Share Nearby…";
+          glyph = "cloud-upload";
+          menus = [ "file" ];
+          when = {
+            minItems = 1;
+            maxItems = 512;
+            folders = true;
+          };
+        }
+      ];
+      access = [
+        "selection"
+        "exec:systemd-run"
+      ];
+    }
+    + "\n"
+  );
+
+  fleaSharingPluginPy = pkgs.writeScript "omarchnix-flea-sharing-plugin.py" ''
+    #!${pkgs.python3}/bin/python3
+    import json
+    import os
+    import subprocess
+    import sys
+
+    SHARE_SCRIPT = ${builtins.toJSON (toString shareFilesScript)}
+    SYSTEMD_RUN = "/run/current-system/sw/bin/systemd-run"
+
+
+    def reply(obj):
+        sys.stdout.write(json.dumps(obj, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
+
+
+    def child_env():
+        env = os.environ.copy()
+        rt = env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+        if os.path.isdir(rt):
+            env["XDG_RUNTIME_DIR"] = rt
+            bus = f"{rt}/bus"
+            if not env.get("DBUS_SESSION_BUS_ADDRESS") and os.path.exists(bus):
+                env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus}"
+        return env
+
+
+    def run_share(paths):
+        if not paths:
+            return False, "No items selected."
+        env = child_env()
+        if os.path.exists(SYSTEMD_RUN):
+            res = subprocess.run(
+                [SYSTEMD_RUN, "--user", "--collect", "--quiet", SHARE_SCRIPT, *paths],
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if res.returncode == 0:
+                return True, "Opened Share Nearby."
+        try:
+            subprocess.Popen(
+                [SHARE_SCRIPT, *paths],
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return True, "Opened Share Nearby."
+        except OSError as exc:
+            return False, str(exc)
+
+
+    def main():
+        for raw in sys.stdin:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            op = msg.get("op")
+            req_id = msg.get("id")
+            if op == "hello":
+                reply({"op": "ready", "protocolVersion": 1})
+            elif op == "settings":
+                out = {"op": "done"}
+                if req_id is not None:
+                    out["id"] = req_id
+                reply(out)
+            elif op == "cancel":
+                break
+            elif op == "run":
+                selection = msg.get("selection") or []
+                paths = [p for p in selection if isinstance(p, str) and p]
+                ok, text = run_share(paths)
+                out = {"op": "done" if ok else "error", "message": text}
+                if req_id is not None:
+                    out["id"] = req_id
+                reply(out)
+
+
+    if __name__ == "__main__":
+        main()
+  '';
 in
 {
   options.programs.omarchnix.fileManager = {
     enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Enable Thunar (Windows Explorer-style GTK3 file manager) with AirDrop/Nearby share & terminal context-menu actions.";
+      description = "Enable the declarative desktop file manager (Flea GPUI/Vulkan by default, or Thunar GTK3) with Nearby Share integration.";
+    };
+
+    backend = lib.mkOption {
+      type = lib.types.enum [
+        "flea"
+        "thunar"
+      ];
+      default = "flea";
+      description = "Desktop file manager implementation (`flea` GPUI/Vulkan Explorer or legacy `thunar` GTK3).";
+    };
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.flea;
+      defaultText = lib.literalExpression "pkgs.flea";
+      description = "Package providing the `flea` and `flea-gui` binaries when `backend = \"flea\"`.";
+    };
+
+    autoTrash = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Automatically purge XDG Trash items older than `days` (like macOS Finder's 30-day Trash auto-removal) via `autotrash`.";
+      };
+
+      days = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 30;
+        description = "Maximum age in days (`DeletionDate` in `.trashinfo`) before trashed items are permanently removed.";
+      };
+
+      minFreeMb = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 2048;
+        description = "Minimum free disk space (MiB) below which `autotrash` proactively purges oldest trashed items first.";
+      };
     };
   };
 
-  config = lib.mkIf (cfg.enable && fmCfg.enable) {
-    home.packages = [
-      thunarWrapped
-      pkgs.xarchiver
-    ];
+  config = lib.mkIf (cfg.enable && fmCfg.enable) (
+    lib.mkMerge [
+      {
+        home.packages = lib.optional fmCfg.autoTrash.enable pkgs.autotrash;
 
-    xdg.mimeApps.defaultApplications = {
-      "inode/directory" = lib.mkDefault [ "thunar.desktop" ];
-    };
+        # Purge trashed items older than `autoTrash.days` based on Freedesktop `.trashinfo`
+        # `DeletionDate` metadata (preserving older nested files inside recently trashed folders),
+        # and age out stale Tumbler image/PDF thumbnails in `~/.cache/thumbnails`.
+        systemd.user.services.omarchnix-autotrash = lib.mkIf fmCfg.autoTrash.enable {
+          Unit = {
+            Description = "Purge expired XDG Trash items (autotrash)";
+            ConditionPathIsDirectory = "%h/.local/share/Trash/info";
+          };
+          Service = {
+            Type = "oneshot";
+            ExecStart = "${lib.getExe pkgs.autotrash} --trash-mounts --days=${toString fmCfg.autoTrash.days} --min-free=${toString fmCfg.autoTrash.minFreeMb}";
+          };
+        };
 
-    xdg.dataFile = {
-      "applications/thunar.desktop".text = ''
-        [Desktop Entry]
-        Version=1.5
-        Type=Application
-        Name=File Explorer
-        GenericName=File Manager
-        Comment=Browse files and folders
-        Keywords=file explorer;file manager;files;folders;finder;explorer;thunar;directory;downloads;browse;
-        Exec=${thunarWrapped}/bin/thunar %U
-        Icon=${pkgs.adwaita-icon-theme}/share/icons/Adwaita/scalable/places/folder.svg
-        Terminal=false
-        StartupNotify=true
-        StartupWMClass=thunar
-        Categories=System;Core;GTK;FileTools;FileManager;
-        MimeType=inode/directory;
-      '';
-      "applications/thunar-bulk-rename.desktop".text = ''
-        [Desktop Entry]
-        Type=Application
-        Name=Bulk Rename
-        Exec=${thunarWrapped}/bin/thunar --bulk-rename %F
-        NoDisplay=true
-      '';
-      "applications/thunar-settings.desktop".text = ''
-        [Desktop Entry]
-        Type=Application
-        Name=File Manager Settings
-        Exec=${thunarWrapped}/bin/thunar-settings
-        NoDisplay=true
-      '';
-      "dbus-1/services/org.freedesktop.FileManager1.service".text = ''
-        [D-BUS Service]
-        Name=org.freedesktop.FileManager1
-        Exec=${thunarWrapped}/bin/Thunar --gapplication-service
-      '';
-    };
+        systemd.user.timers.omarchnix-autotrash = lib.mkIf fmCfg.autoTrash.enable {
+          Unit = {
+            Description = "Daily XDG Trash auto-cleanup timer";
+          };
+          Timer = {
+            OnCalendar = "daily";
+            Persistent = true;
+            RandomizedDelaySec = "15m";
+          };
+          Install = {
+            WantedBy = [ "timers.target" ];
+          };
+        };
 
-    xdg.configFile."Thunar/uca.xml".text = ''
-      <?xml version="1.0" encoding="UTF-8"?>
-      <actions>
-        <action>
-          <icon>document-send</icon>
-          <name>Share Nearby (AirDrop / Phone / Quick Share / LocalSend)…</name>
-          <submenu></submenu>
-          <unique-id>1730000000000001-1</unique-id>
-          <command>${shareFilesScript} %F</command>
-          <description>Stage selected file(s) in the top-bar Share menu to send via AirDrop, Paired Phone (KDE Connect), Quick Share, or LocalSend</description>
-          <range>*</range>
-          <patterns>*</patterns>
-          <audio-files/>
-          <image-files/>
-          <other-files/>
-          <text-files/>
-          <video-files/>
-        </action>
-        <action>
-          <icon>utilities-terminal</icon>
-          <name>Open Terminal Here</name>
-          <submenu></submenu>
-          <unique-id>1730000000000002-1</unique-id>
-          <command>${openTerminalHereScript} %f</command>
-          <description>Open ${cfg.terminal} in this folder</description>
-          <range></range>
-          <patterns>*</patterns>
-          <directories/>
-        </action>
-        <action>
-          <icon>edit-copy</icon>
-          <name>Copy as Path</name>
-          <submenu></submenu>
-          <unique-id>1730000000000003-1</unique-id>
-          <command>${copyPathScript} %F</command>
-          <description>Copy full file or folder path(s) to the clipboard</description>
-          <range>*</range>
-          <patterns>*</patterns>
-          <directories/>
-          <audio-files/>
-          <image-files/>
-          <other-files/>
-          <text-files/>
-          <video-files/>
-        </action>
-      </actions>
-    '';
-
-    # Seed Windows-Explorer-style Thunar defaults as a writable file so `xfconfd`
-    # can freely persist runtime column widths, view toggles, and window geometry,
-    # merging any newly introduced default `<property>` entries without resetting
-    # existing user preferences.
-    home.activation.omarchnixThunarDefaults = config.lib.dag.entryAfter [ "writeBoundary" ] ''
-      thunar_cfg_dir="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
-      thunar_cfg="$thunar_cfg_dir/thunar.xml"
-      mkdir -p "$thunar_cfg_dir"
-      if [ ! -f "$thunar_cfg" ] || [ -L "$thunar_cfg" ]; then
-        rm -f "$thunar_cfg"
-        cp --no-preserve=mode,ownership "${defaultThunarXml}" "$thunar_cfg"
-        chmod 0644 "$thunar_cfg"
-      else
-        ${pkgs.python3}/bin/python3 - "$thunar_cfg" "${defaultThunarXml}" <<'PY'
-      import os
-      import shutil
-      import sys
-      import tempfile
-      import xml.etree.ElementTree as ET
-
-      cfg_path, defaults_path = sys.argv[1], sys.argv[2]
-      try:
-          cur_tree = ET.parse(cfg_path)
-          cur_root = cur_tree.getroot()
-          def_root = ET.parse(defaults_path).getroot()
-          if cur_root.tag != "channel":
-              raise ValueError("unexpected root tag")
-      except Exception:
-          shutil.copyfile(defaults_path, cfg_path)
-          os.chmod(cfg_path, 0o644)
-          sys.exit(0)
-
-      existing = {
-          el.attrib.get("name")
-          for el in cur_root.findall("property")
-          if el.attrib.get("name")
+        systemd.user.tmpfiles.rules = [
+          "d %h/.cache/thumbnails 0700 - - 30d"
+        ];
       }
-      changed = False
-      for prop in def_root.findall("property"):
-          name = prop.attrib.get("name")
-          if name and name not in existing:
-              cur_root.append(prop)
-              existing.add(name)
-              changed = True
 
-      if changed:
-          ET.indent(cur_tree, space="  ")
-          fd, tmp_path = tempfile.mkstemp(prefix="thunar.xml.", dir=os.path.dirname(cfg_path))
+      (lib.mkIf (fmCfg.backend == "flea") {
+        home.packages = [ fmCfg.package ];
+
+        xdg.mimeApps = {
+          defaultApplications = {
+            "inode/directory" = lib.mkDefault [ "com.thisisgm.flea.desktop" ];
+            "inode/mount-point" = lib.mkDefault [ "com.thisisgm.flea.desktop" ];
+            "x-directory/normal" = lib.mkDefault [ "com.thisisgm.flea.desktop" ];
+          };
+          associations.added = {
+            "inode/directory" = [ "com.thisisgm.flea.desktop" ];
+            "inode/mount-point" = [ "com.thisisgm.flea.desktop" ];
+            "x-directory/normal" = [ "com.thisisgm.flea.desktop" ];
+          };
+        };
+
+        xdg.configFile."xdg-desktop-portal/hyprland-portals.conf".text = lib.mkDefault ''
+          [preferred]
+          default=hyprland;gtk
+          org.freedesktop.impl.portal.FileChooser=flea;gtk
+          org.freedesktop.impl.portal.Settings=gtk
+        '';
+
+        xdg.dataFile = {
+          "applications/com.thisisgm.flea.desktop".text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=Flea
+            GenericName=File Manager
+            Comment=Fast, keyboard-first file manager
+            Exec=${fmCfg.package}/bin/flea --gui %f
+            Icon=com.thisisgm.flea
+            Terminal=false
+            Categories=System;FileTools;FileManager;
+            MimeType=inode/directory;inode/mount-point;x-directory/normal;
+            Keywords=file folder;file explorer;file manager;files;folder;folders;finder;explorer;manager;browser;flea;directory;downloads;browse;
+            StartupWMClass=com.thisisgm.flea
+          '';
+          "icons/hicolor/scalable/apps/com.thisisgm.flea.svg".source =
+            "${fmCfg.package}/share/icons/hicolor/scalable/apps/com.thisisgm.flea.svg";
+          "xdg-desktop-portal/portals/flea.portal".source =
+            "${fmCfg.package}/share/xdg-desktop-portal/portals/flea.portal";
+          "dbus-1/services/org.freedesktop.impl.portal.desktop.flea.service".source =
+            "${fmCfg.package}/share/dbus-1/services/org.freedesktop.impl.portal.desktop.flea.service";
+          "dbus-1/services/org.freedesktop.FileManager1.service".text = ''
+            [D-BUS Service]
+            Name=org.freedesktop.FileManager1
+            Exec=${fmCfg.package}/lib/flea/flea-filemanager1
+          '';
+        };
+
+        # Provision the `omarchnix.sharing` context-menu plugin as regular files under
+        # `~/.config/flea/plugins/omarchnix.sharing/`, enable it in Flea's state store,
+        # refresh `~/.local/share/applications/mimeinfo.cache` after `linkGeneration`,
+        # migrate legacy Thunar Spotlight rank, and restart `xdg-desktop-portal` so
+        # FileChooser dialogs route through Flea immediately.
+        home.activation.omarchnixFleaSetup =
+          config.lib.dag.entryAfter [ "linkGeneration" "writeBoundary" "omarchnixUserDirs" ]
+            ''
+              flea_plugin_dir="$HOME/.config/flea/plugins/omarchnix.sharing"
+              rm -rf "$flea_plugin_dir"
+              mkdir -p "$flea_plugin_dir"
+              cp --no-preserve=mode,ownership "${fleaSharingManifest}" "$flea_plugin_dir/manifest.json"
+              chmod 0644 "$flea_plugin_dir/manifest.json"
+              cp --no-preserve=mode,ownership "${fleaSharingPluginPy}" "$flea_plugin_dir/plugin.py"
+              chmod 0755 "$flea_plugin_dir/plugin.py"
+              "${fmCfg.package}/bin/flea" plugin enable omarchnix.sharing >/dev/null 2>&1 || true
+
+              ${pkgs.desktop-file-utils}/bin/update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
+
+              spotlight_usage="$HOME/.local/state/omarchy/spotlight-usage.json"
+              if [ -f "$spotlight_usage" ] && "${pkgs.jq}/bin/jq" -e 'has("thunar")' "$spotlight_usage" >/dev/null 2>&1; then
+                tmp_usage="$(mktemp "$spotlight_usage.XXXXXX")"
+                if "${pkgs.jq}/bin/jq" '
+                  . as $root
+                  | ($root["com.thisisgm.flea"].count // 0) as $fc
+                  | ($root["thunar"].count // 0) as $tc
+                  | ($root["com.thisisgm.flea"].last // 0) as $fl
+                  | ($root["thunar"].last // 0) as $tl
+                  | .["com.thisisgm.flea"] = {
+                      count: (if $fc > $tc then $fc else $tc end),
+                      last: (if $fl > $tl then $fl else $tl end)
+                    }
+                  | del(.["thunar"])
+                ' "$spotlight_usage" > "$tmp_usage" 2>/dev/null; then
+                  mv -f "$tmp_usage" "$spotlight_usage"
+                else
+                  rm -f "$tmp_usage"
+                fi
+              fi
+
+              if [ -S "''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus" ]; then
+                "${pkgs.systemd}/bin/systemctl" --user try-restart xdg-desktop-portal.service >/dev/null 2>&1 || true
+              fi
+            '';
+      })
+
+      (lib.mkIf (fmCfg.backend == "thunar") {
+        home.packages = [
+          thunarWrapped
+          pkgs.xarchiver
+        ];
+
+        xdg.mimeApps.defaultApplications = {
+          "inode/directory" = lib.mkDefault [ "thunar.desktop" ];
+        };
+
+        xdg.dataFile = {
+          "applications/thunar.desktop".text = ''
+            [Desktop Entry]
+            Version=1.5
+            Type=Application
+            Name=File Explorer
+            GenericName=File Manager
+            Comment=Browse files and folders
+            Keywords=file explorer;file manager;files;folders;finder;explorer;thunar;directory;downloads;browse;
+            Exec=${thunarWrapped}/bin/thunar %U
+            Icon=${pkgs.adwaita-icon-theme}/share/icons/Adwaita/scalable/places/folder.svg
+            Terminal=false
+            StartupNotify=true
+            StartupWMClass=thunar
+            Categories=System;Core;GTK;FileTools;FileManager;
+            MimeType=inode/directory;
+          '';
+          "applications/thunar-bulk-rename.desktop".text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=Bulk Rename
+            Exec=${thunarWrapped}/bin/thunar --bulk-rename %F
+            NoDisplay=true
+          '';
+          "applications/thunar-settings.desktop".text = ''
+            [Desktop Entry]
+            Type=Application
+            Name=File Manager Settings
+            Exec=${thunarWrapped}/bin/thunar-settings
+            NoDisplay=true
+          '';
+          "dbus-1/services/org.freedesktop.FileManager1.service".text = ''
+            [D-BUS Service]
+            Name=org.freedesktop.FileManager1
+            Exec=${thunarWrapped}/bin/Thunar --gapplication-service
+          '';
+        };
+
+        xdg.configFile."Thunar/uca.xml".text = ''
+          <?xml version="1.0" encoding="UTF-8"?>
+          <actions>
+            <action>
+              <icon>document-send</icon>
+              <name>Share Nearby (AirDrop / Phone / Quick Share / LocalSend)…</name>
+              <submenu></submenu>
+              <unique-id>1730000000000001-1</unique-id>
+              <command>${shareFilesScript} %F</command>
+              <description>Stage selected file(s) in the top-bar Share menu to send via AirDrop, Paired Phone (KDE Connect), Quick Share, or LocalSend</description>
+              <range>*</range>
+              <patterns>*</patterns>
+              <audio-files/>
+              <image-files/>
+              <other-files/>
+              <text-files/>
+              <video-files/>
+            </action>
+            <action>
+              <icon>utilities-terminal</icon>
+              <name>Open Terminal Here</name>
+              <submenu></submenu>
+              <unique-id>1730000000000002-1</unique-id>
+              <command>${openTerminalHereScript} %f</command>
+              <description>Open ${cfg.terminal} in this folder</description>
+              <range></range>
+              <patterns>*</patterns>
+              <directories/>
+            </action>
+            <action>
+              <icon>edit-copy</icon>
+              <name>Copy as Path</name>
+              <submenu></submenu>
+              <unique-id>1730000000000003-1</unique-id>
+              <command>${copyPathScript} %F</command>
+              <description>Copy full file or folder path(s) to the clipboard</description>
+              <range>*</range>
+              <patterns>*</patterns>
+              <directories/>
+              <audio-files/>
+              <image-files/>
+              <other-files/>
+              <text-files/>
+              <video-files/>
+            </action>
+          </actions>
+        '';
+
+        # Seed Windows-Explorer-style Thunar defaults as a writable file so `xfconfd`
+        # can freely persist runtime column widths, view toggles, and window geometry,
+        # merging any newly introduced default `<property>` entries without resetting
+        # existing user preferences.
+        home.activation.omarchnixThunarDefaults = config.lib.dag.entryAfter [ "writeBoundary" ] ''
+          thunar_cfg_dir="$HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+          thunar_cfg="$thunar_cfg_dir/thunar.xml"
+          mkdir -p "$thunar_cfg_dir"
+          if [ ! -f "$thunar_cfg" ] || [ -L "$thunar_cfg" ]; then
+            rm -f "$thunar_cfg"
+            cp --no-preserve=mode,ownership "${defaultThunarXml}" "$thunar_cfg"
+            chmod 0644 "$thunar_cfg"
+          else
+            ${pkgs.python3}/bin/python3 - "$thunar_cfg" "${defaultThunarXml}" <<'PY'
+          import os
+          import shutil
+          import sys
+          import tempfile
+          import xml.etree.ElementTree as ET
+
+          cfg_path, defaults_path = sys.argv[1], sys.argv[2]
           try:
-              os.fchmod(fd, 0o644)
-              with os.fdopen(fd, "wb") as fh:
-                  cur_tree.write(fh, encoding="UTF-8", xml_declaration=True)
-                  fh.write(b"\n")
-              os.replace(tmp_path, cfg_path)
+              cur_tree = ET.parse(cfg_path)
+              cur_root = cur_tree.getroot()
+              def_root = ET.parse(defaults_path).getroot()
+              if cur_root.tag != "channel":
+                  raise ValueError("unexpected root tag")
           except Exception:
+              shutil.copyfile(defaults_path, cfg_path)
+              os.chmod(cfg_path, 0o644)
+              sys.exit(0)
+
+          existing = {
+              el.attrib.get("name")
+              for el in cur_root.findall("property")
+              if el.attrib.get("name")
+          }
+          changed = False
+          for prop in def_root.findall("property"):
+              name = prop.attrib.get("name")
+              if name and name not in existing:
+                  cur_root.append(prop)
+                  existing.add(name)
+                  changed = True
+
+          if changed:
+              ET.indent(cur_tree, space="  ")
+              fd, tmp_path = tempfile.mkstemp(prefix="thunar.xml.", dir=os.path.dirname(cfg_path))
               try:
-                  os.unlink(tmp_path)
-              except OSError:
-                  pass
-              raise
-      PY
-      fi
-    '';
-  };
+                  os.fchmod(fd, 0o644)
+                  with os.fdopen(fd, "wb") as fh:
+                      cur_tree.write(fh, encoding="UTF-8", xml_declaration=True)
+                      fh.write(b"\n")
+                  os.replace(tmp_path, cfg_path)
+              except Exception:
+                  try:
+                      os.unlink(tmp_path)
+                  except OSError:
+                      pass
+                  raise
+          PY
+          fi
+        '';
+      })
+    ]
+  );
 }

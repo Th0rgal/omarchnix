@@ -605,7 +605,7 @@ in
         programs.xfconf.enable = lib.mkDefault true;
 
         programs.thunar = {
-          enable = lib.mkDefault true;
+          enable = lib.mkDefault false;
           plugins = [
             pkgs.thunar-archive-plugin
             pkgs.thunar-volman
@@ -629,7 +629,6 @@ in
           pkgs.adw-gtk3
           pkgs.adwaita-icon-theme
           pkgs.morewaita-icon-theme
-          pkgs.xarchiver
           pkgs.hyprsunset
           pkgs.lm_sensors
           pkgs.mission-center
@@ -651,10 +650,17 @@ in
 
         xdg.portal = {
           enable = lib.mkDefault true;
-          extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+          extraPortals = [
+            pkgs.xdg-desktop-portal-gtk
+            pkgs.flea
+          ];
           config.hyprland = {
             default = [
               "hyprland"
+              "gtk"
+            ];
+            "org.freedesktop.impl.portal.FileChooser" = lib.mkDefault [
+              "flea"
               "gtk"
             ];
             "org.freedesktop.impl.portal.Settings" = [ "gtk" ];

@@ -28,8 +28,6 @@ Item {
   readonly property var hiddenIds: ({
     "footclient": true,
     "foot-server": true,
-    "thunar-bulk-rename": true,
-    "thunar-settings": true,
     "uuctl": true
   })
 

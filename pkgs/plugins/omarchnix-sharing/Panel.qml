@@ -649,7 +649,7 @@ Panel {
             }
           }
 
-          // Pre-staged files card (summoned from Thunar's right-click "Share…" action)
+          // Pre-staged files card (summoned from Flea's right-click "Share Nearby…" action)
           BorderSurface {
             visible: !!(root.engine && root.engine.stagedFiles && root.engine.stagedFiles.length > 0)
             Layout.fillWidth: true

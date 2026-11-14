@@ -61,6 +61,7 @@
   # A minimal example desktop. Personal app sets belong in the consuming flake
   # (see github.com/Th0rgal/nixos-config).
   environment.systemPackages = with pkgs; [
+    orb-desktop
     age
     rclone
     restic

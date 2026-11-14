@@ -474,13 +474,40 @@ class PipeWireRecorder:
         self._proc: Optional[subprocess.Popen] = None
         self._reader_thread: Optional[threading.Thread] = None
         self._warm_timer: Optional[threading.Timer] = None
+        self._zero_run: int = 0
+        self._last_heal_at: float = -30.0
 
     def _spawn_stream(self) -> None:
         if self._proc is not None and self._proc.poll() is None:
             return
         cmds = [
-            ["pw-cat", "--record", "-", "--format", "s16", "--rate", str(SAMPLE_RATE), "--channels", "1", "--latency", "10ms"],
-            ["pw-record", "--format", "s16", "--rate", str(SAMPLE_RATE), "--channels", "1", "--latency", "10ms", "-"],
+            [
+                "pw-cat",
+                "--record",
+                "--raw",
+                "-",
+                "--format",
+                "s16",
+                "--rate",
+                str(SAMPLE_RATE),
+                "--channels",
+                "1",
+                "--latency",
+                "10ms",
+            ],
+            [
+                "pw-record",
+                "--raw",
+                "--format",
+                "s16",
+                "--rate",
+                str(SAMPLE_RATE),
+                "--channels",
+                "1",
+                "--latency",
+                "10ms",
+                "-",
+            ],
         ]
         last_err: Optional[Exception] = None
         for cmd in cmds:
@@ -501,48 +528,119 @@ class PipeWireRecorder:
                 last_err = e
         raise RuntimeError(f"Could not start PipeWire microphone capture: {last_err}")
 
+    def _heal_zero_stream_async(self, proc: subprocess.Popen) -> None:
+        def _heal() -> None:
+            log("detected all-zero PipeWire capture; restarting WirePlumber & audio stream")
+            try:
+                subprocess.run(
+                    ["systemctl", "--user", "restart", "wireplumber.service"],
+                    env=_user_systemd_env(),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=4.0,
+                    check=False,
+                )
+            except Exception:
+                pass
+            time.sleep(0.35)
+            with self.lock:
+                should_respawn = self.active_recording
+            if self._proc is proc:
+                self._proc = None
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            if should_respawn:
+                try:
+                    self._spawn_stream()
+                except Exception as e:
+                    log(f"stream respawn after heal failed: {e}")
+
+        threading.Thread(target=_heal, name="murmure-pw-heal", daemon=True).start()
+
     def _read_loop(self, proc: subprocess.Popen) -> None:
         out = proc.stdout
         if out is None:
             return
-        # Skip optional 44-byte RIFF header if pw-cat/pw-record emits WAV container on stdout "-"
-        first = out.read(44)
-        if not first:
-            return
-        pending = bytearray()
-        if len(first) >= 12 and first[:4] == b"RIFF" and first[8:12] == b"WAVE":
-            # Raw PCM starts right after the 44-byte standard PCM WAV header
-            pass
-        else:
-            pending.extend(first)
+        try:
+            # Skip optional container header if pw-cat/pw-record ever emits WAV ("RIFF") or Sun .au ("dns.")
+            first = out.read(44)
+            if not first:
+                return
+            pending = bytearray()
+            if len(first) >= 12 and first[:4] == b"RIFF" and first[8:12] == b"WAVE":
+                # Raw PCM starts right after the 44-byte standard PCM WAV header
+                pass
+            elif len(first) >= 24 and first[:4] == b"dns.":
+                # PipeWire sndfile Sun/DEC .au header (little-endian data offset at bytes 4..8, typically 24)
+                hdr_off = struct.unpack("<I", first[4:8])[0]
+                if 24 <= hdr_off <= len(first):
+                    pending.extend(first[hdr_off:])
+                elif hdr_off > len(first):
+                    rem = hdr_off - len(first)
+                    if rem <= 4096:
+                        out.read(rem)
+            else:
+                pending.extend(first)
 
-        chunk_bytes = 320  # 160 int16 samples = 10 ms @ 16 kHz
-        while proc.poll() is None:
-            raw = out.read(chunk_bytes)
-            if not raw:
-                break
-            pending.extend(raw)
-            n_shorts = len(pending) // 2
-            if n_shorts <= 0:
-                continue
-            usable = bytes(pending[: n_shorts * 2])
-            del pending[: n_shorts * 2]
-            ints = struct.unpack(f"<{n_shorts}h", usable)
-            floats = [x / 32768.0 for x in ints]
+            chunk_bytes = 320  # 160 int16 samples = 10 ms @ 16 kHz
+            while proc.poll() is None:
+                raw = out.read(chunk_bytes)
+                if not raw:
+                    break
+                pending.extend(raw)
+                n_shorts = len(pending) // 2
+                if n_shorts <= 0:
+                    continue
+                usable = bytes(pending[: n_shorts * 2])
+                del pending[: n_shorts * 2]
+                ints = struct.unpack(f"<{n_shorts}h", usable)
+                all_zero = not any(ints)
+                floats = [x / 32768.0 for x in ints]
 
-            notify = False
+                notify = False
+                need_heal = False
+                with self.lock:
+                    if self.active_recording:
+                        if all_zero:
+                            self._zero_run += n_shorts
+                            now = time.monotonic()
+                            if self._zero_run >= int(0.8 * SAMPLE_RATE) and (now - self._last_heal_at) >= 15.0:
+                                self._zero_run = 0
+                                self._last_heal_at = now
+                                need_heal = True
+                        else:
+                            self._zero_run = 0
+                        self.samples.extend(floats)
+                        self._meter_locked(floats)
+                        notify = True
+                    else:
+                        self._zero_run = 0
+                        self.prebuffer.append_many(floats)
+                if need_heal:
+                    self._heal_zero_stream_async(proc)
+                    return
+                if notify:
+                    try:
+                        self.on_samples()
+                    except Exception:
+                        pass
+        finally:
+            if self._proc is proc:
+                self._proc = None
             with self.lock:
-                if self.active_recording:
-                    self.samples.extend(floats)
-                    self._meter_locked(floats)
-                    notify = True
-                else:
-                    self.prebuffer.append_many(floats)
-            if notify:
-                try:
-                    self.on_samples()
-                except Exception:
-                    pass
+                should_respawn = self.active_recording
+            if should_respawn:
+                time.sleep(0.15)
+                with self.lock:
+                    still_rec = self.active_recording
+                if still_rec:
+                    try:
+                        self._spawn_stream()
+                    except Exception as e:
+                        log(f"stream auto-respawn failed: {e}")
 
     def _meter_locked(self, chunk: List[float]) -> None:
         block = 160  # 10 ms @ 16 kHz
@@ -553,7 +651,7 @@ class PipeWireRecorder:
             e = math.sumprod(seg, seg) if hasattr(math, "sumprod") else sum(x * x for x in seg)
             rms = max(math.sqrt(e / block), 1e-6)
             db = 20.0 * math.log10(rms)
-            target = max(0.0, min(1.0, (db + 55.0) / 45.0))
+            target = max(0.0, min(1.0, (db + 62.0) / 40.0))
             tau = 45.0 if target > self.envelope else 180.0
             self.envelope += (target - self.envelope) * (1.0 - math.exp(-10.0 / tau))
             self.levels.append(self.envelope)
@@ -573,6 +671,7 @@ class PipeWireRecorder:
             self.samples = warm_samples[-cap:] if warm_samples else []
             self.levels = []
             self.envelope = 0.0
+            self._zero_run = 0
             self.active_recording = True
         self._spawn_stream()
 
@@ -695,6 +794,14 @@ class VoiceSocketClient:
 
 # --------------------------------------------------------------------------
 # Wayland Clipboard + Hyprland Universal Paste
+
+
+def _user_systemd_env() -> Dict[str, str]:
+    env = dict(os.environ)
+    rt = env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    env["XDG_RUNTIME_DIR"] = rt
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={rt}/bus")
+    return env
 
 
 def _hyprctl_env() -> Optional[Dict[str, str]]:

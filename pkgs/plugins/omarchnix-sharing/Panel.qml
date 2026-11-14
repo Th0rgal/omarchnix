@@ -99,7 +99,7 @@ Panel {
         ? ("CONNECTED · " + String(kcConnected[0].name || "PHONE").toUpperCase())
         : ("CONNECTED · " + kcConnected.length + " PHONES")
     }
-    return "AIRDROP · PHONE · QUICK SHARE · NEARBY"
+    return "AIRDROP · PHONE · ANDROID · NEARBY"
   }
 
   property bool viewRegistered: false
@@ -237,11 +237,14 @@ Panel {
               visible: root.engine ? root.engine.airdropAvailable : true
               Layout.fillWidth: true
               bordered: true
-              selected: root.engine ? root.engine.airdropReceiving : false
+              selected: root.engine
+                ? (root.engine.airdropBusy ? root.engine.airdropPendingEnable : root.engine.airdropReceiving)
+                : false
               foreground: root.foreground
               fontSize: Style.font.caption
               iconText: "󰀵"
               text: {
+                if (root.engine && root.engine.airdropBusy) return "AirDrop…"
                 if (!root.engine || !root.engine.airdropReceiving) return "AirDrop"
                 if (!root.engine.airdropVisible) return "AirDrop…"
                 return root.engine.airdropRemaining > 0
@@ -649,7 +652,7 @@ Panel {
             }
           }
 
-          // Pre-staged files card (summoned from Thunar's right-click "Share…" action)
+          // Pre-staged files card (summoned from Flea's right-click "Share Nearby…" action)
           BorderSurface {
             visible: !!(root.engine && root.engine.stagedFiles && root.engine.stagedFiles.length > 0)
             Layout.fillWidth: true

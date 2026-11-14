@@ -43,9 +43,17 @@ Item {
   }
 
   function pathForWorkspace(wsId) {
-    var key = String(wsId || "")
+    var num = parseInt(String(wsId || ""), 10)
     var map = root.workspaceMap || {}
-    if (key && map[key]) return String(map[key])
+    if (!isNaN(num) && num > 0) {
+      var exact = String(num)
+      if (map[exact]) return String(map[exact])
+      var slot = String(((num - 1) % 10) + 1)
+      if (map[slot]) return String(map[slot])
+    } else {
+      var key = String(wsId || "")
+      if (key && map[key]) return String(map[key])
+    }
     return root.defaultWallpaper
   }
 
@@ -313,6 +321,9 @@ Item {
                 panel.fastWsId = wsPart
               }
             }
+          } else if (name === "moveworkspacev2" || name === "changeworkspaceid") {
+            Hyprland.refreshMonitors()
+            Hyprland.refreshWorkspaces()
           }
         }
       }

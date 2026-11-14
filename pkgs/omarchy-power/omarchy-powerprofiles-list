@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+# omarchy:summary=Returns a list of all the available power profiles on the system.
+# omarchy:args=[--active-state]
+
+if [[ ${1:-} != "" && ${1:-} != "--active-state" ]]; then
+  echo "Usage: omarchy-powerprofiles-list [--active-state]" >&2
+  exit 1
+fi
+
+with_state="${1:+1}"
+
+if [[ -r /sys/devices/system/cpu/cpufreq/policy0/scaling_driver ]] &&
+   [[ $(</sys/devices/system/cpu/cpufreq/policy0/scaling_driver) == "apple-cpufreq" ]]; then
+  state_dir="${OMARCHY_POWERPROFILES_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/powerprofiles}"
+  active=""
+  if [[ -r "$state_dir/active" ]]; then
+    cand=$(<"$state_dir/active")
+    case "$cand" in
+      power-saver | balanced | performance) active="$cand" ;;
+    esac
+  fi
+
+  if [[ -z $active ]]; then
+    if [[ -r /sys/devices/system/cpu/cpufreq/boost && $(</sys/devices/system/cpu/cpufreq/boost) == "1" ]]; then
+      active="performance"
+    else
+      ppd=$(powerprofilesctl get 2>/dev/null || true)
+      case "$ppd" in
+        power-saver | performance) active="$ppd" ;;
+        *) active="balanced" ;;
+      esac
+    fi
+  fi
+
+  for p in power-saver balanced performance; do
+    if [[ -n $with_state ]]; then
+      if [[ $p == "$active" ]]; then
+        printf '%s\t1\n' "$p"
+      else
+        printf '%s\t0\n' "$p"
+      fi
+    else
+      printf '%s\n' "$p"
+    fi
+  done
+  exit 0
+fi
+
+powerprofilesctl list 2>/dev/null |
+  awk -v with_state="$with_state" '/^\s*[* ]\s*[a-zA-Z0-9-]+:$/ {
+    active = ($1 == "*") ? 1 : 0
+    gsub(/^[*[:space:]]+|:$/, "")
+    print $0 (with_state ? "\t" active : "")
+  }' |
+  tac

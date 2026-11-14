@@ -61,7 +61,52 @@ let
 
   defaultKdeconnectPkg =
     if (pkgs ? kdePackages) && (pkgs.kdePackages ? kdeconnect-kde) then
-      pkgs.kdePackages.kdeconnect-kde
+      pkgs.kdePackages.kdeconnect-kde.overrideAttrs (old: {
+        # KDE Connect iOS (`Device.m` / `BatteryStatus.swift`) still gates its
+        # `Battery` plugin on `kdeconnect.battery.request` in `incomingCapabilities`
+        # (dropped upstream in kdeconnect-kde protocol v8), causing iOS to show
+        # "No battery detected in device" for laptops and never report iPhone
+        # battery back. Restore `kdeconnect.battery.request` support and report
+        # Apple Silicon `FullyCharged` AC state accurately.
+        postPatch = (old.postPatch or "") + ''
+          ${pkgs.python3}/bin/python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          meta_path = Path("plugins/battery/kdeconnect_battery.json")
+          meta = json.loads(meta_path.read_text(encoding="utf-8"))
+          supported = meta.setdefault("X-KdeConnect-SupportedPacketType", [])
+          if "kdeconnect.battery.request" not in supported:
+              supported.append("kdeconnect.battery.request")
+          meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=4) + "\n", encoding="utf-8")
+
+          cpp_path = Path("plugins/battery/batteryplugin.cpp")
+          cpp = cpp_path.read_text(encoding="utf-8")
+
+          old_charge = "if (battery->chargeState() == Solid::Battery::ChargeState::Charging) {"
+          new_charge = (
+              "if (battery->chargeState() == Solid::Battery::ChargeState::Charging\n"
+              "                || battery->chargeState() == Solid::Battery::ChargeState::FullyCharged) {"
+          )
+          assert old_charge in cpp, "expected Solid::Battery::ChargeState::Charging check in batteryplugin.cpp"
+          cpp = cpp.replace(old_charge, new_charge, 1)
+
+          old_recv = "void BatteryPlugin::receivePacket(const NetworkPacket &np)\n{"
+          new_recv = (
+              "void BatteryPlugin::receivePacket(const NetworkPacket &np)\n{\n"
+              "    if (np.type() == QLatin1String(\"kdeconnect.battery.request\")\n"
+              "        || np.get<bool>(QStringLiteral(\"request\"), false)) {\n"
+              "        slotChargeChanged();\n"
+              "        return;\n"
+              "    }\n"
+          )
+          assert old_recv in cpp, "expected BatteryPlugin::receivePacket signature in batteryplugin.cpp"
+          cpp = cpp.replace(old_recv, new_recv, 1)
+
+          cpp_path.write_text(cpp, encoding="utf-8")
+          PY
+        '';
+      })
     else
       null;
 
@@ -312,7 +357,13 @@ in
         };
 
         home.file =
-          lib.mkIf (cfg.agents.enable && sCfg.airdrop.installAgentSkill && omdropSkillFile != null)
+          lib.mkIf
+            (
+              cfg.agents.enable
+              && cfg.agents.installSkills
+              && sCfg.airdrop.installAgentSkill
+              && omdropSkillFile != null
+            )
             (
               (mkOmdropSkillFor ".agents/skills/omdrop")
               // lib.optionalAttrs (builtins.elem "claude" cfg.agents.targets) (

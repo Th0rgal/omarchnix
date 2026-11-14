@@ -53,13 +53,17 @@
     };
   };
 
-  # Google Antigravity ships as a binary Electron app; allow only that unfree
-  # package rather than the whole unfree set.
-  nixpkgs.config.allowUnfreePackages = [ "antigravity-hub" ];
+  # Google Antigravity and Widevine CDM ship as proprietary binaries; allow only
+  # those unfree packages rather than the whole unfree set.
+  nixpkgs.config.allowUnfreePackages = [
+    "antigravity-hub"
+    "widevine-cdm"
+  ];
+
+  programs.firefox.enable = true;
 
   environment.systemPackages = with pkgs; [
     brave
-    firefox
     bitwarden-desktop
     bitwarden-cli
     telegram-desktop

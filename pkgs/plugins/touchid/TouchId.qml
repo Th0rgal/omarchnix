@@ -35,9 +35,9 @@ Item {
     Commons.Color.background.r,
     Commons.Color.background.g,
     Commons.Color.background.b,
-    isLight ? 0.88 : 0.84
+    isLight ? 0.48 : 0.45
   )
-  readonly property color cardBorder: isLight ? "#22000000" : "#30ffffff"
+  readonly property color cardBorder: isLight ? "#24000000" : "#24ffffff"
   readonly property color innerHighlight: isLight ? "#55ffffff" : "#18ffffff"
   readonly property color textPrimary: Commons.Color.foreground
   readonly property color textMuted: Commons.Color.muted

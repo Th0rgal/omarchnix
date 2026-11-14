@@ -43,6 +43,8 @@ in
     ./containers.nix
     ./secrets.nix
     ./sharing.nix
+    ./lean-mesh-client.nix
+    ./mac-tether.nix
   ];
 
   options = {
@@ -167,6 +169,19 @@ in
           enable = lib.mkEnableOption "Murmure on-device Wayland dictation (`Fn + Right Shift` + shared `voiced` Cohere Transcribe daemon)";
         };
 
+        widevine = {
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = ''
+              Provision Widevine DRM (`widevine-cdm`, including 16K-page `aarch64-linux`
+              builds) for Brave, Chromium, and Firefox so encrypted streaming services
+              (Netflix, Prime Video, Disney+, Spotify Web) work out of the box without
+              imperative browser downloads.
+            '';
+          };
+        };
+
         macos = {
           enable = lib.mkEnableOption "macOS-style desktop suite (Mission Control & contiguous Spaces, auto-hide Dock, Spotlight, slanted Workspaces, minimal bar, and per-Space preloaded Wallpapers)";
 
@@ -251,6 +266,7 @@ in
                   scrollFactor = lib.mkDefault cfg.desktop.touchpad.scrollFactor;
                 };
                 murmure.enable = lib.mkDefault cfg.desktop.murmure.enable;
+                widevine.enable = lib.mkDefault cfg.desktop.widevine.enable;
                 macos = {
                   enable = lib.mkDefault cfg.desktop.macos.enable;
                   missionControl.gestures = lib.mkDefault cfg.desktop.macos.gestures;
@@ -271,6 +287,7 @@ in
                   nearby.enable = lib.mkDefault cfg.services.sharing.nearby.enable;
                   kdeconnect.enable = lib.mkDefault cfg.services.sharing.kdeconnect.enable;
                 };
+                macTether.enable = lib.mkDefault cfg.macTether.enable;
               };
             };
         };
@@ -457,6 +474,32 @@ in
 
       nix.optimise.automatic = lib.mkDefault true;
 
+      # Keep /nix/store, user profiles, /tmp, journals, and crash dumps bounded automatically.
+      programs.nh = {
+        enable = lib.mkDefault true;
+        clean = {
+          enable = lib.mkDefault (!config.nix.gc.automatic);
+          dates = lib.mkDefault "weekly";
+          extraArgs = lib.mkDefault "--keep 5 --keep-since 7d";
+        };
+      };
+
+      boot.tmp.cleanOnBoot = lib.mkDefault (!config.boot.tmp.useTmpfs);
+
+      services.journald.settings.Journal = {
+        SystemMaxUse = lib.mkDefault "250M";
+        MaxRetentionSec = lib.mkDefault "14day";
+      };
+
+      systemd.coredump.settings.Coredump = {
+        MaxUse = lib.mkDefault "250M";
+        KeepFree = lib.mkDefault "2G";
+      };
+
+      systemd.tmpfiles.rules = [
+        "d /var/lib/systemd/coredump 0755 root root 7d"
+      ];
+
       system.stateVersion = lib.mkDefault "25.05";
     })
 
@@ -528,6 +571,23 @@ in
       {
         hardware.graphics.enable = lib.mkDefault true;
 
+        nixpkgs.config = lib.mkIf (options.nixpkgs ? localSystem) (
+          lib.optionalAttrs cfg.desktop.widevine.enable {
+            allowUnfreePackages = [ "widevine-cdm" ];
+          }
+        );
+
+        programs.firefox = lib.mkIf (cfg.desktop.widevine.enable && config.programs.firefox.enable) {
+          preferencesStatus = lib.mkDefault "default";
+          preferences = {
+            "media.eme.enabled" = lib.mkDefault true;
+            "media.gmp-widevinecdm.visible" = lib.mkDefault true;
+            "media.gmp-widevinecdm.enabled" = lib.mkDefault true;
+            "media.gmp-widevinecdm.version" = lib.mkDefault "system-installed";
+            "media.gmp-widevinecdm.autoupdate" = lib.mkDefault false;
+          };
+        };
+
         # Managed policy directories as `/etc` symlinks so Chromium & Brave
         # follow the XDG Settings portal (`prefer-dark` / `prefer-light`)
         # globally across all desktops without triggering upstream
@@ -588,21 +648,11 @@ in
         };
 
         programs.dconf.enable = lib.mkDefault true;
-        programs.xfconf.enable = lib.mkDefault true;
-
-        programs.thunar = {
-          enable = lib.mkDefault true;
-          plugins = [
-            pkgs.thunar-archive-plugin
-            pkgs.thunar-volman
-          ];
-        };
 
         services.gvfs = {
           enable = lib.mkDefault true;
           package = lib.mkDefault pkgs.gvfs;
         };
-        services.tumbler.enable = lib.mkDefault true;
 
         programs.hyprland = {
           enable = true;
@@ -615,7 +665,6 @@ in
           pkgs.adw-gtk3
           pkgs.adwaita-icon-theme
           pkgs.morewaita-icon-theme
-          pkgs.xarchiver
           pkgs.hyprsunset
           pkgs.lm_sensors
           pkgs.mission-center
@@ -637,10 +686,18 @@ in
 
         xdg.portal = {
           enable = lib.mkDefault true;
-          extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+          xdgOpenUsePortal = lib.mkDefault true;
+          extraPortals = [
+            pkgs.xdg-desktop-portal-gtk
+            pkgs.flea
+          ];
           config.hyprland = {
             default = [
               "hyprland"
+              "gtk"
+            ];
+            "org.freedesktop.impl.portal.FileChooser" = lib.mkDefault [
+              "flea"
               "gtk"
             ];
             "org.freedesktop.impl.portal.Settings" = [ "gtk" ];
@@ -651,7 +708,14 @@ in
         # sharing never hits "No node factory discovered" at startup, and bind
         # xdg-desktop-portal-hyprland to pipewire.service so a PipeWire restart
         # cleanly restarts the screencopy portal alongside its internal reconnect.
+        # `enableDefaultPath = false` is critical: NixOS generates a `.service.d/overrides.conf`
+        # drop-in for any unit touched in `systemd.user.services`, and without opting out of
+        # `enableDefaultPath` it injects `Environment="PATH=coreutils:findutils:gnugrep:gnused:systemd"`,
+        # clobbering the user session `PATH` imported by UWSM and causing GLib's `GDesktopAppInfo`
+        # inside `xdg-desktop-portal` (`OpenURI`) to reject every `.desktop` file whose `Exec=`
+        # uses a bare binary name (`vesktop`, `bitwarden`, `Telegram`, `antigravity`, etc.).
         systemd.user.services.xdg-desktop-portal = {
+          enableDefaultPath = false;
           wants = [
             "pipewire.service"
             "wireplumber.service"
@@ -663,6 +727,7 @@ in
         };
 
         systemd.user.services.xdg-desktop-portal-hyprland = {
+          enableDefaultPath = false;
           wants = [
             "pipewire.service"
             "wireplumber.service"
@@ -672,6 +737,23 @@ in
             "wireplumber.service"
           ];
           partOf = [ "pipewire.service" ];
+        };
+
+        # Prevent kernel OOM kills of single runaway child processes (e.g. a multi-GiB
+        # `lean`/`rustc` build spawned inside `app-antigravity-*.scope`, a terminal tab in
+        # `app-ghostty-surface-transient-*.scope`, or an isolated browser tab renderer)
+        # from cascading into `systemd --user` tearing down the entire parent app scope
+        # under systemd's default `OOMPolicy=stop`.
+        systemd.user.settings.Manager = {
+          DefaultOOMPolicy = lib.mkDefault "continue";
+        };
+
+        # Prioritize background Nix sandbox builds (`qemu`, `lean`, `rustc` under `nix-daemon`)
+        # above interactive desktop apps (`oom_score_adj` 100..300) when the kernel OOM-killer
+        # selects a victim, while keeping `nix-daemon` itself alive (`OOMPolicy=continue`).
+        systemd.services.nix-daemon.serviceConfig = {
+          OOMPolicy = lib.mkDefault "continue";
+          OOMScoreAdjust = lib.mkDefault 500;
         };
 
         # Grant the active local seat user read access to hardware keyboard evdev

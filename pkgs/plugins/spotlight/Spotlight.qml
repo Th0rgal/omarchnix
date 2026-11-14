@@ -28,8 +28,6 @@ Item {
   readonly property var hiddenIds: ({
     "footclient": true,
     "foot-server": true,
-    "thunar-bulk-rename": true,
-    "thunar-settings": true,
     "uuctl": true
   })
 
@@ -622,7 +620,7 @@ Item {
                 event.accepted = true
                 return
               }
-              if (event.key === Qt.Key_D || event.key === Qt.Key_Space || event.key === Qt.Key_W || event.key === Qt.Key_Q) {
+              if (event.key === Qt.Key_D || event.key === Qt.Key_Space || (shift && event.key === Qt.Key_Q)) {
                 root.dismiss()
                 event.accepted = true
                 return

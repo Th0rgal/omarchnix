@@ -22,14 +22,50 @@ Item {
   // 0 = previews sit on top of the real windows, 1 = spread out.
   property real progress: 0
 
+  readonly property int slots: 10
   readonly property string pluginId: (manifest && manifest.id) || "io.github.joaovitor2763.mission-control"
   readonly property string backgroundLink: Quickshell.env("HOME") + "/.local/state/omarchy/current/background"
   readonly property string wsWallpapersConfigPath: Quickshell.env("HOME") + "/.config/omarchy/workspace-wallpapers.json"
+  readonly property string monitorBlocksPath: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy/monitors/workspaces"
   property string backgroundPath: ""
   property string defaultWorkspaceWallpaper: ""
   property var workspaceWallpapers: ({})
+  property var monitorBlocks: ({})
   property string pendingFocusKind: ""
   property string pendingFocusTarget: ""
+  property string pendingFocusMonitor: ""
+
+  function parseMonitorBlocks(text) {
+    var next = {}
+    var lines = String(text || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var fields = lines[i].split("\t")
+      if (fields.length >= 3 && fields[1] !== "") {
+        var b = parseInt(fields[0], 10)
+        if (!isNaN(b) && b >= 0) next[fields[1]] = b
+      }
+    }
+    root.monitorBlocks = next
+  }
+
+  function blockForMonitor(monName, activeWsId) {
+    if (monName && root.monitorBlocks[monName] !== undefined) {
+      return root.monitorBlocks[monName]
+    }
+    if (activeWsId > 0 && activeWsId < 9000) {
+      return Math.floor((activeWsId - 1) / root.slots)
+    }
+    return 0
+  }
+
+  function slotLabelForWorkspace(wsId) {
+    var n = parseInt(String(wsId || ""), 10)
+    if (!isNaN(n) && n > 0 && n < 9000) {
+      var slot = ((n - 1) % root.slots) + 1
+      return slot === root.slots ? "0" : String(slot)
+    }
+    return String(wsId || "")
+  }
 
   function parseWorkspaceWallpapers(raw) {
     var text = String(raw || "").trim()
@@ -52,9 +88,17 @@ Item {
   }
 
   function wallpaperForWorkspace(wsId) {
-    var key = String(wsId || "")
+    var num = parseInt(String(wsId || ""), 10)
     var map = root.workspaceWallpapers || {}
-    if (key && map[key]) return String(map[key])
+    if (!isNaN(num) && num > 0) {
+      var exact = String(num)
+      if (map[exact]) return String(map[exact])
+      var slot = String(((num - 1) % root.slots) + 1)
+      if (map[slot]) return String(map[slot])
+    } else {
+      var key = String(wsId || "")
+      if (key && map[key]) return String(map[key])
+    }
     if (root.defaultWorkspaceWallpaper) return root.defaultWorkspaceWallpaper
     return root.backgroundPath
   }
@@ -106,13 +150,15 @@ Item {
   function activateWindowAndDismiss(address) {
     root.pendingFocusKind = "window"
     root.pendingFocusTarget = String(address || "")
+    root.pendingFocusMonitor = ""
     root.dismiss()
     pendingFocusTimer.restart()
   }
 
-  function switchWorkspaceAndDismiss(workspace, sameWorkspace) {
+  function switchWorkspaceAndDismiss(workspace, sameWorkspace, monitorName) {
     root.pendingFocusKind = "workspace"
     root.pendingFocusTarget = String(workspace)
+    root.pendingFocusMonitor = String(monitorName || "")
     if (!sameWorkspace) {
       if (root.shell && typeof root.shell.hide === "function")
         root.shell.hide(root.pluginId)
@@ -147,11 +193,13 @@ Item {
     onTriggered: {
       var kind = root.pendingFocusKind
       var target = root.pendingFocusTarget
+      var mon = root.pendingFocusMonitor
       root.pendingFocusKind = ""
       root.pendingFocusTarget = ""
+      root.pendingFocusMonitor = ""
       if (!target) return
       if (kind === "window") root.focusWindow(target)
-      else if (kind === "workspace") root.focusWorkspace(target)
+      else if (kind === "workspace") root.focusWorkspace(target, mon)
     }
   }
 
@@ -170,7 +218,24 @@ Item {
     dispatch("window.close({ window = 'address:0x" + clean + "' })")
   }
 
-  function focusWorkspace(workspace) {
+  function focusWorkspace(workspace, monitorName) {
+    var num = parseInt(String(workspace || ""), 10)
+    if (!isNaN(num) && num > 0 && num < 9000 && monitorName) {
+      var slot = ((num - 1) % root.slots) + 1
+      var block = Math.floor((num - 1) / root.slots)
+      var monBlock = root.blockForMonitor(monitorName, num)
+      if (block === monBlock) {
+        Hyprland.dispatch("function() "
+          + "if o and o.workspaces and o.workspaces.focus then "
+          +   "o.workspaces.focus(" + slot + ", " + JSON.stringify(monitorName) + ")() "
+          + "else "
+          +   "hl.dispatch(hl.dsp.focus({ monitor = " + JSON.stringify(monitorName) + " })) "
+          +   "hl.dispatch(hl.dsp.focus({ workspace = " + num + " })) "
+          + "end "
+          + "end")
+        return
+      }
+    }
     dispatch("focus({ workspace = " + luaWorkspaceArg(workspace) + " })")
   }
 
@@ -272,6 +337,16 @@ Item {
     watchChanges: true
     printErrors: false
     onLoaded: root.parseWorkspaceWallpapers(text())
+    onFileChanged: reload()
+  }
+
+  FileView {
+    id: monitorBlocksFile
+    path: root.monitorBlocksPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.parseMonitorBlocks(text())
+    onLoadFailed: root.parseMonitorBlocks("")
     onFileChanged: reload()
   }
 

@@ -45,6 +45,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    orb-mesh = {
+      url = "github:Th0rgal/orb/07032deb643dd0c167effb8987a397e02ff07df9";
+      flake = false;
+    };
+
     folio = {
       url = "github:Th0rgal/folio";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -198,6 +203,7 @@
         let
           pkgs = import nixpkgs {
             inherit system;
+            config.allowUnfreePackages = [ "claude-desktop" ];
             overlays = [
               orb.overlays.default
               omarchnixOverlay
@@ -213,10 +219,13 @@
           omarchy-quickshare = pkgs.omarchy-quickshare;
           omarchy-nearby = pkgs.omarchy-nearby;
           orb-agent-sync = pkgs.orb-agent-sync;
+          flea = pkgs.flea;
           turbo-lean = pkgs.turbo-lean;
           orb-desktop = pkgs.orb-desktop;
           folio-desktop = pkgs.folio-desktop;
           notion-calendar = pkgs.notion-calendar;
+          claude-desktop = pkgs.claude-desktop;
+          helium = pkgs.helium;
           michelangelus-font = pkgs.michelangelus-font;
           plugin-opencode-model-usage = pkgs.omarchnix.buildPlugin {
             src = inputs.omarchy-plugin-opencode-usage;

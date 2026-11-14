@@ -124,6 +124,42 @@ if stdenv.hostPlatform.isLinux then
       patched_utils = patched_utils.replace(
           needle_loading,
           needle_loading + """
+          let lastLoadedUrl = url;
+          win.webContents.on('did-navigate', (_e, navUrl) => {
+              if (navUrl && navUrl.startsWith('https://127.0.0.1:')) {
+                  lastLoadedUrl = navUrl;
+              }
+          });
+          const lowerRendererOomScore = () => {
+              if (process.platform !== 'linux' || win.isDestroyed()) {
+                  return;
+              }
+              try {
+                  const osPid = win.webContents.getOSProcessId();
+                  if (osPid > 0) {
+                      fs.writeFileSync('/proc/' + osPid + '/oom_score_adj', '100\\n');
+                  }
+              }
+              catch (_) {
+              }
+          };
+          win.webContents.on('did-finish-load', lowerRendererOomScore);
+          let lastRendererRecoveryMs = 0;
+          win.webContents.on('render-process-gone', (_event, details) => {
+              const reason = details && details.reason;
+              if (!reason || reason === 'clean-exit' || win.isDestroyed()) {
+                  return;
+              }
+              const now = Date.now();
+              const delayMs = now - lastRendererRecoveryMs < 5000 ? 1500 : 250;
+              lastRendererRecoveryMs = now;
+              console.warn('[OOM-Guard] Renderer process gone (' + reason + ', exitCode=' + details.exitCode + '); reloading ' + lastLoadedUrl + ' in ' + delayMs + 'ms');
+              setTimeout(() => {
+                  if (!win.isDestroyed()) {
+                      void win.loadURL(lastLoadedUrl);
+                  }
+              }, delayMs);
+          });
           const syncWindowBackground = () => {
               if (win.isDestroyed()) {
                   return;
@@ -138,6 +174,66 @@ if stdenv.hostPlatform.isLinux then
           1,
       )
       update_asar_entry(utils_meta, patched_utils.encode("utf-8"))
+
+      main_meta = dist_files.get("main.js")
+      assert main_meta is not None, "expected dist/main.js in app.asar"
+      main_off = int(main_meta["offset"])
+      main_size = int(main_meta["size"])
+      main_src = payload[main_off : main_off + main_size].decode("utf-8")
+      needle_main_lock = "const gotTheLock = electron_1.app.requestSingleInstanceLock();"
+      assert needle_main_lock in main_src, "expected requestSingleInstanceLock in dist/main.js"
+      patched_main = main_src.replace(
+          needle_main_lock,
+          """if (process.platform === 'linux') {
+          try {
+              require('fs').writeFileSync('/proc/self/oom_score_adj', '100\\n');
+          }
+          catch (_) {
+          }
+      }
+      """ + needle_main_lock,
+          1,
+      )
+      needle_gpu_oom = "electron_1.app\n    .whenReady()"
+      assert needle_gpu_oom in patched_main, "expected app.whenReady() in dist/main.js"
+      patched_main = patched_main.replace(
+          needle_gpu_oom,
+          """if (process.platform === 'linux') {
+          electron_1.app.on('child-process-launched', (_event, details) => {
+              if (details && details.pid > 0 && (details.type === 'GPU' || details.type === 'Utility')) {
+                  try {
+                      fs.writeFileSync('/proc/' + details.pid + '/oom_score_adj', '100\\n');
+                  }
+                  catch (_) {
+                  }
+              }
+          });
+      }
+      """ + needle_gpu_oom,
+          1,
+      )
+      update_asar_entry(main_meta, patched_main.encode("utf-8"))
+
+      ls_meta = dist_files.get("languageServer.js")
+      assert ls_meta is not None, "expected dist/languageServer.js in app.asar"
+      ls_off = int(ls_meta["offset"])
+      ls_size = int(ls_meta["size"])
+      ls_src = payload[ls_off : ls_off + ls_size].decode("utf-8")
+      needle_ls_spawn = "_lsStdinIsLiveness = !!wsl;"
+      assert needle_ls_spawn in ls_src, "expected _lsStdinIsLiveness in dist/languageServer.js"
+      patched_ls = ls_src.replace(
+          needle_ls_spawn,
+          """if (process.platform === 'linux' && _lsProcess && _lsProcess.pid) {
+            try {
+                fs.writeFileSync('/proc/' + _lsProcess.pid + '/oom_score_adj', '200\\n');
+            }
+            catch (_) {
+            }
+        }
+        """ + needle_ls_spawn,
+          1,
+      )
+      update_asar_entry(ls_meta, patched_ls.encode("utf-8"))
 
       splash_meta = dist_files.get("provisionSplash.js")
       if splash_meta:

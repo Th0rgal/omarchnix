@@ -25,6 +25,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Live systemd job tree on the boot console (`omarchnix.boot.bootvine`). Used as a
+    # plain source: its NixOS module builds from its own package.nix.
+    bootvine = {
+      url = "git+https://codeberg.org/wvhulle/bootvine?ref=refs/tags/v0.1.4";
+      flake = false;
+    };
+
     omarchy = {
       url = "github:omacom/omarchy/6194f4606c585da8b839b87df9120b7d796afedf";
       flake = false;
@@ -105,7 +112,12 @@
         inherit inputs omarchyLib;
       };
 
-      omarchnixModule = import ./modules/omarchnix.nix;
+      omarchnixModule = {
+        imports = [
+          ./modules/omarchnix.nix
+          (import ./modules/bootvine.nix { bootvineSrc = inputs.bootvine; })
+        ];
+      };
 
       mkHost = import ./lib/mkHost.nix {
         inherit inputs omarchnixOverlay omarchnixModule;
@@ -274,6 +286,10 @@
             inherit (nixpkgs) lib;
             m2airConfig = self.nixosConfigurations.m2air.config;
             m2airAuroraConfig = self.nixosConfigurations.m2air-aurora.config;
+          };
+
+          bootvine = import ./tests/bootvine.nix {
+            inherit pkgs inputs self;
           };
 
           modules-eval =

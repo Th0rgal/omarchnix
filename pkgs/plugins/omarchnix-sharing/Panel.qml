@@ -237,11 +237,14 @@ Panel {
               visible: root.engine ? root.engine.airdropAvailable : true
               Layout.fillWidth: true
               bordered: true
-              selected: root.engine ? root.engine.airdropReceiving : false
+              selected: root.engine
+                ? (root.engine.airdropBusy ? root.engine.airdropPendingEnable : root.engine.airdropReceiving)
+                : false
               foreground: root.foreground
               fontSize: Style.font.caption
               iconText: "󰀵"
               text: {
+                if (root.engine && root.engine.airdropBusy) return "AirDrop…"
                 if (!root.engine || !root.engine.airdropReceiving) return "AirDrop"
                 if (!root.engine.airdropVisible) return "AirDrop…"
                 return root.engine.airdropRemaining > 0

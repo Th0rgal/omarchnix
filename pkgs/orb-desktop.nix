@@ -31,8 +31,8 @@ let
 
   # Upstream `orb` (`nix/package.nix`) stages `lean-sys` offline and compiles
   # all Lean 4 modules once via `turbo-lean` + `clang`/`lld`; add `autoPatchelfHook`
-  # + `glibc` so linked ELF binaries carry the Nixpkgs dynamic loader, and wire
-  # Linux GGUF Speech-to-Text (`cstr/cohere-transcribe-03-2026-GGUF`) into `Rpc.lean`.
+  # + `glibc` so linked ELF binaries carry the Nixpkgs dynamic loader. Linux GGUF
+  # Speech-to-Text now ships upstream in `Rpc.lean`.
   sandboxedShOffline = sandboxed-sh.overrideAttrs (old: {
     nativeBuildInputs =
       (old.nativeBuildInputs or [ ])
@@ -45,33 +45,6 @@ let
       ++ lib.optionals stdenv.hostPlatform.isLinux [
         glibc
       ];
-    postPatch = (old.postPatch or "") + ''
-      python3 - <<'PY'
-      import pathlib
-
-      rpc = pathlib.Path("lean/OrbLocald/OrbLocald/Rpc.lean")
-      rpc_txt = rpc.read_text()
-      for old_s, new_s in [
-          (
-              'private def pinnedVoiceModelRevision : String :=\n  "553445e84959f9ec3fcd43443bce75ea05c400f3"',
-              'private def pinnedVoiceModelRevision : String :=\n  "553445e84959f9ec3fcd43443bce75ea05c400f3"\n\nprivate def pinnedLinuxVoiceModelRepo : String :=\n  "cstr/cohere-transcribe-03-2026-GGUF"\n\nprivate def pinnedLinuxVoiceModelRevision : String :=\n  "4e98a8c31c95a92d651e60e3bfae4fe29fc6e026"',
-          ),
-          (
-              'private def resolveVoiceModelDir (st : LocaldState) : IO String := do\n  if let some envDir ← OrbBin.PosixExt.getEnvNonEmpty "ORB_VOICE_MODEL_DIR" then\n    return envDir\n  if let some hfCache ← OrbBin.PosixExt.getEnvNonEmpty "HF_HUB_CACHE" then\n    return (System.FilePath.mk hfCache / "models--MarkChen1214--cohere-transcribe-03-2026-MLX-Mixed-2bit3bit4bit" / "snapshots" / pinnedVoiceModelRevision).toString\n  let home := if st.homeDir.trimAscii.toString.isEmpty then "/tmp" else st.homeDir.trimAscii.toString\n  return (System.FilePath.mk home / ".cache" / "huggingface" / "hub" / "models--MarkChen1214--cohere-transcribe-03-2026-MLX-Mixed-2bit3bit4bit" / "snapshots" / pinnedVoiceModelRevision).toString\n\nprivate def isVoiceModelPresent (modelDir : String) : IO Bool := do\n  let d := System.FilePath.mk modelDir\n  return (← (d / "config.json").pathExists) && (← (d / "model.safetensors").pathExists)',
-              'private def resolveVoiceModelDir (st : LocaldState) : IO String := do\n  if let some envDir ← OrbBin.PosixExt.getEnvNonEmpty "ORB_VOICE_MODEL_DIR" then\n    return envDir\n  let repoSlug := if st.hostOs == "linux" then "models--cstr--cohere-transcribe-03-2026-GGUF" else "models--MarkChen1214--cohere-transcribe-03-2026-MLX-Mixed-2bit3bit4bit"\n  let rev := if st.hostOs == "linux" then pinnedLinuxVoiceModelRevision else pinnedVoiceModelRevision\n  if let some hfCache ← OrbBin.PosixExt.getEnvNonEmpty "HF_HUB_CACHE" then\n    return (System.FilePath.mk hfCache / repoSlug / "snapshots" / rev).toString\n  let home := if st.homeDir.trimAscii.toString.isEmpty then "/tmp" else st.homeDir.trimAscii.toString\n  return (System.FilePath.mk home / ".cache" / "huggingface" / "hub" / repoSlug / "snapshots" / rev).toString\n\nprivate def isVoiceModelPresent (modelDir : String) : IO Bool := do\n  let d := System.FilePath.mk modelDir\n  if (← (d / "config.json").pathExists) && (← (d / "model.safetensors").pathExists) then\n    return true\n  for fn in #["cohere-transcribe-q4_k.gguf", "cohere-transcribe-q5_0.gguf", "cohere-transcribe-q8_0.gguf", "cohere-transcribe-f16.gguf"] do\n    if (← (d / fn).pathExists) then\n      return true\n  return false',
-          ),
-          (
-              '    let hasLinuxCohere ← (OrbBin.PosixExt.getEnvNonEmpty "VOICED_COHERE_LIB").map Option.isSome\n    let supported := fakeMode || (st.hostOs == "macos" && arch == "aarch64") || (st.hostOs == "linux" && hasLinuxCohere)\n    let reasonVal : JVal :=\n      if !supported then .str "Speech-to-text requires Orb Desktop on Apple Silicon (macOS arm64)."\n      else .null\n    let pyReady := py?.isSome && script?.isSome\n    return .ok (.obj #[\n      ("supported", .bool supported),\n      ("reason", reasonVal),\n      ("platform", .str st.hostOs),\n      ("arch", .str arch),\n      ("python", match py? with | some p => .str p | none => .null),\n      ("python_ready", .bool pyReady),\n      ("model_repo", .str pinnedVoiceModelRepo),\n      ("model_revision", .str pinnedVoiceModelRevision),',
-              '    let hasLinuxCohere ← (OrbBin.PosixExt.getEnvNonEmpty "VOICED_COHERE_LIB").map Option.isSome\n    let supported := fakeMode || (st.hostOs == "macos" && arch == "aarch64") || (st.hostOs == "linux" && (hasLinuxCohere || arch == "aarch64" || arch == "x86_64"))\n    let reasonVal : JVal :=\n      if !supported then .str "Speech-to-text requires Orb Desktop on Apple Silicon or Linux (aarch64/x86_64)."\n      else .null\n    let pyReady := py?.isSome && script?.isSome\n    let effRepo := if st.hostOs == "linux" then pinnedLinuxVoiceModelRepo else pinnedVoiceModelRepo\n    let effRev := if st.hostOs == "linux" then pinnedLinuxVoiceModelRevision else pinnedVoiceModelRevision\n    return .ok (.obj #[\n      ("supported", .bool supported),\n      ("reason", reasonVal),\n      ("platform", .str st.hostOs),\n      ("arch", .str arch),\n      ("python", match py? with | some p => .str p | none => .null),\n      ("python_ready", .bool pyReady),\n      ("model_repo", .str effRepo),\n      ("model_revision", .str effRev),',
-          ),
-      ]:
-          if old_s in rpc_txt:
-              rpc_txt = rpc_txt.replace(old_s, new_s, 1)
-          else:
-              assert new_s in rpc_txt, f"missing Rpc.lean snippet: {old_s!r}"
-      rpc.write_text(rpc_txt)
-      PY
-    '';
   });
 
   pnpmDeps = fetchPnpmDeps {
@@ -455,6 +428,13 @@ stdenv.mkDerivation {
       cp ${./orb-shell-gtk4.c} main.c
       substituteInPlace Makefile \
         --replace-fail 'gtk+-3.0 webkit2gtk-4.1' 'gtk4 webkitgtk-6.0'
+      # The GTK4 shell is the single file above. Upstream keeps adding GTK3
+      # companion sources (gtk_chrome.c, gtk_icons.c, gtk_menu.c, ...) to the
+      # rule, so drop whatever the rule lists instead of matching exact names.
+      sed -i -E \
+        -e 's|^orb-desktop:.*$|orb-desktop: main.c|' \
+        -e 's|-o \$@ main\.c .*\$\(LDFLAGS\)|-o $@ main.c $(LDFLAGS)|' Makefile
+      grep -q -- '-o $@ main.c $(LDFLAGS)' Makefile
     fi
   '';
 

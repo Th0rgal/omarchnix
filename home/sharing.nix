@@ -357,7 +357,13 @@ in
         };
 
         home.file =
-          lib.mkIf (cfg.agents.enable && sCfg.airdrop.installAgentSkill && omdropSkillFile != null)
+          lib.mkIf
+            (
+              cfg.agents.enable
+              && cfg.agents.installSkills
+              && sCfg.airdrop.installAgentSkill
+              && omdropSkillFile != null
+            )
             (
               (mkOmdropSkillFor ".agents/skills/omdrop")
               // lib.optionalAttrs (builtins.elem "claude" cfg.agents.targets) (

@@ -1068,9 +1068,28 @@ in
                 "$@"
             '';
           };
+          speakerguarddSpeakerMux = pkgs.writeShellApplication {
+            name = "speakerguardd-speaker-mux";
+            runtimeInputs = [
+              (pkgs.aurora-alsa-utils or pkgs.alsa-utils)
+              pkgs.coreutils
+            ];
+            text = ''
+              # Only where speakerguardd v2 owns the speakers in this boot.
+              [ -e /run/speakerguardd-graph/speakerguardd-owns-speakers ] || exit 0
+              for id in /proc/asound/card*/id; do
+                [ -r "$id" ] || continue
+                card=$(cat "$id")
+                if amixer -c "$card" cget "name=Speaker Playback Mux" >/dev/null 2>&1; then
+                  amixer -c "$card" -q cset "name=Speaker Playback Mux" Secondary || true
+                fi
+              done
+            '';
+          };
           speakerguarddSessionIdle = pkgs.writeShellApplication {
             name = "speakerguardd-session-idle";
             runtimeInputs = [
+              pkgs.bash
               pkgs.python3
               config.services.pipewire.package
               pkgs.coreutils
@@ -1095,6 +1114,20 @@ in
           services.pipewire = {
             extraLv2Packages = [ sgPkg ];
             wireplumber.extraLv2Packages = [ sgPkg ];
+            # Lock PipeWire's graph quantum to speakerguardd-v2's hard 512-frame /
+            # 48 kHz LV2 block requirement. Without `clock.min-quantum = 512`,
+            # low-latency mic streams (`pw-cat --latency 10ms` -> 256 frames) or
+            # post-s2idle Dummy-Driver fallback (`1024` frames) switch the graph
+            # away from 512 frames and make `libsgv2_lv2.so` fail node start with
+            # `Operation not permitted` (`EPERM`), releasing Speaker Protection.
+            extraConfig.pipewire."10-sgv2-quantum.conf" = {
+              "context.properties" = {
+                "default.clock.rate" = 48000;
+                "default.clock.quantum" = 512;
+                "default.clock.min-quantum" = 512;
+                "default.clock.max-quantum" = 512;
+              };
+            };
           };
           systemd.packages = [
             pkgs.speakerguardd
@@ -1143,6 +1176,9 @@ in
               "speakerguardd-v2-selfcheck.service"
               "speakerguardd-v2-switchtest.service"
             ];
+            serviceConfig = lib.optionalAttrs (m2Cfg.efficiencyCoreSteering or false) {
+              CPUAffinity = "0-3";
+            };
           };
           systemd.services.speakerguardd-v2-provision = {
             path = sgTools;
@@ -1171,14 +1207,32 @@ in
             path = sgTools;
             environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
           };
+          # Cold-boot deadlock breaker: the generated sgv2 graph makes PipeWire
+          # open the raw speaker PCM ("Secondary") as a static `context.objects`
+          # adapter, but the kernel only routes that front-end once
+          # `Speaker Playback Mux = Secondary`, which nothing but WirePlumber's
+          # UCM HiFi verb sets, and WirePlumber needs PipeWire. With the mux at
+          # its boot default ("Primary") the open fails with EINVAL ("no backend
+          # DAIs enabled for Secondary"), PipeWire exits 234 until it hits the
+          # start limit, and the session has no audio at all. Select the mux
+          # before every PipeWire start; the kernel still refuses to start the
+          # amps without a speakerguardd grant.
+          systemd.user.services.pipewire.serviceConfig.ExecStartPre = [
+            "-${speakerguarddSpeakerMux}/bin/speakerguardd-speaker-mux"
+          ];
           systemd.user.services.speakerguardd-v2-session = {
             wantedBy = [ "pipewire.service" ];
             path = sgTools;
             environment.SGV2_GATE = "${sgPkg}/share/speakerguardd/gate.json";
-            serviceConfig.ExecStart = [
-              ""
-              "${speakerguarddSessionIdle}/bin/speakerguardd-session-idle --machine \${SGV2_MACHINE}"
-            ];
+            serviceConfig = {
+              ExecStart = [
+                ""
+                "${speakerguarddSessionIdle}/bin/speakerguardd-session-idle --machine \${SGV2_MACHINE}"
+              ];
+            }
+            // lib.optionalAttrs (m2Cfg.efficiencyCoreSteering or false) {
+              CPUAffinity = "0-3";
+            };
           };
           systemd.services.speakerguardd.serviceConfig.ExecCondition = [ "${sgGate} legacy" ];
           systemd.services.speakersafetyd.serviceConfig = {

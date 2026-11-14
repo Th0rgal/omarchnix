@@ -294,16 +294,33 @@
         ]
       },
       "locked": {
-        "lastModified": 1794346358,
-        "narHash": "sha256-3Hwxo6igunjNCeEENe5tqdwDPkiV2hgvbNhuINf6Tjg=",
+        "lastModified": 1794663234,
+        "narHash": "sha256-bhV9iPxKMlghwxfT0O8QL1laSIV3URvzD9QlrTa/AAQ=",
         "owner": "Th0rgal",
         "repo": "orb",
-        "rev": "15c0c313bc4cb0b551cb277723658f6ca6128549",
+        "rev": "4514109957920ef6e493a9d872e31acf97e9eb37",
         "type": "github"
       },
       "original": {
         "owner": "Th0rgal",
         "repo": "orb",
+        "type": "github"
+      }
+    },
+    "orb-mesh": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794484513,
+        "narHash": "sha256-ONqH4L2um3W0ea65AR/iAPXVUcfuLqGzi3y3uvAFUC8=",
+        "owner": "Th0rgal",
+        "repo": "orb",
+        "rev": "07032deb643dd0c167effb8987a397e02ff07df9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "orb",
+        "rev": "07032deb643dd0c167effb8987a397e02ff07df9",
         "type": "github"
       }
     },
@@ -323,6 +340,7 @@
         "omdrop-awdl": "omdrop-awdl",
         "omdrop-plugin": "omdrop-plugin",
         "orb": "orb",
+        "orb-mesh": "orb-mesh",
         "sops-nix": "sops-nix",
         "turbo-lean": "turbo-lean"
       }

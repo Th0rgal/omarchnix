@@ -153,6 +153,11 @@ let
     cities = cfg.shell.elsewhenCities;
   };
 
+  powerSeedEntry = {
+    id = "omarchy.power";
+    showPercentage = cfg.shell.showBatteryPercentage;
+  };
+
   baseLayout = {
     left = [
       { id = "omarchy.menu"; }
@@ -172,14 +177,22 @@ let
       elsewhenSeedEntry
       { id = "omarchy.weather"; }
     ];
-    tray = map (id: { inherit id; }) effectiveTrayIds;
+    tray = map (
+      id:
+      {
+        inherit id;
+      }
+      // lib.optionalAttrs (id == "omarchy.agents" && cfg.agents.enable && cfg.agents.orbSync.enable) {
+        minimalHud = cfg.agents.orbSync.minimalHud;
+      }
+    ) effectiveTrayIds;
     right = [
       { id = "omarchy.tray"; }
       { id = "omarchy.keyboard-layout"; }
       { id = "omarchy.bluetooth"; }
       { id = "omarchy.network"; }
       { id = "omarchy.audio"; }
-      { id = "omarchy.power"; }
+      powerSeedEntry
     ];
   };
 
@@ -193,7 +206,7 @@ let
         { id = "omarchy.bluetooth"; }
         { id = "omarchy.network"; }
         { id = "omarchy.audio"; }
-        { id = "omarchy.power"; }
+        powerSeedEntry
       ];
     in
     appendUniqueById ([ { id = "omarchy.tray"; } ] ++ pluginRight) coreRight;
@@ -242,6 +255,9 @@ let
       purgedIds = effectivePurgedIds;
       dock = cfg.shell.dock;
       elsewhenCities = cfg.shell.elsewhenCities;
+      showBatteryPercentage = cfg.shell.showBatteryPercentage;
+      agentsMinimalHud =
+        if cfg.agents.enable && cfg.agents.orbSync.enable then cfg.agents.orbSync.minimalHud else null;
       lockedPlugins = map (entry: {
         inherit (entry)
           id
@@ -381,6 +397,20 @@ let
         for it in layout.get("centerEnd", []):
             if item_id(it) == "omarchy.elsewhen" and not it.get("cities"):
                 it["cities"] = seed_cities
+
+    agents_min_hud = spec.get("agentsMinimalHud")
+    if isinstance(agents_min_hud, bool):
+        for sec_items in layout.values():
+            for it in sec_items:
+                if item_id(it) == "omarchy.agents":
+                    it["minimalHud"] = agents_min_hud
+
+    show_batt_pct = spec.get("showBatteryPercentage")
+    if isinstance(show_batt_pct, bool):
+        for sec_items in layout.values():
+            for it in sec_items:
+                if item_id(it) == "omarchy.power":
+                    it.setdefault("showPercentage", show_batt_pct)
 
     disabled = list(data.get("disabledPlugins") or [])
     for did in spec.get("disabledPlugins") or []:
@@ -584,6 +614,27 @@ in
             ];
           };
         };
+
+    systemd.user.services.omarchy-monitor-watch = lib.mkIf (cfg.shell.backend == "omarchy-shell") {
+      Unit = {
+        Description = "Omarchy Hyprland multi-monitor hotplug, clamshell & modeless recovery watcher";
+        PartOf = [ "graphical-session.target" ];
+        After = [ "graphical-session.target" ];
+        ConditionEnvironment = "HYPRLAND_INSTANCE_SIGNATURE";
+      };
+      Service = {
+        Type = "simple";
+        Environment = [
+          "OMARCHY_PATH=${omarchyShellPkg.sharePath}"
+        ];
+        ExecStart = "${omarchyShellPkg}/bin/omarchy-hyprland-monitor-watch";
+        Restart = "on-failure";
+        RestartSec = 2;
+      };
+      Install = {
+        WantedBy = [ "graphical-session.target" ];
+      };
+    };
 
     systemd.user.services.omarchy-shell = lib.mkIf (cfg.shell.backend == "omarchy-shell") {
       Unit = {

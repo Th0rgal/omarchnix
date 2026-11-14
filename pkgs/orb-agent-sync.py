@@ -1273,28 +1273,38 @@ def should_probe_account(account: dict[str, Any], cached_usage: dict[str, Any] |
 def cmd_usage_update(argv: list[str]) -> int:
     force = False
     limits_only = False
+    orb_only = os.environ.get("OMARCHY_ORB_ONLY") == "1"
     excluded: set[str] = set()
     targets: list[str] = []
+    upstream_passthrough_argv: list[str] = []
 
     i = 0
     while i < len(argv):
         arg = argv[i]
         if arg == "--force":
             force = True
+            upstream_passthrough_argv.append(arg)
         elif arg == "--limits-only":
             limits_only = True
+            upstream_passthrough_argv.append(arg)
+        elif arg == "--orb-only":
+            orb_only = True
         elif arg == "--except" and i + 1 < len(argv):
             i += 1
             excluded.add(argv[i])
+            upstream_passthrough_argv.extend(["--except", argv[i]])
         elif not arg.startswith("-"):
             targets.append(arg)
+            upstream_passthrough_argv.append(arg)
+        else:
+            upstream_passthrough_argv.append(arg)
         i += 1
 
     target_set = set(targets) if targets else None
 
     conn = load_orb_connection()
     if conn is None:
-        return run_upstream("omarchy-agent-usage-update", argv)
+        return run_upstream("omarchy-agent-usage-update", upstream_passthrough_argv)
 
     api_url, token = conn
     state_root = omarchy_agents_state_dir()
@@ -1497,9 +1507,14 @@ def cmd_usage_update(argv: list[str]) -> int:
                             enabled_any = [a for a in ordered_accs if a.get("enabled", True) and a.get("user_enabled") is not False]
                             did_autoswitch = True
                             peer_lbl = str(best_peer.get("name") or best_peer.get("account_email") or disp_name)
+                            switch_reason = (
+                                "Previous account sign-in expired."
+                                if top_broken
+                                else f"Previous account reached {round(top_pct)}% (auto threshold {sw_threshold}%)."
+                            )
                             send_notification(
                                 f"{disp_name}: switched to {peer_lbl}",
-                                f"Previous account reached {round(top_pct)}% (auto threshold {sw_threshold}%).",
+                                switch_reason,
                             )
                         except Exception:
                             pass
@@ -1738,14 +1753,15 @@ def cmd_usage_update(argv: list[str]) -> int:
             atomic_write_json(u_dir / f"{t_id}.json", record)
             written_orb_ids.add(t_id)
 
-        # Clean up Orb-managed files for providers that were completely removed from Orb
+        # Clean up Orb-managed files for providers removed from Orb, and when `--orb-only`
+        # is active also prune stale non-Orb stub records left by upstream collectors.
         if target_set is None:
             for existing_file in u_dir.glob("*.json"):
                 eid = existing_file.stem
                 if eid in excluded or eid in written_orb_ids:
                     continue
                 rec = load_json_safe(existing_file, None)
-                if isinstance(rec, dict) and rec.get("orbManaged"):
+                if orb_only or (isinstance(rec, dict) and rec.get("orbManaged")):
                     try:
                         existing_file.unlink()
                     except OSError:
@@ -1758,17 +1774,18 @@ def cmd_usage_update(argv: list[str]) -> int:
         if did_autoswitch:
             emit_desktop_command({"action": "providers-refresh"})
 
-        # Run upstream collector only for non-Orb-managed local agents so local models / transcripts keep working
-        if target_set is None:
-            up_args = ["--limits-only"] if limits_only else []
-            for wid in sorted(written_orb_ids | excluded):
-                up_args.extend(["--except", wid])
-            run_upstream("omarchy-agent-usage-update", up_args)
-        else:
-            rem_targets = [t for t in targets if t not in written_orb_ids and t not in excluded]
-            if rem_targets:
-                up_args = (["--limits-only"] if limits_only else []) + rem_targets
+        # Run upstream collector only when `--orb-only` is disabled
+        if not orb_only:
+            if target_set is None:
+                up_args = ["--limits-only"] if limits_only else []
+                for wid in sorted(written_orb_ids | excluded):
+                    up_args.extend(["--except", wid])
                 run_upstream("omarchy-agent-usage-update", up_args)
+            else:
+                rem_targets = [t for t in targets if t not in written_orb_ids and t not in excluded]
+                if rem_targets:
+                    up_args = (["--limits-only"] if limits_only else []) + rem_targets
+                    run_upstream("omarchy-agent-usage-update", up_args)
 
     return 0
 

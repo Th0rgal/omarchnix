@@ -202,6 +202,12 @@ in
         description = "Default cities seeded on `omarchy.elsewhen` in `bar.layout.centerEnd` when none are configured yet.";
       };
 
+      showBatteryPercentage = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Seed `showPercentage` on `omarchy.power` in `~/.config/omarchy/shell.json` so the status bar battery icon displays the battery percentage by default (can still be toggled live via right-click or the Omarchy menu).";
+      };
+
       dock = lib.mkOption {
         type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
         default = null;
@@ -251,6 +257,37 @@ in
       };
     };
 
+    widevine = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Provision Widevine CDM (`pkgs.widevine-cdm`) into Brave and Chromium's
+          `WidevineCdm/latest-component-updated-widevine-cdm` hint files (with
+          `brave.widevine_opted_in` seeded to `true` when unset) and expose
+          `MOZ_GMP_PATH` for Firefox encrypted media playback (Netflix, Prime Video,
+          Disney+, Spotify Web) on both `aarch64-linux` (16K & 4K pages) and `x86_64-linux`.
+        '';
+      };
+
+      package = lib.mkOption {
+        type = lib.types.nullOr lib.types.package;
+        default =
+          if
+            (pkgs ? widevine-cdm)
+            && (
+              (pkgs.config.allowUnfree or false)
+              || builtins.elem "widevine-cdm" (pkgs.config.allowUnfreePackages or [ ])
+            )
+          then
+            pkgs.widevine-cdm
+          else
+            null;
+        defaultText = lib.literalExpression "pkgs.widevine-cdm or null";
+        description = "Widevine CDM package providing `share/google/chrome/WidevineCdm` and `gmp-widevinecdm/system-installed`.";
+      };
+    };
+
     plugins = {
       locked = lib.mkOption {
         default = { };
@@ -291,7 +328,19 @@ in
       enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
-        description = "Provision the governed `omarchnix` system skill and agent ergonomics configs.";
+        description = "Provision agent ergonomics, live theme hooks, and optional system skills.";
+      };
+
+      installSkills = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Provision the built-in `omarchnix` (and `omdrop`) skills into agent skill directories. Disable when skills are managed externally (e.g. `orb-library`).";
+      };
+
+      manageOpencodeConfig = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Write a minimal `~/.config/opencode/opencode.json` disabling self-updates. Disable when a host module reconciles `opencode.json` directly.";
       };
 
       targets = lib.mkOption {
@@ -318,24 +367,51 @@ in
           default = true;
           description = ''
             Sync Omarchy's `omarchy.agents` status-bar plugin (`~/.local/state/omarchy/agents/usage/*.json`)
-            bidirectionally with Orb Core (`~/.orb/connection.json`) and Orb Desktop, falling back cleanly
-            to upstream local collectors when Orb is not configured.
+            with Orb Core (`~/.orb/connection.json`), falling back cleanly to upstream local collectors
+            when Orb is not configured.
+          '';
+        };
+
+        orbOnly = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            When Orb Core is connected, skip fanning out to upstream's 22 local transcript/SQLite
+            collectors on each refresh and prune stale local stub records (~35x lower CPU/RAM per poll).
+          '';
+        };
+
+        minimalHud = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Streamline `omarchy.agents` into a focused Quota & Account-Switch HUD (removing starter
+            prompt tiles, per-provider terminal launch buttons, right-click launcher, in-panel OAuth
+            wizard, and inline rename).
           '';
         };
 
         launchInOrb = lib.mkOption {
           type = lib.types.bool;
-          default = true;
+          default = false;
           description = ''
-            Route `omarchy-agent` and `omarchy-agent-prompt` bar/tile actions into Orb Desktop's
-            New Agent composer (pre-selecting the requested harness and prompt), while keeping
-            `--local`, `--local-model`, `--terminal`, and `--inline` on upstream CLI launch.
+            Route `omarchy-agent` and `omarchy-agent-prompt` actions into Orb Desktop's New Agent
+            composer (`~/.orb/desktop-command.json`). Disabled by default when launching directly in Orb.
+          '';
+        };
+
+        manageAccountsInPanel = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Install `omarchy-agent-account-add` and `omarchy-agent-account-rename` overrides for
+            in-panel OAuth sign-in and account renaming (disabled by default in favor of Orb Desktop).
           '';
         };
 
         pollInterval = lib.mkOption {
           type = lib.types.str;
-          default = "2m";
+          default = "5m";
           description = "Background systemd user timer interval for `omarchy-orb-agent usage-update`.";
         };
       };
@@ -349,6 +425,7 @@ in
     ./macos.nix
     ./murmure.nix
     ./sharing.nix
+    ./mac-tether.nix
     ./flea.nix
     ./agents.nix
     ./fcitx5.nix
@@ -382,7 +459,10 @@ in
         GTK_USE_PORTAL = "1";
         QT_QPA_PLATFORMTHEME = lib.mkDefault "xdgdesktopportal";
         QT_WAYLAND_DISABLE_WINDOWDECORATION = "1";
-        BROWSER = "brave";
+        BROWSER = lib.mkDefault "brave";
+      }
+      // lib.optionalAttrs (cfg.widevine.enable && cfg.widevine.package != null) {
+        MOZ_GMP_PATH = "${cfg.widevine.package}/gmp-widevinecdm/system-installed";
       };
 
       packages =
@@ -580,6 +660,7 @@ in
     home.activation.omarchnixBrowserFontDefaults = config.lib.dag.entryAfter [ "writeBoundary" ] ''
       for pair in \
         "brave:$HOME/.config/BraveSoftware/Brave-Browser/Default/Preferences" \
+        "helium:$HOME/.config/net.imput.helium/Default/Preferences" \
         "chromium:$HOME/.config/chromium/Default/Preferences"; do
         proc="''${pair%%:*}"
         prefs="''${pair#*:}"
@@ -604,6 +685,69 @@ in
       done
     '';
 
+    home.activation.omarchnixWidevineCdm =
+      lib.mkIf (cfg.widevine.enable && cfg.widevine.package != null)
+        (
+          config.lib.dag.entryAfter [ "writeBoundary" ] (
+            let
+              wvDir = "${cfg.widevine.package}/share/google/chrome/WidevineCdm";
+              wvVersion = cfg.widevine.package.version or "";
+            in
+            ''
+              for browser_dir in \
+                "$HOME/.config/BraveSoftware/Brave-Browser" \
+                "$HOME/.config/BraveSoftware/Brave-Browser-Origin" \
+                "$HOME/.config/net.imput.helium" \
+                "$HOME/.config/chromium"; do
+                case "$(basename "$browser_dir")" in
+                  Brave-Browser)
+                    mkdir -p "$browser_dir/WidevineCdm"
+                    ;;
+                  *)
+                    [ -d "$browser_dir" ] || continue
+                    mkdir -p "$browser_dir/WidevineCdm"
+                    ;;
+                esac
+                hint_file="$browser_dir/WidevineCdm/latest-component-updated-widevine-cdm"
+                tmp_hint="$(mktemp "$hint_file.XXXXXX")"
+                ${pkgs.jq}/bin/jq -nc \
+                  --arg path ${lib.escapeShellArg wvDir} \
+                  --arg ver ${lib.escapeShellArg wvVersion} \
+                  'if $ver != "" then { Path: $path, LastBundledVersion: $ver } else { Path: $path } end' \
+                  > "$tmp_hint"
+                chmod 0600 "$tmp_hint"
+                mv "$tmp_hint" "$hint_file"
+              done
+
+              for pair in \
+                "brave:$HOME/.config/BraveSoftware/Brave-Browser" \
+                "brave-origin:$HOME/.config/BraveSoftware/Brave-Browser-Origin"; do
+                proc="''${pair%%:*}"
+                browser_dir="''${pair#*:}"
+                [ -d "$browser_dir" ] || continue
+                local_state="$browser_dir/Local State"
+                if [ ! -e "$local_state" ]; then
+                  tmp_ls="$(mktemp "$local_state.XXXXXX")"
+                  printf '{"brave":{"widevine_opted_in":true}}\n' > "$tmp_ls"
+                  chmod 0600 "$tmp_ls"
+                  mv "$tmp_ls" "$local_state"
+                elif [ -f "$local_state" ] && [ ! -L "$local_state" ] \
+                  && ! ${pkgs.procps}/bin/pgrep -u "$USER" -f "/$proc/$proc " >/dev/null 2>&1; then
+                  tmp_ls="$(mktemp "$local_state.XXXXXX")"
+                  if ${pkgs.jq}/bin/jq '
+                    .brave = ((.brave // {}) | if has("widevine_opted_in") then . else .widevine_opted_in = true end)
+                  ' "$local_state" > "$tmp_ls" 2>/dev/null; then
+                    chmod --reference="$local_state" "$tmp_ls" 2>/dev/null || chmod 0600 "$tmp_ls"
+                    mv "$tmp_ls" "$local_state"
+                  else
+                    rm -f "$tmp_ls"
+                  fi
+                fi
+              done
+            ''
+          )
+        );
+
     xdg.mimeApps = {
       enable = lib.mkDefault true;
       defaultApplications = {
@@ -614,7 +758,21 @@ in
         "x-scheme-handler/unknown" = lib.mkDefault [ "brave-browser.desktop" ];
         "application/xhtml+xml" = lib.mkDefault [ "brave-browser.desktop" ];
       };
+      # Mirror every declarative `defaultApplications` entry into `[Added Associations]`
+      # (`associations.added`) so `g_app_info_get_recommended_for_type()` / `get_all_for_type()`
+      # inside `xdg-desktop-portal`'s `OpenURI` handler always return the configured handler
+      # as an explicit choice even when a package's `.desktop` lives in an unindexed directory
+      # without `mimeinfo.cache` (such as imperative `nix profile` / `~/.nix-profile/share/applications`).
+      associations.added = lib.mapAttrs (_: lib.mkDefault) config.xdg.mimeApps.defaultApplications;
     };
+
+    home.activation.omarchnixUpdateDesktopDatabase =
+      config.lib.dag.entryAfter [ "writeBoundary" "linkGeneration" ]
+        ''
+          if [ -d "$HOME/.local/share/applications" ]; then
+            ${pkgs.desktop-file-utils}/bin/update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
+          fi
+        '';
 
     programs.fastfetch.enable = lib.mkDefault true;
 
@@ -628,7 +786,29 @@ in
 
     systemd.user.sessionVariables = {
       GTK_USE_PORTAL = "1";
+    }
+    // lib.optionalAttrs (cfg.widevine.enable && cfg.widevine.package != null) {
+      MOZ_GMP_PATH = "${cfg.widevine.package}/gmp-widevinecdm/system-installed";
     };
+
+    wayland.windowManager.hyprland.settings.env =
+      lib.mkIf (cfg.widevine.enable && cfg.widevine.package != null)
+        (
+          lib.mkAfter [
+            {
+              _args = [
+                "MOZ_GMP_PATH"
+                "${cfg.widevine.package}/gmp-widevinecdm/system-installed"
+              ];
+            }
+          ]
+        );
+
+    # Age out stale Nix HTTP/tarball/eval cache files in `~/.cache/nix` after 30 days
+    # while keeping active flake inputs warm.
+    systemd.user.tmpfiles.rules = [
+      "d %h/.cache/nix 0755 - - 30d"
+    ];
 
     gtk = {
       enable = true;
@@ -661,6 +841,15 @@ in
         gtk-decoration-layout = ":";
       };
     };
+
+    # Keep transient desktop & agent scopes alive if a single child process (e.g. a
+    # multi-GiB `lean` / `cargo` build spawned inside `app-antigravity-*.scope` or a
+    # Ghostty tab) is reaped by the kernel OOM-killer, even on standalone Home Manager
+    # setups without the system-level `omarchnix` NixOS module.
+    xdg.configFile."systemd/user/scope.d/10-omarchnix-oom.conf".text = ''
+      [Scope]
+      OOMPolicy=continue
+    '';
 
     dconf.settings =
       let

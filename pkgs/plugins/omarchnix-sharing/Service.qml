@@ -55,6 +55,10 @@ Item {
   property bool airdropReceiving: false
   property bool airdropVisible: false
   property bool airdropBusy: false
+  // Direction of the toggle in flight: `omdrop on` only exits once the AWDL
+  // radio is up (8-25 s, minutes when its transmit gate retries), so the chip
+  // needs something to show before the first status refresh.
+  property bool airdropPendingEnable: false
   property int airdropRemaining: -1
   property string airdropDeviceName: ""
   property string airdropError: ""
@@ -84,6 +88,7 @@ Item {
   function setAirdrop(enable) {
     if (!airdropAvailable || airdropBusy || airdropToggleProc.running) return
     if (Boolean(enable) === airdropReceiving) return
+    airdropPendingEnable = Boolean(enable)
     airdropBusy = true
     airdropError = ""
     airdropToggleProc.command = enable

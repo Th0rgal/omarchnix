@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Sample live per-application CPU% and resident memory for the Omarchy Battery popup."""
+
+import os
+import pathlib
+import sys
+import time
+
+SAMPLE_SECS = 0.25
+PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")
+CLK_TCK = os.sysconf("SC_CLK_TCK")
+SELF_PID = os.getpid()
+
+IGNORE_NAMES = {
+    "omarchy-power-consumers",
+    "omarchy-battery-status",
+    "omarchy-system-stats",
+    "omarchy-powerprofiles-list",
+    "omarchy-powerprofiles-set",
+    "ps",
+    "top",
+    "upower",
+}
+
+APP_RULES = (
+    (("claude-desktop", "@anthropic-ai/claude"), "Claude Desktop"),
+    (("antigravity", "language_server_linux"), "Antigravity"),
+    (("helium",), "Helium"),
+    (("firefox",), "Firefox"),
+    (("orb-desktop", "orb-router"), "Orb Desktop"),
+    (("telegram",), "Telegram"),
+    (("signal-desktop",), "Signal"),
+    (("vesktop", "discord"), "Discord"),
+    (("folio-desktop", "folio"), "Folio"),
+    (("notion-calendar",), "Notion Calendar"),
+    (("bitwarden",), "Bitwarden"),
+    (("ghostty",), "Ghostty"),
+    (("flea",), "Flea"),
+    (("quickshell", "omarchy-shell"), "Omarchy Shell"),
+    (("hyprland", "hyprlock", "hyprpaper", "hypridle"), "Hyprland"),
+    (("pipewire", "wireplumber", "speakerguard"), "PipeWire Audio"),
+    (("opencode",), "OpenCode"),
+    (("murmure",), "Murmure"),
+    (("rclone",), "Cloud Mounts"),
+    (("nix-daemon", "nix "), "Nix Daemon"),
+    (("lean", "lake", "turbo-lean"), "Lean 4"),
+    (("rustc", "cargo", "rust-analyzer"), "Rust"),
+)
+
+
+def classify(comm: str, cmdline: str) -> str | None:
+    base = comm.strip()
+    if base.startswith("."):
+        base = base[1:]
+    for suffix in ("-wrapped", "-wrappe", "-wrapp"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+    if base in IGNORE_NAMES:
+        return None
+
+    hay = f"{base} {cmdline}".lower()
+    for needles, label in APP_RULES:
+        if any(n in hay for n in needles):
+            return label
+
+    if not cmdline:
+        # Kernel thread (e.g. kswapd0): surface only if actively burning CPU.
+        return f"[{base}]"
+
+    tok = os.path.basename(cmdline.split("\0", 1)[0].split(" ", 1)[0])
+    if tok.startswith("."):
+        tok = tok[1:]
+    for suffix in ("-wrapped", "-wrappe", "-wrapp"):
+        if tok.endswith(suffix):
+            tok = tok[: -len(suffix)]
+    if tok in IGNORE_NAMES:
+        return None
+    name = tok or base
+    return name.replace("-", " ").replace("_", " ").title() if name.islower() else name
+
+
+def snapshot() -> dict[int, tuple[int, int, str, str]]:
+    out: dict[int, tuple[int, int, str, str]] = {}
+    proc = pathlib.Path("/proc")
+    for entry in proc.iterdir():
+        name = entry.name
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid == SELF_PID:
+            continue
+        try:
+            stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+            rparen = stat.rfind(")")
+            if rparen < 0:
+                continue
+            comm = stat[stat.find("(") + 1 : rparen]
+            fields = stat[rparen + 2 :].split()
+            ticks = int(fields[11]) + int(fields[12])
+            statm = (entry / "statm").read_text(encoding="ascii").split()
+            rss_bytes = int(statm[1]) * PAGE_SIZE
+            raw_cmd = (entry / "cmdline").read_bytes()
+            cmdline = raw_cmd[:512].decode("utf-8", errors="replace")
+            out[pid] = (ticks, rss_bytes, comm, cmdline)
+        except OSError:
+            continue
+    return out
+
+
+def fmt_mem(n_bytes: int) -> str:
+    if n_bytes <= 0:
+        return "—"
+    gib = n_bytes / (1024**3)
+    if gib >= 1.0:
+        return f"{gib:.1f}G"
+    mib = round(n_bytes / (1024**2))
+    return f"{max(1, mib)}M"
+
+
+def fmt_cpu(pct: float) -> str:
+    if pct >= 10.0:
+        return f"{round(pct)}%"
+    return f"{pct:.1f}%"
+
+
+def main() -> None:
+    limit = 3
+    if len(sys.argv) > 1 and sys.argv[1].isdigit():
+        limit = max(1, min(8, int(sys.argv[1])))
+
+    t0 = time.monotonic()
+    s0 = snapshot()
+    time.sleep(SAMPLE_SECS)
+    t1 = time.monotonic()
+    s1 = snapshot()
+    dt = max(0.05, t1 - t0)
+
+    groups: dict[str, list[float]] = {}
+    for pid, (ticks1, rss1, comm, cmdline) in s1.items():
+        prev = s0.get(pid)
+        dticks = max(0, ticks1 - prev[0]) if prev is not None else 0
+        cpu_pct = (dticks / CLK_TCK) / dt * 100.0
+        if not cmdline and cpu_pct < 1.0:
+            continue
+        label = classify(comm, cmdline)
+        if not label:
+            continue
+        rec = groups.setdefault(label, [0.0, 0.0])
+        rec[0] += cpu_pct
+        rec[1] += rss1
+
+    ranked = sorted(
+        groups.items(),
+        key=lambda kv: (round(kv[1][0], 1), kv[1][1]),
+        reverse=True,
+    )
+    for label, (cpu_pct, rss_bytes) in ranked[:limit]:
+        print(f"{label}\t{fmt_cpu(cpu_pct)}\t{fmt_mem(int(rss_bytes))}")
+
+
+if __name__ == "__main__":
+    main()

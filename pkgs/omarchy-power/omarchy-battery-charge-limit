@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+# omarchy:summary=Read or set the battery charge upper threshold (daily cap vs 100% full).
+# omarchy:args=[get|daily|full|toggle|<50..100>]
+
+set -euo pipefail
+
+power_supply_path="${OMARCHY_POWER_SUPPLY_PATH:-/sys/class/power_supply}"
+action="${1:-get}"
+
+resolve_battery_dir() {
+  local cand
+  if [[ -e "$power_supply_path/macsmc-battery/charge_control_end_threshold" ]]; then
+    printf '%s\n' "$power_supply_path/macsmc-battery"
+    return 0
+  fi
+  for cand in "$power_supply_path"/BAT* "$power_supply_path"/*battery*; do
+    if [[ -e "$cand/charge_control_end_threshold" ]]; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+
+read_daily_limit() {
+  local f val
+  for f in \
+    "${OMARCHY_DAILY_CHARGE_LIMIT_FILE:-}" \
+    "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/daily-charge-limit" \
+    "/etc/omarchnix/daily-charge-limit"; do
+    [[ -n $f && -r $f ]] || continue
+    val=$(tr -d '[:space:]%' <"$f" 2>/dev/null || true)
+    if [[ $val =~ ^[0-9]+$ ]] && (( val >= 50 && val < 100 )); then
+      printf '%s\n' "$val"
+      return 0
+    fi
+  done
+  printf '90\n'
+}
+
+bat_dir=$(resolve_battery_dir) || {
+  [[ $action == "get" ]] && { printf '100\t90\t0\n'; exit 0; }
+  echo "Charge threshold control is not supported on this machine" >&2
+  exit 1
+}
+
+end_file="$bat_dir/charge_control_end_threshold"
+current=$(tr -d '[:space:]' <"$end_file" 2>/dev/null || echo 100)
+[[ $current =~ ^[0-9]+$ ]] || current=100
+daily=$(read_daily_limit)
+writable=0
+[[ -w $end_file ]] && writable=1
+
+case "$action" in
+  get)
+    printf '%s\t%s\t%s\n' "$current" "$daily" "$writable"
+    exit 0
+    ;;
+  daily)
+    target="$daily"
+    ;;
+  full)
+    target=100
+    ;;
+  toggle)
+    if (( current < 100 )); then
+      target=100
+    else
+      target="$daily"
+    fi
+    ;;
+  *)
+    cleaned="${action%%%}"
+    if [[ $cleaned =~ ^[0-9]+$ ]] && (( cleaned >= 50 && cleaned <= 100 )); then
+      target="$cleaned"
+    else
+      echo "Usage: omarchy-battery-charge-limit [get|daily|full|toggle|<50..100>]" >&2
+      exit 2
+    fi
+    ;;
+esac
+
+if (( writable == 0 )); then
+  echo "Cannot write $end_file (permission denied)" >&2
+  exit 1
+fi
+
+printf '%s\n' "$target" >"$end_file"
+omarchy-shell -q omarchy.power refresh >/dev/null 2>&1 || true

@@ -252,6 +252,48 @@ rustPlatform.buildRustPackage (finalAttrs: {
         --replace-quiet "/usr/bin/magick" "${imagemagick}/bin/magick" \
         --replace-quiet "/usr/bin/bash" "${bash}/bin/bash"
     done
+
+    # 6. Cloud / FUSE mount resilience (`fuse.rclone` iCloud Drive & Google Drive):
+    #    - Cold cloud folder listings (OAuth refresh, iCloud session re-auth, or Google API pacer backoff)
+    #      routinely take 5-12s; use `BULK_DEADLINE` (30s) for `list_dir`, raise `CALL_DEADLINE` to 15s,
+    #      shorten `STUCK_TTL` to 5s, and clear `stuck` immediately if a late worker finishes.
+    #    - Route `iomount::not_responding` ("<mount> is not responding.") to `share_silent` instead of
+    #      misreporting timeouts as "That folder could not be read."
+    #    - Prefer `rclone mount --devname <label>` over raw directory leaf names in the Network rail.
+    substituteInPlace src/backend/iomount.rs \
+      --replace-fail 'pub(crate) const CALL_DEADLINE: Duration = Duration::from_secs(5);' 'pub(crate) const CALL_DEADLINE: Duration = Duration::from_secs(15);' \
+      --replace-fail 'pub(crate) const BULK_DEADLINE: Duration = Duration::from_secs(15);' 'pub(crate) const BULK_DEADLINE: Duration = Duration::from_secs(30);' \
+      --replace-fail 'pub(super) const STUCK_TTL: Duration = Duration::from_secs(30);' 'pub(super) const STUCK_TTL: Duration = Duration::from_secs(5);' \
+      --replace-fail $'    let worker = std::sync::Arc::clone(&decided);\n    let (tx, rx) = std::sync::mpsc::channel();\n    std::thread::spawn(move || {\n        let value = f();\n        if worker.worker_claim() {\n            let _ = tx.send(value);\n        } else {\n            late(value);\n        }\n    });' $'    let worker = std::sync::Arc::clone(&decided);\n    let worker_mount = mount.clone();\n    let (tx, rx) = std::sync::mpsc::channel();\n    std::thread::spawn(move || {\n        let value = f();\n        if worker.worker_claim() {\n            let _ = tx.send(value);\n        } else {\n            clear_stuck(&worker_mount);\n            late(value);\n        }\n    });' \
+      --replace-fail 'call_with_flag(&path_buf, body, "scan", CALL_DEADLINE, STUCK_TTL,' 'call_with_flag(&path_buf, body, "scan", BULK_DEADLINE, STUCK_TTL,'
+
+    substituteInPlace crates/flea-gui/src/window/startup.rs \
+      --replace-fail 'pub const LISTING_WAIT_MS: u64 = 10_000;' 'pub const LISTING_WAIT_MS: u64 = 25_000;'
+
+    substituteInPlace src/ui_logic_status_feedback/errors.rs \
+      --replace-fail 'text.contains("timed out") || text.contains("timeout")' 'text.contains("timed out") || text.contains("timeout") || text.contains("is not responding")'
+
+    substituteInPlace src/ui_logic_network_shares/kernel_mounts.rs \
+      --replace-fail 'pub(super) fn rows(body: &str) -> Vec<(String, String)> {' 'pub(super) fn rows(body: &str) -> Vec<(String, String, String)> {' \
+      --replace-fail '.then(|| (latest.path.clone(), latest.fstype.clone()))' '.then(|| (latest.path.clone(), latest.fstype.clone(), latest.source.clone()))'
+
+    substituteInPlace src/ui_logic_network_shares/rail.rs \
+      --replace-fail $'    for (path, fstype) in super::kernel_mounts::rows(mountinfo) {\n        let lent = gio_kernel.iter().find(|row| row.path == path);\n        let uri = lent.map_or_else(|| path.clone(), |row| row.uri.clone());\n        let label = lent.map_or_else(|| mounts::leaf(&path), |row| row.label.clone());' $'    for (path, fstype, source) in super::kernel_mounts::rows(mountinfo) {\n        let lent = gio_kernel.iter().find(|row| row.path == path);\n        let uri = lent.map_or_else(|| path.clone(), |row| row.uri.clone());\n        let label = if fstype.eq_ignore_ascii_case("fuse.rclone") && !source.is_empty() && !source.contains(\':\') && !source.contains(\'/\') {\n            source\n        } else {\n            lent.map_or_else(|| mounts::leaf(&path), |row| row.label.clone())\n        };'
+
+    # 7. Hide inaccessible Apple Silicon firmware/recovery partitions (`iBootSystemContainer`,
+    #    `RecoveryOSContainer`, CoreStorage) and unmounted `apfs` containers (which Linux `udisks2`
+    #    / `gio mount` cannot mount, otherwise cluttering `DEVICES` with duplicate SSD model rows).
+    substituteInPlace src/ui_logic_device_rail/devices.rs \
+      --replace-fail '    if mount_of(n).is_empty() && fs.is_empty() {' '    if mount_of(n).is_empty() && (fs.is_empty() || fs == "apfs") {' \
+      --replace-fail '"426f6f74-0000-11aa-aa11-00306543ecac",' '"426f6f74-0000-11aa-aa11-00306543ecac", "69646961-6700-11aa-aa11-00306543ecac", "52637672-7900-11aa-aa11-00306543ecac", "53746f72-6167-11aa-aa11-00306543ecac", "5265636f-7665-11aa-aa11-00306543ecac",'
+
+    substituteInPlace ui/js/Devices.js \
+      --replace-fail '    if (fs === "swap" || fs.slice(-7) === "_member" || fs === "bcache" || fs === "ceph" || fs === "drbd")' '    if ((mountOf(n).length === 0 && fs === "apfs") || fs === "swap" || fs.slice(-7) === "_member" || fs === "bcache" || fs === "ceph" || fs === "drbd")' \
+      --replace-fail '"426f6f74-0000-11aa-aa11-00306543ecac",' '"426f6f74-0000-11aa-aa11-00306543ecac", "69646961-6700-11aa-aa11-00306543ecac", "52637672-7900-11aa-aa11-00306543ecac", "53746f72-6167-11aa-aa11-00306543ecac", "5265636f-7665-11aa-aa11-00306543ecac",'
+
+    substituteInPlace tools/flea-udisks \
+      --replace-fail '    if not block["Filesystem"] or block["IdUsage"] != "filesystem" or not block["IdType"]:' '    if not block["Filesystem"] or block["IdUsage"] != "filesystem" or not block["IdType"] or (not block["MountPoints"] and block["IdType"].lower() == "apfs"):' \
+      --replace-fail '"426f6f74-0000-11aa-aa11-00306543ecac",' '"426f6f74-0000-11aa-aa11-00306543ecac", "69646961-6700-11aa-aa11-00306543ecac", "52637672-7900-11aa-aa11-00306543ecac", "53746f72-6167-11aa-aa11-00306543ecac", "5265636f-7665-11aa-aa11-00306543ecac",'
   '';
 
   installPhase = ''
@@ -272,7 +314,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
       makeWrapper "${pythonWithGi}/bin/python3" "$out/lib/flea/$helper" \
         --add-flags "$out/lib/flea/.$helper-real" \
         --prefix GI_TYPELIB_PATH : "${giTypelibPath}" \
-        --prefix PATH : "$out/bin:${runtimeBinPath}:/run/current-system/sw/bin"
+        --prefix PATH : "/run/wrappers/bin:$out/bin:${runtimeBinPath}:/run/current-system/sw/bin"
     done
 
     install -Dm644 packaging/flea.portal -t "$out/share/xdg-desktop-portal/portals"
@@ -320,7 +362,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
       existing="$(patchelf --print-rpath "$bin")"
       patchelf --set-rpath "$existing:$rpath" "$bin"
       wrapProgram "$bin" \
-        --prefix PATH : "$out/bin:${runtimeBinPath}" \
+        --prefix PATH : "/run/wrappers/bin:$out/bin:${runtimeBinPath}" \
         --suffix PATH : "/run/current-system/sw/bin" \
         --prefix XDG_DATA_DIRS : "$out/share:${runtimeDataDirs}:/run/opengl-driver/share" \
         ${lib.optionalString (omarchySrc != null) ''--set-default OMARCHY_PATH "${omarchySrc}"''}

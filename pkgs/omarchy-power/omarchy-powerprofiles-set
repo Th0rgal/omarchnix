@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+
+# omarchy:summary=Set and remember the power profile for AC or battery use
+# omarchy:args=[autodetect|ac|battery] [power-saver|balanced|performance]
+
+action="${1:-autodetect}"
+requested_profile="${2:-}"
+
+usage() {
+  echo "Usage: omarchy-powerprofiles-set [autodetect|ac|battery] [power-saver|balanced|performance]" >&2
+  exit 1
+}
+
+(( $# <= 2 )) || usage
+
+case "$action" in
+  autodetect)
+    # Use the same signal as the shell (UPower.onBattery) so every entry point
+    # saves and restores the profile under the same ac/battery key.
+    if [[ $(busctl get-property org.freedesktop.UPower /org/freedesktop/UPower org.freedesktop.UPower OnBattery 2>/dev/null) == "b true" ]]; then
+      action=battery
+    else
+      action=ac
+    fi
+    ;;
+  ac | battery) ;;
+  *) usage ;;
+esac
+
+mapfile -t profiles < <(omarchy-powerprofiles-list)
+
+profile_available() {
+  [[ " ${profiles[*]} " == *" $1 "* ]]
+}
+
+is_apple_cpufreq=false
+if [[ -r /sys/devices/system/cpu/cpufreq/policy0/scaling_driver ]] &&
+   [[ $(</sys/devices/system/cpu/cpufreq/policy0/scaling_driver) == "apple-cpufreq" ]]; then
+  is_apple_cpufreq=true
+fi
+
+state_dir="${OMARCHY_POWERPROFILES_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/powerprofiles}"
+state_file="$state_dir/$action"
+
+if [[ -n $requested_profile ]]; then
+  profile_available "$requested_profile" || {
+    echo "Power profile is not available: $requested_profile" >&2
+    exit 1
+  }
+
+  profile="$requested_profile"
+elif [[ -r $state_file ]]; then
+  profile=$(<"$state_file")
+fi
+
+if [[ -z ${profile:-} ]] || ! profile_available "$profile"; then
+  if [[ $is_apple_cpufreq == "true" ]]; then
+    # Default fanless Apple Silicon Macs to cool, silent Balanced mode on both
+    # AC and battery until the user explicitly chooses Power-saver or Performance.
+    profile=balanced
+  elif [[ $action == "ac" ]] && profile_available performance; then
+    profile=performance
+  else
+    profile=balanced
+  fi
+fi
+
+pick_freq_le() {
+  local limit="$1"
+  shift
+  local best="" f
+  for f in "$@"; do
+    [[ $f =~ ^[0-9]+$ ]] || continue
+    if (( f <= limit )); then
+      best="$f"
+    fi
+  done
+  [[ -n $best ]] || best="${1:-}"
+  printf '%s' "$best"
+}
+
+pick_freq_max() {
+  local best="" f
+  for f in "$@"; do
+    [[ $f =~ ^[0-9]+$ ]] || continue
+    if [[ -z $best ]] || (( f > best )); then
+      best="$f"
+    fi
+  done
+  printf '%s' "$best"
+}
+
+apply_apple_silicon_profile() {
+  local target="$1"
+  local ppd_profile="balanced"
+  [[ $target == "power-saver" ]] && ppd_profile="power-saver"
+
+  # Notify power-profiles-daemon so Chromium/Helium/Electron PowerMonitor and
+  # GLib GPowerProfileMonitor clients toggle background Energy Saver timers.
+  powerprofilesctl set "$ppd_profile" >/dev/null 2>&1 || true
+
+  # 1. CPU cluster P-states & Avalanche boost (when sysfs is writable by wheel).
+  local boost_path="/sys/devices/system/cpu/cpufreq/boost"
+  if [[ $target == "performance" ]]; then
+    [[ -w $boost_path ]] && printf '1\n' >"$boost_path" 2>/dev/null || true
+  else
+    [[ -w $boost_path ]] && printf '0\n' >"$boost_path" 2>/dev/null || true
+  fi
+
+  local pol first_cpu cap avail_raw boost_raw target_khz
+  for pol in /sys/devices/system/cpu/cpufreq/policy*; do
+    [[ -w "$pol/scaling_max_freq" && -r "$pol/scaling_available_frequencies" ]] || continue
+    read -r first_cpu _ <"$pol/related_cpus"
+    cap=1024
+    if [[ -r "/sys/devices/system/cpu/cpu${first_cpu}/cpu_capacity" ]]; then
+      cap=$(<"/sys/devices/system/cpu/cpu${first_cpu}/cpu_capacity")
+    fi
+    read -r -a avail_raw <"$pol/scaling_available_frequencies"
+    boost_raw=()
+    [[ -r "$pol/scaling_boost_frequencies" ]] && read -r -a boost_raw <"$pol/scaling_boost_frequencies"
+
+    target_khz=""
+    if (( cap < 1024 )); then
+      # Blizzard / Sawtooth efficiency cluster
+      if [[ $target == "power-saver" ]]; then
+        target_khz=$(pick_freq_le 2050000 "${avail_raw[@]}")
+      else
+        target_khz=$(pick_freq_max "${avail_raw[@]}")
+      fi
+    else
+      # Avalanche / Everest performance cluster
+      case "$target" in
+        power-saver)
+          target_khz=$(pick_freq_le 1750000 "${avail_raw[@]}")
+          ;;
+        balanced)
+          target_khz=$(pick_freq_max "${avail_raw[@]}")
+          ;;
+        performance)
+          if (( ${#boost_raw[@]} > 0 )); then
+            target_khz=$(pick_freq_max "${avail_raw[@]}" "${boost_raw[@]}")
+          else
+            target_khz=$(pick_freq_max "${avail_raw[@]}")
+          fi
+          ;;
+      esac
+    fi
+
+    if [[ -n $target_khz ]]; then
+      printf '%s\n' "$target_khz" >"$pol/scaling_max_freq" 2>/dev/null || true
+    fi
+  done
+
+  # 2. Kernel Energy Aware Scheduler (EAS) utilization clamp on user app.slice:
+  # Clamping app.slice to 50% (< 55.76% Blizzard E-core capacity) packs desktop
+  # & coding-agent workloads onto efficiency cores cpu0..3 in Low Power Mode
+  # while keeping session.slice (Hyprland & Quickshell) unclamped for 60fps UI.
+  local uid
+  uid=$(id -u)
+  local app_uclamp="/sys/fs/cgroup/user.slice/user-${uid}.slice/user@${uid}.service/app.slice/cpu.uclamp.max"
+  if [[ -w $app_uclamp ]]; then
+    if [[ $target == "power-saver" ]]; then
+      printf '50.00\n' >"$app_uclamp" 2>/dev/null || true
+    else
+      printf 'max\n' >"$app_uclamp" 2>/dev/null || true
+    fi
+  fi
+
+  # 3. Hyprland compositor GPU bandwidth savings (1-pass vs 3-pass Kawase blur).
+  local rt_dir="${XDG_RUNTIME_DIR:-/run/user/${uid}}"
+  local sig="${HYPRLAND_INSTANCE_SIGNATURE:-}"
+  if [[ -z $sig ]] && command -v hyprctl >/dev/null 2>&1 && [[ -d "$rt_dir/hypr" ]]; then
+    sig=$(XDG_RUNTIME_DIR="$rt_dir" hyprctl instances -j 2>/dev/null | jq -r '.[0].instance // empty' 2>/dev/null || true)
+  fi
+  if [[ -n $sig ]] && command -v hyprctl >/dev/null 2>&1; then
+    local blur_passes=3
+    [[ $target == "power-saver" ]] && blur_passes=1
+    XDG_RUNTIME_DIR="$rt_dir" HYPRLAND_INSTANCE_SIGNATURE="$sig" \
+      hyprctl --quiet eval "hl.config({ decoration = { blur = { passes = ${blur_passes} } } })" >/dev/null 2>&1 || true
+  fi
+}
+
+mkdir -p "$state_dir"
+if [[ $is_apple_cpufreq == "true" ]]; then
+  apply_apple_silicon_profile "$profile"
+  printf '%s\n' "$profile" >"$state_dir/active"
+else
+  powerprofilesctl set "$profile" || exit
+  printf '%s\n' "$profile" >"$state_dir/active"
+fi
+
+if [[ -n $requested_profile ]]; then
+  printf '%s\n' "$requested_profile" >"$state_file"
+fi
+
+omarchy-shell -q battery refreshPowerProfile >/dev/null 2>&1 || true

@@ -4,6 +4,7 @@ import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
+import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
@@ -46,6 +47,28 @@ BarWidget {
   }
   readonly property string monitorName: root.monitor ? root.monitor.name : ""
 
+  // Connector -> block, synced by Omarchy's `default/hypr/monitor-workspaces.lua`.
+  property var blocks: ({})
+
+  function readBlocks(text) {
+    var next = {}
+    var lines = String(text || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var fields = lines[i].split("\t")
+      if (fields.length >= 3 && fields[1] !== "") next[fields[1]] = parseInt(fields[0], 10)
+    }
+    root.blocks = next
+  }
+
+  FileView {
+    path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/monitors/workspaces"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.readBlocks(text())
+    onLoadFailed: root.readBlocks("")
+  }
+
   function blockOf(id) {
     return Math.floor((id - 1) / root.slots)
   }
@@ -59,6 +82,8 @@ BarWidget {
   }
 
   readonly property int block: {
+    var assigned = root.blocks[root.monitorName]
+    if (assigned !== undefined) return assigned
     var active = root.activeWorkspaceId()
     return active > 0 ? root.blockOf(active) : 0
   }
@@ -80,7 +105,7 @@ BarWidget {
 
     for (var i = 0; i < values.length; i++) {
       var id = values[i].id
-      if (id <= 0) continue
+      if (id <= 0 || id >= 9000) continue
       if (root.blockOf(id) === root.block) {
         if (ids.indexOf(id) === -1) ids.push(id)
       } else if (values[i].monitor && values[i].monitor.name === root.monitorName) {
@@ -93,14 +118,34 @@ BarWidget {
     return ids.concat(guests)
   }
 
+  function dispatch(expression) {
+    if (root.bar) root.bar.run("hyprctl dispatch " + Util.shellQuote(expression))
+  }
+
   function focusWorkspace(id) {
-    if (!root.bar) return
-    root.bar.run("hyprctl dispatch " + Util.shellQuote("hl.dsp.focus({ workspace = " + Number(id) + " })"))
+    if (root.blockOf(id) === root.block && root.monitorName !== "") {
+      root.dispatch("function() if o and o.workspaces and o.workspaces.focus then o.workspaces.focus(" + root.slotOf(id) + ", " + JSON.stringify(root.monitorName) + ")() else hl.dispatch(hl.dsp.focus({ monitor = " + JSON.stringify(root.monitorName) + " })) hl.dispatch(hl.dsp.focus({ workspace = " + Number(id) + " })) end end")
+    } else {
+      root.dispatch("hl.dsp.focus({ workspace = " + Number(id) + " })")
+    }
   }
 
   function toggleMissionControl() {
     if (!root.bar) return
-    root.bar.run("omarchy-shell shell toggle io.github.joaovitor2763.mission-control '{}'")
+    var focusPrefix = ""
+    if (root.monitor && !root.monitor.focused && root.monitorName !== "") {
+      focusPrefix = "hyprctl dispatch " + Util.shellQuote("hl.dsp.focus({ monitor = " + JSON.stringify(root.monitorName) + " })") + " >/dev/null 2>&1 && "
+    }
+    root.bar.run(focusPrefix + "omarchy-shell shell toggle io.github.joaovitor2763.mission-control '{}'")
+  }
+
+  function cycleLayout() {
+    if (!root.bar) return
+    var command = "omarchy-hyprland-workspace-layout-toggle"
+    if (root.monitor && !root.monitor.focused && root.monitorName !== "") {
+      command = "hyprctl dispatch " + Util.shellQuote("hl.dsp.focus({ monitor = " + JSON.stringify(root.monitorName) + " })") + " >/dev/null 2>&1 && " + command
+    }
+    root.bar.run(command)
   }
 
   property real wheelAccumulator: 0
@@ -122,10 +167,18 @@ BarWidget {
     function onRawEvent(event) {
       var name = event ? String(event.name) : ""
       var switched = name === "workspacev2" && root.monitor !== null && root.monitor.focused
-      if (switched || name === "moveworkspacev2" || name === "changeworkspaceid") {
+      if (switched || name === "focusedmonv2" || name === "moveworkspacev2" || name === "changeworkspaceid" || name === "configreloaded") {
         Hyprland.refreshMonitors()
         Hyprland.refreshWorkspaces()
       }
+    }
+  }
+
+  ShellIpc {
+    target: "omarchy.workspaces"
+    function refresh(): void {
+      Hyprland.refreshMonitors()
+      Hyprland.refreshWorkspaces()
     }
   }
 
@@ -305,9 +358,9 @@ BarWidget {
           cursorShape: Qt.PointingHandCursor
           acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
           onClicked: function(mouse) {
-            if (mouse.button === Qt.RightButton || mouse.button === Qt.MiddleButton) {
-              root.toggleMissionControl()
-            } else if (chip.shown) {
+            if (mouse.button === Qt.MiddleButton) {
+              root.cycleLayout()
+            } else if (mouse.button === Qt.RightButton || chip.shown) {
               root.toggleMissionControl()
             } else {
               root.focusWorkspace(chip.modelData)

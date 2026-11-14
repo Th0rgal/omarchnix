@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchnix.mac-mesh",
+  "name": "Mac Mesh & Tether",
+  "version": "1.0.0",
+  "author": "Omarchnix",
+  "license": "MIT",
+  "description": "Sovereign Lean-Mesh status (Paloma, Umbrel Personal Mesh, MacBook Tether) with Touch ID mission approval, confined host/sandbox SSH toggle, and one-click localhost Next.js preview.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Mac Mesh",
+    "description": "Approve or revoke Orb mission tether leases with Touch ID and monitor Lean-Mesh planes.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

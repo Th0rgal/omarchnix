@@ -772,6 +772,9 @@ pkgs.writeShellApplication {
       if [[ -e /etc/brave/policies/managed ]] && command -v brave >/dev/null 2>&1 && pgrep -f 'brave-browser|BraveSoftware/Brave-Browser' >/dev/null 2>&1; then
         brave --refresh-platform-policy --no-startup-window </dev/null >/dev/null 2>&1 &
       fi
+      if [[ -e /etc/chromium/policies/managed ]] && command -v helium >/dev/null 2>&1 && pgrep -f '/helium/helium|net\.imput\.helium' >/dev/null 2>&1; then
+        helium --refresh-platform-policy --no-startup-window </dev/null >/dev/null 2>&1 &
+      fi
 
       pulse_hyprland_global_theme "$bg_hex"
     }

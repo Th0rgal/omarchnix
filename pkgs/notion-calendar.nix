@@ -1,7 +1,7 @@
 {
   lib,
   stdenvNoCC,
-  brave,
+  helium,
   makeWrapper,
 }:
 stdenvNoCC.mkDerivation {
@@ -27,10 +27,7 @@ stdenvNoCC.mkDerivation {
     </svg>
     SVG
 
-    makeWrapper ${brave}/bin/brave "$out/bin/notion-calendar" \
-      --add-flags "--ozone-platform=wayland" \
-      --add-flags "--enable-features=UseOzonePlatform,WaylandWindowDecorations,WebRTCPipeWireCapturer,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoEncoder" \
-      --add-flags "--enable-wayland-ime=true --wayland-text-input-version=3" \
+    makeWrapper ${helium}/bin/helium "$out/bin/notion-calendar" \
       --add-flags "--app=https://calendar.notion.so"
 
     cat > "$out/share/applications/notion-calendar.desktop" <<EOF
@@ -43,7 +40,7 @@ stdenvNoCC.mkDerivation {
     Terminal=false
     Type=Application
     Categories=Office;Calendar;
-    StartupWMClass=brave-calendar.notion.so__-Default
+    StartupWMClass=helium-calendar.notion.so__-Default
     EOF
     runHook postInstall
   '';

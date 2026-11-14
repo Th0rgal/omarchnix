@@ -309,21 +309,8 @@ PanelWindow {
     x: window.popupX(window.hoveredSlot, hoverTooltip)
     y: window.popupY(window.hoveredSlot, hoverTooltip, 4)
     radius: 9
-    color: Qt.rgba(
-      Commons.Color.popups.background.r,
-      Commons.Color.popups.background.g,
-      Commons.Color.popups.background.b,
-      0.92
-    )
-    borderSpec: Border.flat(
-      Qt.rgba(
-        Commons.Color.popups.text.r,
-        Commons.Color.popups.text.g,
-        Commons.Color.popups.text.b,
-        0.12
-      ),
-      1
-    )
+    color: Commons.Color.tooltip.background
+    borderSpec: Border.surfaceSpec("tooltip", "border", Commons.Color.tooltip.border, 1)
 
     Row {
       id: tooltipRow

@@ -50,7 +50,7 @@ Item {
   readonly property bool hasLiveSpace: liveWorkspace !== null || liveWindows.length > 0 || active
   property var frozenIsPlaceholder: null
   readonly property bool isPlaceholder: false
-  readonly property string spaceName: liveWorkspace ? String(liveWorkspace.name) : String(spaceId)
+  readonly property string spaceName: monitorView.labelForSpaceId(spaceId)
   readonly property var workspace: liveWorkspace || ({ id: spaceId, name: spaceName })
 
   readonly property bool windowDropHover: monitorView.dropTarget === spaceId

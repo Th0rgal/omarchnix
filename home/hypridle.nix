@@ -21,11 +21,16 @@ let
       pkgs.omarchy-shell
     else
       null;
+  tetherLockHook = lib.optionalString (cfg.macTether.enable or false
+  ) "; /run/current-system/sw/bin/mac-meshctl lock-event 'idle lock' >/dev/null 2>&1 || true";
   lockCmd =
-    if shellPkg != null then
-      "${shellPkg}/bin/omarchy-shell lock lock"
-    else
-      "${pkgs.hyprlock}/bin/hyprlock";
+    (
+      if shellPkg != null then
+        "${shellPkg}/bin/omarchy-shell lock lock"
+      else
+        "${pkgs.hyprlock}/bin/hyprlock"
+    )
+    + tetherLockHook;
   brightnessctl = "${pkgs.brightnessctl}/bin/brightnessctl";
   jq = "${pkgs.jq}/bin/jq";
   systemctl = "${pkgs.systemd}/bin/systemctl";

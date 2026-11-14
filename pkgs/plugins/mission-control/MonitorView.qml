@@ -14,6 +14,14 @@ PanelWindow {
 
   readonly property HyprlandMonitor monitor: Hyprland.monitorFor(screen)
   readonly property var activeWorkspace: monitor ? monitor.activeWorkspace : null
+  readonly property string monitorName: monitor ? monitor.name : ""
+  readonly property int slots: controller.slots
+  readonly property int monitorBlock: controller.blockForMonitor(
+    monitorName,
+    activeWorkspace && activeWorkspace.id > 0 ? activeWorkspace.id : 1
+  )
+  readonly property int blockBase: monitorBlock * slots + 1
+  readonly property int blockLimit: monitorBlock * slots + slots
 
   readonly property color accent: Commons.Color.accent
   readonly property color foreground: Commons.Color.foreground
@@ -84,47 +92,66 @@ PanelWindow {
   }
 
   readonly property int currentMaxSpaceId: {
-    var monName = monitor ? monitor.name : ""
+    var monName = monitorName
+    var base = blockBase
+    var limit = blockLimit
     var map = workspacesById
-    var maxId = activeWorkspace && activeWorkspace.id > 0 && activeWorkspace.id < 9000
-      ? activeWorkspace.id
-      : 1
+    var maxId = base
+    if (activeWorkspace && activeWorkspace.id >= base && activeWorkspace.id <= limit) {
+      maxId = activeWorkspace.id
+    }
     for (var k in map) {
       var w = map[k]
-      if ((!w.monitor || w.monitor.name === monName) && w.id > maxId) {
+      if (w.id >= base && w.id <= limit && (!w.monitor || w.monitor.name === monName) && w.id > maxId) {
         maxId = w.id
       }
     }
     for (var addr in pendingWindowMoves) {
       var mv = pendingWindowMoves[addr]
-      if (mv && mv.toId > maxId) maxId = mv.toId
+      if (mv && mv.toId >= base && mv.toId <= limit && mv.toId > maxId) maxId = mv.toId
     }
     return maxId
   }
 
   onCurrentMaxSpaceIdChanged: {
     if (controller.mapped) {
-      if (currentMaxSpaceId > sessionMaxSpaceId) sessionMaxSpaceId = currentMaxSpaceId
+      if (currentMaxSpaceId > sessionMaxSpaceId || sessionMaxSpaceId < blockBase || sessionMaxSpaceId > blockLimit) {
+        sessionMaxSpaceId = currentMaxSpaceId
+      }
     } else {
       sessionMaxSpaceId = currentMaxSpaceId
     }
   }
 
-  // Include every workspace number from 1..upper on this monitor, visualizing
-  // unused intermediate numbers while keeping newly-created workspaces (whose
-  // `monitor` field is momentarily null before IPC refresh) stable in-place.
+  onBlockBaseChanged: {
+    sessionMaxSpaceId = currentMaxSpaceId
+  }
+
+  // Include every workspace number from blockBase..upper in this monitor's 10-slot
+  // block, plus any visiting guest workspaces parked here while their monitor is unplugged.
   readonly property var liveSpaceIds: {
-    var monName = monitor ? monitor.name : ""
+    var monName = monitorName
+    var base = blockBase
+    var limit = blockLimit
     var map = workspacesById
-    var upper = Math.max(currentMaxSpaceId, controller.mapped ? sessionMaxSpaceId : 1)
+    var clampedSession = (sessionMaxSpaceId >= base && sessionMaxSpaceId <= limit) ? sessionMaxSpaceId : base
+    var upper = Math.min(limit, Math.max(base, currentMaxSpaceId, controller.mapped ? clampedSession : base))
     var ids = []
-    for (var id = 1; id <= upper; id++) {
+    for (var id = base; id <= upper; id++) {
       var existing = map[id]
       if (!existing || !existing.monitor || existing.monitor.name === monName) {
         ids.push(id)
       }
     }
-    return ids
+    var guests = []
+    for (var k in map) {
+      var gw = map[k]
+      if (gw && gw.id > 0 && gw.id < 9000 && (gw.id < base || gw.id > limit) && gw.monitor && gw.monitor.name === monName) {
+        guests.push(gw.id)
+      }
+    }
+    guests.sort(function(a, b) { return a - b })
+    return ids.concat(guests)
   }
 
   readonly property var spaceIds: spaceReordering && frozenSpaceIds !== null
@@ -132,11 +159,21 @@ PanelWindow {
     : liveSpaceIds
 
   readonly property int nextNewWorkspaceId: {
-    var ids = liveSpaceIds
-    var candidate = ids.length > 0 ? ids[ids.length - 1] + 1 : 1
+    var base = blockBase
+    var limit = blockLimit
     var map = workspacesById
-    while (map[candidate]) candidate++
-    return candidate
+    var highestOwn = base - 1
+    for (var i = 0; i < liveSpaceIds.length; i++) {
+      var sid = liveSpaceIds[i]
+      if (sid >= base && sid <= limit && sid > highestOwn) highestOwn = sid
+    }
+    var candidate = Math.max(base, highestOwn + 1)
+    while (candidate <= limit && map[candidate]) candidate++
+    if (candidate <= limit) return candidate
+    for (var id = base; id <= limit; id++) {
+      if (!map[id]) return id
+    }
+    return limit
   }
 
   function workspaceById(id) {
@@ -260,7 +297,7 @@ PanelWindow {
 
   function switchTo(workspace) {
     var same = activeWorkspace !== null && String(activeWorkspace.id) === String(workspace)
-    controller.switchWorkspaceAndDismiss(workspace, same)
+    controller.switchWorkspaceAndDismiss(workspace, same, monitorName)
   }
 
   function refreshHyprlandNow() {
@@ -297,7 +334,7 @@ PanelWindow {
 
   function closeEmptySpace(spaceId) {
     if (spaceReordering || spaceIds.length <= 1) return
-    sessionMaxSpaceId = Math.max(1, Math.max(currentMaxSpaceId, sessionMaxSpaceId) - 1)
+    sessionMaxSpaceId = Math.max(blockBase, Math.max(currentMaxSpaceId, sessionMaxSpaceId) - 1)
     controller.removeSpace(spaceId)
     refreshSoon.restart()
     refreshFollowUp.restart()
@@ -369,11 +406,19 @@ PanelWindow {
     return idx
   }
 
-  function previewSpaceLabel(index, fallbackName) {
+  function labelForSpaceId(id) {
     var map = workspacesById
+    var existing = map[id]
+    if (existing && existing.name && String(existing.name) !== String(id)) {
+      return String(existing.name)
+    }
+    return controller.slotLabelForWorkspace(id)
+  }
+
+  function previewSpaceLabel(index, fallbackName) {
     var names = spaceReordering && frozenSlotNames.length > 0
       ? frozenSlotNames
-      : spaceIds.map(function(id) { return map[id] ? String(map[id].name) : String(id) })
+      : spaceIds.map(function(id) { return labelForSpaceId(id) })
     var from = spaceDragIndex
     var to = spaceDropIndex
     if (from < 0 || to < 0 || from === to) {
@@ -398,7 +443,7 @@ PanelWindow {
     if (!map[ids[fromIndex]]) return false
 
     var emptyFlags = ids.map(function(id) { return !map[id] })
-    var slotNames = ids.map(function(id) { return map[id] ? String(map[id].name) : String(id) })
+    var slotNames = ids.map(function(id) { return labelForSpaceId(id) })
     var activeId = view.activeWorkspace ? view.activeWorkspace.id : -1
     var activeIdx = ids.indexOf(activeId)
 
@@ -780,8 +825,9 @@ PanelWindow {
         view.moveSelection(0, 1)
       } else if (k === Qt.Key_Backspace) {
         view.query = view.query.slice(0, -1)
-      } else if (view.query.length === 0 && k >= Qt.Key_1 && k <= Qt.Key_9) {
-        view.switchTo(k - Qt.Key_0)
+      } else if (view.query.length === 0 && ((k >= Qt.Key_1 && k <= Qt.Key_9) || k === Qt.Key_0)) {
+        var slot = k === Qt.Key_0 ? view.slots : (k - Qt.Key_0)
+        view.switchTo(view.monitorBlock * view.slots + slot)
       } else if (event.text.length === 1 && event.text >= " "
           && !(event.modifiers & (Qt.ControlModifier | Qt.MetaModifier | Qt.AltModifier))) {
         view.query += event.text

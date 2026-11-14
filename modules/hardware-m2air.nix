@@ -52,6 +52,18 @@ in
       description = "Apple SMC battery charge start threshold (%) written to macsmc-battery when present.";
     };
 
+    efficiencyCoreSteering = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Steer background daemons, real-time audio DSP (`PipeWire`, `WirePlumber`,
+        `speakerguardd-v2`), cloud FUSE mounts, and routine `nix-daemon` builds
+        toward the 4 Blizzard efficiency cores (`cpu0..3`) on MacBook Air M2 so
+        periodic wakeups leave the 4 Avalanche performance cores (`cpu4..7`) in
+        deep cluster power-down (`CPU PD`).
+      '';
+    };
+
     keyboardBacklight = {
       defaultBrightness = lib.mkOption {
         type = lib.types.nullOr (lib.types.ints.between 0 100);
@@ -141,6 +153,163 @@ in
             vaapi-support = true;
           };
         };
+
+        services.pipewire.wireplumber.configPackages = [
+          (pkgs.writeTextDir "share/wireplumber/scripts/linking/asahi-relink-rawmics.lua" ''
+            -- Ensure the Apple Silicon HPAI beamforming mic filter (`audio_effect.*-mic`,
+            -- `target.object = "alsa_input.platform-sound.RawMics"`) always links to
+            -- `RawMics` after lid close/open (`Internal Mic Jack`) or `s2idle` resume.
+            local cutils = require("common-utils")
+            local lutils = require("linking-utils")
+            local log = Log.open_topic("s-linking")
+
+            local pending_timer = nil
+
+            local function check_and_relink()
+              pending_timer = nil
+              local source = Plugin.find("standard-event-source")
+              if not source then
+                return
+              end
+              local om = source:call("get-object-manager", "session-item")
+              if not om then
+                return
+              end
+
+              local raw_si = nil
+              local filter_si = nil
+
+              for si in om:iterate({ type = "SiLinkable" }) do
+                local p = si.properties
+                local name = p["node.name"]
+                if name == "alsa_input.platform-sound.RawMics" then
+                  raw_si = si
+                elseif p["target.object"] == "alsa_input.platform-sound.RawMics" then
+                  filter_si = si
+                end
+              end
+
+              if not raw_si or not filter_si then
+                return
+              end
+
+              local existing_si_link = lutils.lookupLink(filter_si.id, raw_si.id)
+              local pw_linked = false
+              local filter_node_id = tonumber(filter_si.properties["node.id"])
+              local raw_node_id = tonumber(raw_si.properties["node.id"])
+              local links_om = source:call("get-object-manager", "link")
+              if links_om and filter_node_id and raw_node_id then
+                for l in links_om:iterate() do
+                  local lp = l.properties
+                  if tonumber(lp["link.output.node"]) == raw_node_id
+                      and tonumber(lp["link.input.node"]) == filter_node_id then
+                    pw_linked = true
+                    break
+                  end
+                end
+              end
+
+              if existing_si_link and pw_linked then
+                return
+              end
+
+              if existing_si_link then
+                existing_si_link:remove()
+              end
+
+              log:notice(filter_si, "RawMics filter unlinked; pushing select-target + rescan")
+              local flags = lutils:get_flags(filter_si.id)
+              flags.peer_id = nil
+              flags.failed_peer_id = nil
+              flags.failed_count = 0
+              source:call("push-event", "select-target", filter_si, nil)
+              source:call("schedule-rescan", "linking")
+            end
+
+            local function schedule_relink(delay_ms)
+              if pending_timer then
+                pending_timer:destroy()
+                pending_timer = nil
+              end
+              pending_timer = Core.timeout_add(delay_ms or 350, function()
+                check_and_relink()
+                return false
+              end)
+            end
+
+            SimpleEventHook({
+              name = "linking/asahi-relink-rawmics",
+              interests = {
+                EventInterest({
+                  Constraint({ "event.type", "=", "session-item-added" }),
+                  Constraint({ "event.session-item.interface", "=", "linkable" }),
+                }),
+                EventInterest({
+                  Constraint({ "event.type", "=", "device-params-changed" }),
+                  Constraint({ "event.subject.param-id", "c", "Route", "EnumRoute", "Profile" }),
+                }),
+              },
+              execute = function(event)
+                local eprops = event:get_properties()
+                if eprops["event.type"] == "session-item-added" then
+                  local si = event:get_subject()
+                  local p = si and si.properties
+                  if p then
+                    local name = p["node.name"]
+                    if name == "alsa_input.platform-sound.RawMics"
+                        or p["target.object"] == "alsa_input.platform-sound.RawMics"
+                        or (name and name:find("^pw%-cat"))
+                        or (name and name:find("^pw%-record")) then
+                      schedule_relink(250)
+                    end
+                  end
+                else
+                  schedule_relink(350)
+                end
+              end,
+            }):register()
+
+            schedule_relink(600)
+          '')
+          (
+            let
+              conf = pkgs.writeTextDir "share/wireplumber/wireplumber.conf.d/99-zz-asahi-mic.conf" ''
+                monitor.alsa.rules = [
+                  {
+                    matches = [
+                      { device.name = "~alsa_card.*", api.alsa.card.name = "~^Mac.* HPAI$" }
+                      { device.name = "~alsa_card.*", api.alsa.card.name = "MacBook Neo J700 AOP" }
+                    ]
+                    actions = {
+                      update-props = {
+                        api.acp.disable-pro-audio = true
+                      }
+                    }
+                  }
+                ]
+
+                wireplumber.components = [
+                  {
+                    name = linking/asahi-relink-rawmics.lua, type = script/lua
+                    provides = custom.asahi-relink-rawmics
+                  }
+                ]
+
+                wireplumber.profiles = {
+                  main = {
+                    custom.asahi-relink-rawmics = required
+                  }
+                }
+              '';
+            in
+            conf
+            // {
+              passthru = (conf.passthru or { }) // {
+                onlyConfigs = false;
+              };
+            }
+          )
+        ];
       }
     ))
 
@@ -208,13 +377,77 @@ in
         enable = true;
         algorithm = "zstd";
         memoryPercent = 50;
+        priority = 100;
+      };
+
+      # Bound concurrent Nix sandbox builds on 8-core / 16 GiB unified-memory M2 Air
+      # so parallel coding-agent evaluations/VMs/compiles cannot spawn 8 simultaneous
+      # multi-GiB `qemu` / `lean` / `rustc` derivations and exhaust RAM + swap.
+      nix.settings = {
+        max-jobs = lib.mkDefault 2;
+        cores = lib.mkDefault 4;
+      };
+
+      systemd.services.avahi-daemon.serviceConfig = lib.optionalAttrs cfg.efficiencyCoreSteering {
+        CPUAffinity = "0-3";
+      };
+      systemd.services.upower.serviceConfig = lib.optionalAttrs cfg.efficiencyCoreSteering {
+        CPUAffinity = "0-3";
+      };
+      systemd.services.bluetooth.serviceConfig = lib.optionalAttrs cfg.efficiencyCoreSteering {
+        CPUAffinity = "0-3";
+      };
+      systemd.services.power-profiles-daemon.serviceConfig =
+        lib.optionalAttrs cfg.efficiencyCoreSteering
+          {
+            CPUAffinity = "0-3";
+          };
+      systemd.services."container@".serviceConfig = lib.optionalAttrs cfg.efficiencyCoreSteering {
+        CPUAffinity = "0-3";
+      };
+
+      systemd.user.services = lib.optionalAttrs cfg.efficiencyCoreSteering (
+        lib.genAttrs
+          [
+            "pipewire"
+            "pipewire-pulse"
+            "wireplumber"
+            "speakerguardd-v2-session"
+            "murmure"
+            "rclone-apple"
+            "rclone-google"
+            "omarchy-quickshare"
+            "omarchnix-nearby"
+            "kdeconnect"
+            "kdeconnectd"
+            "kdeconnect-indicator"
+            "opencode"
+          ]
+          (_: {
+            serviceConfig.CPUAffinity = "0-3";
+          })
+      );
+
+      systemd.services.nix-daemon.serviceConfig = {
+        MemoryHigh = lib.mkDefault "10G";
+        CPUWeight = lib.mkDefault 25;
+        IOWeight = lib.mkDefault 25;
+      }
+      // lib.optionalAttrs cfg.efficiencyCoreSteering {
+        # Clamp nix-daemon utilization hint (`50% < 571/1024` Blizzard capacity)
+        # so Linux EAS packs routine background evaluations/builds onto E-cores
+        # (`cpu0..3`) first while still allowing spillover if all E-cores are full.
+        ExecStartPost = [
+          "+${pkgs.runtimeShell} -c 'echo 50.00 > /sys/fs/cgroup/system.slice/nix-daemon.service/cpu.uclamp.max 2>/dev/null || true'"
+        ];
       };
 
       # Tune VM & zstd ZRAM reclaim for Apple Silicon 16 KiB pages and unified memory:
       # - page-cluster = 0 avoids 128 KiB (8x 16 KiB) read-ahead decompression per fault
-      # - swappiness = 180 prefers fast in-RAM zstd compression over dropping NVMe page cache
+      # - swappiness = 100 balances fast in-RAM zstd ZRAM compression against keeping
+      #   warm V8/Electron anonymous heaps resident without excessive kswapd0 thrashing
       boot.kernel.sysctl = {
-        "vm.swappiness" = lib.mkDefault 180;
+        "vm.swappiness" = lib.mkDefault 100;
         "vm.page-cluster" = lib.mkDefault 0;
         "vm.watermark_boost_factor" = lib.mkDefault 0;
         "vm.watermark_scale_factor" = lib.mkDefault 125;
@@ -243,9 +476,24 @@ in
           pkgs.asahi-bless
         ];
 
+      environment.etc =
+        let
+          dailyLimit =
+            if cfg.chargeControlEndThreshold != null && cfg.chargeControlEndThreshold < 100 then
+              cfg.chargeControlEndThreshold
+            else
+              90;
+        in
+        {
+          "omarchnix/daily-charge-limit".text = "${toString dailyLimit}\n";
+        };
+
       systemd.tmpfiles.rules = [
         "d /usr/share/omarchy-platform 0755 root root - -"
         "L+ /usr/share/omarchy-platform/display-cutouts.json - - - - ${displayCutoutsJson}"
+        "z /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq 0664 root wheel - -"
+        "z /sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq 0664 root wheel - -"
+        "z /sys/devices/system/cpu/cpufreq/boost 0664 root wheel - -"
       ]
       ++ lib.optional (
         cfg.isoLayout != null
@@ -254,6 +502,9 @@ in
       services.udev.extraRules = ''
         SUBSYSTEM=="power_supply", KERNEL=="macsmc-battery", RUN+="${pkgs.coreutils}/bin/chgrp wheel /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold", RUN+="${pkgs.coreutils}/bin/chmod 0664 /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold"
         SUBSYSTEM=="leds", KERNEL=="*kbd_backlight*", RUN+="${pkgs.coreutils}/bin/chgrp wheel /sys%p/brightness", RUN+="${pkgs.coreutils}/bin/chmod 0664 /sys%p/brightness"
+        SUBSYSTEM=="cpu", KERNEL=="cpu0|cpu4", RUN+="${pkgs.runtimeShell} -c '${pkgs.coreutils}/bin/chgrp wheel /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true; ${pkgs.coreutils}/bin/chmod 0664 /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true'"
+        # Hide internal Apple Silicon iBoot, RecoveryOS, and SEP-encrypted APFS container partitions from desktop volume managers.
+        SUBSYSTEM=="block", KERNEL=="nvme0n*", ENV{ID_PART_ENTRY_TYPE}=="69646961-6700-11aa-aa11-00306543ecac|52637672-7900-11aa-aa11-00306543ecac|7c3457ef-0000-11aa-aa11-00306543ecac", ENV{UDISKS_IGNORE}="1"
       '';
 
       systemd.services.m2air-kbd-backlight = lib.mkIf (cfg.keyboardBacklight.defaultBrightness != null) {

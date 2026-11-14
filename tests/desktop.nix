@@ -14,7 +14,9 @@ assert !(vmConfig ? home-manager) || (vmConfig.home-manager.users == { });
 assert m2airConfig.home-manager.users ? thomas;
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.enable == true;
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.configType == "lua";
-assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.extraConfig == "";
+# extraConfig carries only the per-monitor Spaces runtime (bootstrap + runtime Lua).
+assert lib.hasInfix "OMARCHY_PATH"
+  m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.extraConfig;
 # UWSM owns graphical-session.target; HM's hyprland-session.target must stay off
 # or the generated startup exec stops the compositor a few seconds after login.
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.systemd.enable == false;
@@ -31,10 +33,15 @@ assert
 assert builtins.elem "pipewire.service" m2airConfig.systemd.user.services.xdg-desktop-portal.after;
 assert builtins.elem "wireplumber.service"
   m2airConfig.systemd.user.services.xdg-desktop-portal.after;
+assert m2airConfig.systemd.user.services.xdg-desktop-portal.enableDefaultPath == false;
+assert !(m2airConfig.systemd.user.services.xdg-desktop-portal.environment ? PATH);
 assert builtins.elem "pipewire.service"
   m2airConfig.systemd.user.services.xdg-desktop-portal-hyprland.after;
 assert builtins.elem "pipewire.service"
   m2airConfig.systemd.user.services.xdg-desktop-portal-hyprland.partOf;
+assert m2airConfig.systemd.user.services.xdg-desktop-portal-hyprland.enableDefaultPath == false;
+assert !(m2airConfig.systemd.user.services.xdg-desktop-portal-hyprland.environment ? PATH);
+assert m2airConfig.xdg.portal.xdgOpenUsePortal == true;
 assert m2airConfig.home-manager.users.thomas.xdg.configFile ? "hypr/xdph.conf";
 assert m2airConfig.fonts.enableDefaultPackages == false;
 assert m2airConfig.home-manager.users.thomas.gtk.font.name == "IBM Plex Sans";
@@ -55,6 +62,11 @@ assert
   == ":";
 assert m2airConfig.environment.etc ? "brave/policies/managed";
 assert m2airConfig.environment.etc ? "chromium/policies/managed";
+assert m2airConfig.omarchnix.desktop.widevine.enable == true;
+assert builtins.elem "widevine-cdm" m2airConfig.nixpkgs.config.allowUnfreePackages;
+assert m2airConfig.home-manager.users.thomas.programs.omarchnix.widevine.enable == true;
+assert m2airConfig.home-manager.users.thomas.programs.omarchnix.widevine.package != null;
+assert m2airConfig.home-manager.users.thomas.home.sessionVariables ? MOZ_GMP_PATH;
 assert
   m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.settings.config.input.kb_layout
   == "us";

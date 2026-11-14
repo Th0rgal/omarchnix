@@ -427,6 +427,8 @@ in
     ./sharing.nix
     ./mac-tether.nix
     ./flea.nix
+    ./cloud-mounts.nix
+    ./rbw.nix
     ./agents.nix
     ./fcitx5.nix
     ./foot.nix
@@ -441,8 +443,6 @@ in
     _module.args.theme = theme;
 
     home = {
-      username = lib.mkDefault "thomas";
-      homeDirectory = lib.mkDefault "/home/thomas";
       stateVersion = lib.mkDefault "25.05";
 
       pointerCursor = {

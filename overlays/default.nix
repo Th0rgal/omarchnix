@@ -136,6 +136,9 @@ in
   flea = final.callPackage ../pkgs/flea.nix {
     omarchySrc = inputs.omarchy;
   };
+  turbo-lean-guard-shims = final.callPackage ../pkgs/turbo-lean-guard-shims.nix { };
+  opencode-v2 = final.callPackage ../pkgs/opencode-v2.nix { };
+  signal-desktop-frameless = final.callPackage ../pkgs/signal-desktop-frameless.nix { };
   turbo-lean = final.callPackage ../pkgs/turbo-lean.nix {
     turboLeanSrc = inputs.turbo-lean;
   };

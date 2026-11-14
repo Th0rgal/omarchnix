@@ -53,27 +53,17 @@
     };
   };
 
-  # Google Antigravity and Widevine CDM ship as proprietary binaries; allow only
-  # those unfree packages rather than the whole unfree set.
-  nixpkgs.config.allowUnfreePackages = [
-    "antigravity-hub"
-    "widevine-cdm"
-  ];
+  # Widevine CDM ships as a proprietary binary; allow only that unfree package.
+  nixpkgs.config.allowUnfreePackages = [ "widevine-cdm" ];
 
   programs.firefox.enable = true;
 
+  # A minimal example desktop. Personal app sets belong in the consuming flake
+  # (see github.com/Th0rgal/nixos-config).
   environment.systemPackages = with pkgs; [
-    brave
-    bitwarden-desktop
-    bitwarden-cli
-    telegram-desktop
     age
-    restic
     rclone
-    turbo-lean
-    orb-desktop
-    notion-calendar
-    antigravity-hub
+    restic
   ];
 
   users.users.thomas = {

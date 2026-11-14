@@ -434,7 +434,9 @@ let
     DESKTOP_HOME = Path(${builtins.toJSON desktopHome})
     DISPATCH_WRAPPER = "/run/wrappers/bin/orb-tether-dispatch"
     CONFIGURED_CORE_URL = ${builtins.toJSON (if cfg.coreUrl != null then cfg.coreUrl else "")}
-    TOKEN_FILE = Path(${builtins.toJSON (if cfg.tokenFile != null then cfg.tokenFile else "/var/lib/mac-mesh/core.token")})
+    TOKEN_FILE = Path(${
+      builtins.toJSON (if cfg.tokenFile != null then cfg.tokenFile else "/var/lib/mac-mesh/core.token")
+    })
 
     HOSTED_FAILOVER_MAP = {
         "https://orbcore.thomas.md": [

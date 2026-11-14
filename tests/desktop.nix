@@ -15,7 +15,8 @@ assert m2airConfig.home-manager.users ? thomas;
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.enable == true;
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.configType == "lua";
 # extraConfig carries only the per-monitor Spaces runtime (bootstrap + runtime Lua).
-assert lib.hasInfix "OMARCHY_PATH" m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.extraConfig;
+assert lib.hasInfix "OMARCHY_PATH"
+  m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.extraConfig;
 # UWSM owns graphical-session.target; HM's hyprland-session.target must stay off
 # or the generated startup exec stops the compositor a few seconds after login.
 assert m2airConfig.home-manager.users.thomas.wayland.windowManager.hyprland.systemd.enable == false;

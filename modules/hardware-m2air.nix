@@ -302,7 +302,12 @@ in
                 }
               '';
             in
-            conf // { passthru = (conf.passthru or { }) // { onlyConfigs = false; }; }
+            conf
+            // {
+              passthru = (conf.passthru or { }) // {
+                onlyConfigs = false;
+              };
+            }
           )
         ];
       }
@@ -392,9 +397,11 @@ in
       systemd.services.bluetooth.serviceConfig = lib.optionalAttrs cfg.efficiencyCoreSteering {
         CPUAffinity = "0-3";
       };
-      systemd.services.power-profiles-daemon.serviceConfig = lib.optionalAttrs cfg.efficiencyCoreSteering {
-        CPUAffinity = "0-3";
-      };
+      systemd.services.power-profiles-daemon.serviceConfig =
+        lib.optionalAttrs cfg.efficiencyCoreSteering
+          {
+            CPUAffinity = "0-3";
+          };
       systemd.services."container@".serviceConfig = lib.optionalAttrs cfg.efficiencyCoreSteering {
         CPUAffinity = "0-3";
       };

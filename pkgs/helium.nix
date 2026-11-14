@@ -140,25 +140,24 @@ let
     gtk4
   ];
 
-  widevineBootstrap =
-    lib.optionalString (widevineCdm != null) ''
-      wv_dir="${widevineCdm}/share/google/chrome/WidevineCdm"
-      wv_ver="${widevineCdm.version or ""}"
-      cfg_dir="''${XDG_CONFIG_HOME:-$HOME/.config}/net.imput.helium"
-      mkdir -p "$cfg_dir/WidevineCdm"
-      hint_file="$cfg_dir/WidevineCdm/latest-component-updated-widevine-cdm"
-      if [ -n "$wv_ver" ]; then
-        desired_hint="{\"Path\":\"$wv_dir\",\"LastBundledVersion\":\"$wv_ver\"}"
-      else
-        desired_hint="{\"Path\":\"$wv_dir\"}"
-      fi
-      if [ ! -f "$hint_file" ] || [ "$(cat "$hint_file" 2>/dev/null || true)" != "$desired_hint" ]; then
-        tmp_hint="$(mktemp "$hint_file.XXXXXX")"
-        printf '%s\n' "$desired_hint" > "$tmp_hint"
-        chmod 0600 "$tmp_hint"
-        mv "$tmp_hint" "$hint_file"
-      fi
-    '';
+  widevineBootstrap = lib.optionalString (widevineCdm != null) ''
+    wv_dir="${widevineCdm}/share/google/chrome/WidevineCdm"
+    wv_ver="${widevineCdm.version or ""}"
+    cfg_dir="''${XDG_CONFIG_HOME:-$HOME/.config}/net.imput.helium"
+    mkdir -p "$cfg_dir/WidevineCdm"
+    hint_file="$cfg_dir/WidevineCdm/latest-component-updated-widevine-cdm"
+    if [ -n "$wv_ver" ]; then
+      desired_hint="{\"Path\":\"$wv_dir\",\"LastBundledVersion\":\"$wv_ver\"}"
+    else
+      desired_hint="{\"Path\":\"$wv_dir\"}"
+    fi
+    if [ ! -f "$hint_file" ] || [ "$(cat "$hint_file" 2>/dev/null || true)" != "$desired_hint" ]; then
+      tmp_hint="$(mktemp "$hint_file.XXXXXX")"
+      printf '%s\n' "$desired_hint" > "$tmp_hint"
+      chmod 0600 "$tmp_hint"
+      mv "$tmp_hint" "$hint_file"
+    fi
+  '';
 in
 stdenvNoCC.mkDerivation {
   inherit pname version;

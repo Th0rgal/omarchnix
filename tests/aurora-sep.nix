@@ -163,8 +163,8 @@ let
         aurora-sep = realPkgs.sep;
         aurora-xart = realPkgs.xart;
         aurora-fido = realPkgs.fido;
-        libfprint = realPkgs.libfprint;
-        fprintd = realPkgs.fprintd;
+        inherit (realPkgs) libfprint;
+        inherit (realPkgs) fprintd;
         aurora-touchid-rearm = mockRearm;
       }
     else

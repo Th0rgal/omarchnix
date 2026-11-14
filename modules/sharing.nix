@@ -19,18 +19,18 @@ let
       null;
 
   omdropPkg =
-    if pkgs ? omdrop then
-      pkgs.omdrop
-    else if (pkgs ? omarchnix) && (pkgs.omarchnix ? omdrop) then
-      pkgs.omarchnix.omdrop
-    else if (inputs ? omdrop-awdl) && (inputs ? omdrop-plugin) then
-      pkgs.callPackage ../pkgs/omdrop.nix {
-        omdropAwdlSrc = inputs.omdrop-awdl;
-        omdropPluginSrc = inputs.omdrop-plugin;
-        inherit buildPlugin omarchyShell;
-      }
-    else
-      null;
+    pkgs.omdrop or (
+      if (pkgs ? omarchnix) && (pkgs.omarchnix ? omdrop) then
+        pkgs.omarchnix.omdrop
+      else if (inputs ? omdrop-awdl) && (inputs ? omdrop-plugin) then
+        pkgs.callPackage ../pkgs/omdrop.nix {
+          omdropAwdlSrc = inputs.omdrop-awdl;
+          omdropPluginSrc = inputs.omdrop-plugin;
+          inherit buildPlugin omarchyShell;
+        }
+      else
+        null
+    );
 in
 {
   options.omarchnix.services.sharing = {

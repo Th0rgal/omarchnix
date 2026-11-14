@@ -166,20 +166,10 @@ in
     ]
     ++ lib.optional hasFprintd rbwTouchid;
 
-    home.activation.rbwPinentry = config.lib.dag.entryAfter [ "writeBoundary" ] ''
-      rbw_cfg="$HOME/.config/rbw/config.json"
-      mkdir -p "$HOME/.config/rbw"
-      if [ ! -s "$rbw_cfg" ] || [ -L "$rbw_cfg" ]; then
-        rm -f "$rbw_cfg"
-        printf '{}\n' > "$rbw_cfg"
-      fi
-      tmp_rbw="$(mktemp "$rbw_cfg.XXXXXX")"
-      if ${pkgs.jq}/bin/jq --arg p ${lib.escapeShellArg pinentry} '.pinentry = $p' "$rbw_cfg" > "$tmp_rbw"; then
-        chmod 600 "$tmp_rbw"
-        mv "$tmp_rbw" "$rbw_cfg"
-      else
-        rm -f "$tmp_rbw"
-      fi
-    '';
+    # rbw rewrites its own config (`rbw config set email ...`), so only pin `pinentry`.
+    programs.omarchnix.mutableJson.".config/rbw/config.json" = {
+      force.pinentry = pinentry;
+      mode = "0600";
+    };
   };
 }

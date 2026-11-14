@@ -741,13 +741,13 @@ in
             rules.auth = {
               unix.control = lib.mkForce "[success=ok new_authtok_reqd=ok default=2]";
               aurora-touchid-rearm = {
-                enable = unix.enable;
+                inherit (unix) enable;
                 order = unix.order + 1;
                 control = "optional";
                 modulePath = "${pkgs.aurora-touchid-rearm}/lib/security/pam_aurora_touchid.so";
               };
               aurora-touchid-rearm-done = {
-                enable = unix.enable;
+                inherit (unix) enable;
                 order = unix.order + 2;
                 control = "sufficient";
                 modulePath = "${pkgs.pam}/lib/security/pam_permit.so";

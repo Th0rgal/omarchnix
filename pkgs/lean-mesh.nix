@@ -85,7 +85,7 @@ let
   filteredOrbSrc = lib.cleanSourceWith {
     src = orbSrc;
     filter =
-      path: type:
+      path: _type:
       let
         base = baseNameOf (toString path);
         rel = lib.removePrefix (toString orbSrc + "/") (toString path);

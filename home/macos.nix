@@ -485,7 +485,7 @@ in
     wallpapers = {
       enable = lib.mkOption {
         type = lib.types.bool;
-        default = (mCfg.wallpapers.default != null || mCfg.wallpapers.workspaces != { });
+        default = mCfg.wallpapers.default != null || mCfg.wallpapers.workspaces != { };
         defaultText = lib.literalExpression "default != null || workspaces != {}";
         description = "Enable preloaded zero-latency per-Space wallpapers (`th0rgal.workspace-wallpapers`).";
       };

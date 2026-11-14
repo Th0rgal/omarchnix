@@ -2,8 +2,7 @@
 # Intentionally uses pure NixOS `fileSystems` + `boot.initrd.luks.devices`
 # (no `disko` GPT/partition declarations) so NixOS has zero capability to
 # create, modify, or wipe Apple Silicon GPT partition tables.
-{ ... }:
-{
+_: {
   boot.initrd.luks.devices.cryptroot = {
     device = "/dev/disk/by-uuid/aa0403dd-9917-49e1-85b1-46b21b39f2d9";
     allowDiscards = true;

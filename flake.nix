@@ -213,20 +213,20 @@
         rec {
           omarchy-shell = pkgs.omarchnix.omarchy-shell;
           omarchnix = pkgs.omarchnix.cli;
-          crispasr-cohere = pkgs.crispasr-cohere;
-          murmure = pkgs.murmure;
-          omdrop = pkgs.omdrop;
-          omarchy-quickshare = pkgs.omarchy-quickshare;
-          omarchy-nearby = pkgs.omarchy-nearby;
-          orb-agent-sync = pkgs.orb-agent-sync;
-          flea = pkgs.flea;
-          turbo-lean = pkgs.turbo-lean;
-          orb-desktop = pkgs.orb-desktop;
-          folio-desktop = pkgs.folio-desktop;
-          notion-calendar = pkgs.notion-calendar;
-          claude-desktop = pkgs.claude-desktop;
-          helium = pkgs.helium;
-          michelangelus-font = pkgs.michelangelus-font;
+          inherit (pkgs) crispasr-cohere;
+          inherit (pkgs) murmure;
+          inherit (pkgs) omdrop;
+          inherit (pkgs) omarchy-quickshare;
+          inherit (pkgs) omarchy-nearby;
+          inherit (pkgs) orb-agent-sync;
+          inherit (pkgs) flea;
+          inherit (pkgs) turbo-lean;
+          inherit (pkgs) orb-desktop;
+          inherit (pkgs) folio-desktop;
+          inherit (pkgs) notion-calendar;
+          inherit (pkgs) claude-desktop;
+          inherit (pkgs) helium;
+          inherit (pkgs) michelangelus-font;
           plugin-opencode-model-usage = pkgs.omarchnix.buildPlugin {
             src = inputs.omarchy-plugin-opencode-usage;
           };

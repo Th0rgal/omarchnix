@@ -1,0 +1,2 @@
+# `programs.a = ...; programs.b = ...;` is the idiomatic NixOS module style here.
+disabled = [ "repeated_keys" ]

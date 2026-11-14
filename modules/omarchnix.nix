@@ -553,12 +553,12 @@ in
     (lib.mkIf (cfg.enable && cfg.desktop.enable) (
       let
         michelangelusPkg =
-          if pkgs ? michelangelus-font then
-            pkgs.michelangelus-font
-          else if (pkgs ? omarchnix) && (pkgs.omarchnix ? michelangelus-font) then
-            pkgs.omarchnix.michelangelus-font
-          else
-            pkgs.callPackage ../pkgs/michelangelus-font.nix { };
+          pkgs.michelangelus-font or (
+            if (pkgs ? omarchnix) && (pkgs.omarchnix ? michelangelus-font) then
+              pkgs.omarchnix.michelangelus-font
+            else
+              pkgs.callPackage ../pkgs/michelangelus-font.nix { }
+          );
 
         hyprlandPortalPkg =
           if (pkgs ? omarchnix) && (pkgs.omarchnix ? xdg-desktop-portal-hyprland) then

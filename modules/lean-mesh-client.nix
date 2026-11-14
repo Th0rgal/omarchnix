@@ -11,15 +11,16 @@ let
   defaultLeanMeshPkg =
     if (pkgs ? omarchnix) && (pkgs.omarchnix ? lean-mesh) then
       pkgs.omarchnix.lean-mesh
-    else if pkgs ? sandboxed-sh then
-      pkgs.sandboxed-sh
-    else if inputs ? orb then
-      pkgs.callPackage ../pkgs/lean-mesh.nix {
-        orbSrc = inputs.orb;
-        turbo-lean = pkgs.turbo-lean or null;
-      }
     else
-      null;
+      pkgs.sandboxed-sh or (
+        if inputs ? orb then
+          pkgs.callPackage ../pkgs/lean-mesh.nix {
+            orbSrc = inputs.orb;
+            turbo-lean = pkgs.turbo-lean or null;
+          }
+        else
+          null
+      );
 
   leanMeshPkg = if cfg.package != null then cfg.package else defaultLeanMeshPkg;
 
@@ -539,7 +540,7 @@ in
     );
 
     systemd.tmpfiles.rules = lib.concatLists (
-      lib.mapAttrsToList (name: inst: [
+      lib.mapAttrsToList (_name: inst: [
         "d ${inst.stateDir} 0700 root root -"
         "d ${inst.stateDir}/psks 0700 root root -"
         "d /run/lean-mesh-${inst.interface} 0755 root root -"
@@ -584,7 +585,7 @@ in
       ) (lib.filterAttrs (_: inst: inst.roamingPeers != [ ]) enabledInstances));
 
     systemd.timers = lib.mapAttrs' (
-      name: inst:
+      name: _inst:
       lib.nameValuePair "lean-mesh-${name}-roam" {
         description = "Periodic roaming endpoint check for Lean-Mesh (${name})";
         wantedBy = [ "timers.target" ];

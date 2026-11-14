@@ -372,13 +372,13 @@ let
         if omarchnix ? buildTheme then
           omarchnix.importTheme {
             inherit name palette;
-            ui = shared.ui;
+            inherit (shared) ui;
           }
         else if omarchnix ? importTheme then
           (omarchnix.importTheme package)
           // {
             inherit name;
-            ui = shared.ui;
+            inherit (shared) ui;
           }
         else
           null;

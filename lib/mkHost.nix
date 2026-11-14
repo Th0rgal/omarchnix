@@ -23,6 +23,17 @@ let
     ;
   inherit (nixpkgs) lib;
 
+  # The omarchnix profile each platform implies, so hosts no longer set both.
+  platformProfile =
+    {
+      m2air-aurora = "asahi";
+      m2air-asahi = "asahi";
+      spark = "spark";
+      workstation = "workstation";
+      vm = "vm";
+    }
+    .${platform} or null;
+
   withAuroraOverlay = platform == "m2air-aurora";
   withAsahiOverlay = platform == "m2air-asahi";
 
@@ -58,6 +69,10 @@ lib.nixosSystem {
   ++ lib.optional withAuroraOverlay nixos-aurora.inputs.apple-silicon.nixosModules.default
   ++ lib.optional withAsahiOverlay apple-silicon-support.nixosModules.apple-silicon-support
   ++ lib.optional includeOmarchnixModule omarchnixModule
+  # Hosts built with the bundled module get their profile from `platform`.
+  ++ lib.optional (includeOmarchnixModule && platformProfile != null) {
+    omarchnix.profile = lib.mkDefault platformProfile;
+  }
   ++ lib.optional includeHomeManager home-manager.nixosModules.home-manager
   ++ lib.optional includeSops sops-nix.nixosModules.sops
   ++ modules;

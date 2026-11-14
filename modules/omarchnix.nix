@@ -311,7 +311,7 @@ in
     (lib.mkIf (cfg.enable && cfg.desktop.enable && cfg.desktop.autostartTty.enable) (
       let
         tty = cfg.desktop.autostartTty.tty;
-        user = if cfg.desktop.user != null then cfg.desktop.user else "thomas";
+        user = cfg.desktop.user;
         userGroup = config.users.users.${user}.group;
         runtimeDir = "/run/user/${toString config.users.users.${user}.uid}";
         unlockKeyring =
@@ -370,6 +370,13 @@ in
         );
       in
       {
+        assertions = [
+          {
+            assertion = cfg.desktop.user != null;
+            message = "omarchnix.desktop.autostartTty.enable needs omarchnix.desktop.user to name the session user.";
+          }
+        ];
+
         # getty.target pulls in autovt@tty1, which `switch-to-configuration`
         # starts on every activation and thereby kills the live session.
         systemd.targets.getty.wants = lib.mkForce [ ];
@@ -546,12 +553,12 @@ in
     (lib.mkIf (cfg.enable && cfg.desktop.enable) (
       let
         michelangelusPkg =
-          if pkgs ? michelangelus-font then
-            pkgs.michelangelus-font
-          else if (pkgs ? omarchnix) && (pkgs.omarchnix ? michelangelus-font) then
-            pkgs.omarchnix.michelangelus-font
-          else
-            pkgs.callPackage ../pkgs/michelangelus-font.nix { };
+          pkgs.michelangelus-font or (
+            if (pkgs ? omarchnix) && (pkgs.omarchnix ? michelangelus-font) then
+              pkgs.omarchnix.michelangelus-font
+            else
+              pkgs.callPackage ../pkgs/michelangelus-font.nix { }
+          );
 
         hyprlandPortalPkg =
           if (pkgs ? omarchnix) && (pkgs.omarchnix ? xdg-desktop-portal-hyprland) then

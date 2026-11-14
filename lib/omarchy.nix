@@ -130,7 +130,7 @@ let
   resolvePalette =
     rawAttrs: themeDir:
     let
-      raw = lib.mapAttrs (_: v: toString v) rawAttrs;
+      raw = lib.mapAttrs (_: toString) rawAttrs;
       pick =
         keys: default:
         let
@@ -313,16 +313,17 @@ let
       defaultSerifPkg =
         if pkgs == null then
           null
-        else if pkgs ? michelangelus-font then
-          pkgs.michelangelus-font
-        else if (pkgs ? omarchnix) && (pkgs.omarchnix ? michelangelus-font) then
-          pkgs.omarchnix.michelangelus-font
         else
-          pkgs.callPackage ../pkgs/michelangelus-font.nix { };
+          pkgs.michelangelus-font or (
+            if (pkgs ? omarchnix) && (pkgs.omarchnix ? michelangelus-font) then
+              pkgs.omarchnix.michelangelus-font
+            else
+              pkgs.callPackage ../pkgs/michelangelus-font.nix { }
+          );
     in
     {
       inherit name palette sourceDir;
-      mode = palette.mode;
+      inherit (palette) mode;
 
       fonts = lib.recursiveUpdate {
         sans = {

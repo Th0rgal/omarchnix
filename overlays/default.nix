@@ -54,12 +54,12 @@ in
     themes = omarchyLib.allBundledThemes final;
     buildTheme = args: omarchyLib.buildThemePkg ({ pkgs = final; } // args);
     buildPlugin = args: omarchyLib.buildPlugin ({ pkgs = final; } // args);
-    michelangelus-font = final.michelangelus-font;
-    omdrop = final.omdrop;
-    omarchy-quickshare = final.omarchy-quickshare;
-    omarchy-nearby = final.omarchy-nearby;
-    orb-agent-sync = final.orb-agent-sync;
-    flea = final.flea;
+    inherit (final) michelangelus-font;
+    inherit (final) omdrop;
+    inherit (final) omarchy-quickshare;
+    inherit (final) omarchy-nearby;
+    inherit (final) orb-agent-sync;
+    inherit (final) flea;
     lean-mesh-standalone = final.callPackage ../pkgs/lean-mesh.nix {
       orbSrc = inputs.orb-mesh or inputs.orb;
       inherit (final) turbo-lean;
@@ -76,7 +76,7 @@ in
             mkdir -p "$out/bin"
             ln -s "${final.sandboxed-sh}/bin/lean-mesh" "$out/bin/lean-mesh"
           '';
-    xdg-desktop-portal-hyprland = final.xdg-desktop-portal-hyprland;
+    inherit (final) xdg-desktop-portal-hyprland;
     plugins = {
       mac-mesh = final.omarchnix.buildPlugin {
         src = ../pkgs/plugins/omarchnix-mac-mesh;
@@ -136,6 +136,9 @@ in
   flea = final.callPackage ../pkgs/flea.nix {
     omarchySrc = inputs.omarchy;
   };
+  turbo-lean-guard-shims = final.callPackage ../pkgs/turbo-lean-guard-shims.nix { };
+  opencode-v2 = final.callPackage ../pkgs/opencode-v2.nix { };
+  signal-desktop-frameless = final.callPackage ../pkgs/signal-desktop-frameless.nix { };
   turbo-lean = final.callPackage ../pkgs/turbo-lean.nix {
     turboLeanSrc = inputs.turbo-lean;
   };

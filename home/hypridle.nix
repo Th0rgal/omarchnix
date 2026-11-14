@@ -15,12 +15,7 @@ let
   # second lock request: two requesters kept re-locking the session a few
   # seconds after every unlock and prompted for the password each time.
   shellPkg =
-    if (cfg.shell.package or null) != null then
-      cfg.shell.package
-    else if pkgs ? omarchy-shell then
-      pkgs.omarchy-shell
-    else
-      null;
+    if (cfg.shell.package or null) != null then cfg.shell.package else pkgs.omarchy-shell or null;
   tetherLockHook = lib.optionalString (cfg.macTether.enable or false
   ) "; /run/current-system/sw/bin/mac-meshctl lock-event 'idle lock' >/dev/null 2>&1 || true";
   lockCmd =

@@ -20,44 +20,44 @@ let
   omarchyShell = cfg.shell.package;
 
   defaultOmdropPkg =
-    if pkgs ? omdrop then
-      pkgs.omdrop
-    else if (pkgs ? omarchnix) && (pkgs.omarchnix ? omdrop) then
-      pkgs.omarchnix.omdrop
-    else if (inputs ? omdrop-awdl) && (inputs ? omdrop-plugin) then
-      pkgs.callPackage ../pkgs/omdrop.nix {
-        omdropAwdlSrc = inputs.omdrop-awdl;
-        omdropPluginSrc = inputs.omdrop-plugin;
-        inherit buildPlugin omarchyShell;
-      }
-    else
-      null;
+    pkgs.omdrop or (
+      if (pkgs ? omarchnix) && (pkgs.omarchnix ? omdrop) then
+        pkgs.omarchnix.omdrop
+      else if (inputs ? omdrop-awdl) && (inputs ? omdrop-plugin) then
+        pkgs.callPackage ../pkgs/omdrop.nix {
+          omdropAwdlSrc = inputs.omdrop-awdl;
+          omdropPluginSrc = inputs.omdrop-plugin;
+          inherit buildPlugin omarchyShell;
+        }
+      else
+        null
+    );
 
   defaultQuicksharePkg =
-    if pkgs ? omarchy-quickshare then
-      pkgs.omarchy-quickshare
-    else if (pkgs ? omarchnix) && (pkgs.omarchnix ? omarchy-quickshare) then
-      pkgs.omarchnix.omarchy-quickshare
-    else if inputs ? omarchy-quickshare then
-      pkgs.callPackage ../pkgs/omarchy-quickshare.nix {
-        omarchyQuickshareSrc = inputs.omarchy-quickshare;
-        inherit buildPlugin omarchyShell;
-      }
-    else
-      null;
+    pkgs.omarchy-quickshare or (
+      if (pkgs ? omarchnix) && (pkgs.omarchnix ? omarchy-quickshare) then
+        pkgs.omarchnix.omarchy-quickshare
+      else if inputs ? omarchy-quickshare then
+        pkgs.callPackage ../pkgs/omarchy-quickshare.nix {
+          omarchyQuickshareSrc = inputs.omarchy-quickshare;
+          inherit buildPlugin omarchyShell;
+        }
+      else
+        null
+    );
 
   defaultNearbyPkg =
-    if pkgs ? omarchy-nearby then
-      pkgs.omarchy-nearby
-    else if (pkgs ? omarchnix) && (pkgs.omarchnix ? omarchy-nearby) then
-      pkgs.omarchnix.omarchy-nearby
-    else if inputs ? omarchy-nearby then
-      pkgs.callPackage ../pkgs/omarchy-nearby.nix {
-        omarchyNearbySrc = inputs.omarchy-nearby;
-        inherit buildPlugin;
-      }
-    else
-      null;
+    pkgs.omarchy-nearby or (
+      if (pkgs ? omarchnix) && (pkgs.omarchnix ? omarchy-nearby) then
+        pkgs.omarchnix.omarchy-nearby
+      else if inputs ? omarchy-nearby then
+        pkgs.callPackage ../pkgs/omarchy-nearby.nix {
+          omarchyNearbySrc = inputs.omarchy-nearby;
+          inherit buildPlugin;
+        }
+      else
+        null
+    );
 
   defaultKdeconnectPkg =
     if (pkgs ? kdePackages) && (pkgs.kdePackages ? kdeconnect-kde) then

@@ -12,7 +12,6 @@
   boot.loader.grub.enable = lib.mkDefault false;
   boot.loader.efi.canTouchEfiVariables = lib.mkDefault false;
 
-  time.timeZone = "Europe/Paris";
   i18n.defaultLocale = "en_US.UTF-8";
   console.keyMap = "us";
 

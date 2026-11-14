@@ -70,11 +70,7 @@ let
     id: pluginCfg:
     let
       drv = pluginCfg.package;
-      manifest =
-        if drv ? pluginManifest then
-          drv.pluginManifest
-        else
-          builtins.fromJSON (builtins.readFile "${drv}/manifest.json");
+      manifest = drv.pluginManifest or (builtins.fromJSON (builtins.readFile "${drv}/manifest.json"));
       _ =
         if (manifest.id or "") != id then
           throw "programs.omarchnix.plugins.locked.'${id}': manifest.json id '${manifest.id or ""}' does not match attribute key '${id}'"
@@ -108,7 +104,7 @@ let
         hasNonBarKind
         effectiveSection
         ;
-      enable = pluginCfg.enable;
+      inherit (pluginCfg) enable;
     }
   ) cfg.plugins.locked;
 
@@ -117,13 +113,13 @@ let
     lib.concatMap (
       entry:
       if entry.enable && entry.isBarWidget && entry.effectiveSection == sectionName then
-        [ { id = entry.id; } ]
+        [ { inherit (entry) id; } ]
       else
         [ ]
     ) lockedPluginEntries;
 
   enabledNonBarPlugins = lib.concatMap (
-    entry: if entry.enable && entry.hasNonBarKind then [ { id = entry.id; } ] else [ ]
+    entry: if entry.enable && entry.hasNonBarKind then [ { inherit (entry) id; } ] else [ ]
   ) lockedPluginEntries;
 
   selectedBarOverride =

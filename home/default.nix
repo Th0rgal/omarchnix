@@ -10,22 +10,21 @@ let
   omarchySrc =
     if cfg.omarchySrc != null then
       cfg.omarchySrc
-    else if inputs ? omarchy then
-      inputs.omarchy
-    else if (pkgs ? omarchnix) && (pkgs.omarchnix ? omarchySrc) then
-      pkgs.omarchnix.omarchySrc
     else
-      null;
+      inputs.omarchy or (
+        if (pkgs ? omarchnix) && (pkgs.omarchnix ? omarchySrc) then pkgs.omarchnix.omarchySrc else null
+      );
 
   marketplaceSrc =
     if cfg.marketplaceSrc != null then
       cfg.marketplaceSrc
-    else if inputs ? omarchy-plugin-marketplace then
-      inputs.omarchy-plugin-marketplace
-    else if (pkgs ? omarchnix) && (pkgs.omarchnix ? marketplaceSrc) then
-      pkgs.omarchnix.marketplaceSrc
     else
-      null;
+      inputs.omarchy-plugin-marketplace or (
+        if (pkgs ? omarchnix) && (pkgs.omarchnix ? marketplaceSrc) then
+          pkgs.omarchnix.marketplaceSrc
+        else
+          null
+      );
 
   omarchyLib = import ../lib/omarchy.nix {
     inherit lib omarchySrc;
@@ -427,6 +426,9 @@ in
     ./sharing.nix
     ./mac-tether.nix
     ./flea.nix
+    ./cloud-mounts.nix
+    ./rbw.nix
+    ./mutable-json.nix
     ./agents.nix
     ./fcitx5.nix
     ./foot.nix
@@ -441,8 +443,6 @@ in
     _module.args.theme = theme;
 
     home = {
-      username = lib.mkDefault "thomas";
-      homeDirectory = lib.mkDefault "/home/thomas";
       stateVersion = lib.mkDefault "25.05";
 
       pointerCursor = {

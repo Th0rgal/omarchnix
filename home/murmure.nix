@@ -9,9 +9,7 @@ let
   mCfg = cfg.murmure;
 
   defaultMurmurePkg =
-    if pkgs ? murmure then
-      pkgs.murmure
-    else
+    pkgs.murmure or (
       let
         crispasr = pkgs.callPackage ../pkgs/crispasr-cohere.nix { };
         buildPlugin =
@@ -20,7 +18,8 @@ let
       pkgs.callPackage ../pkgs/murmure {
         crispasr-cohere = crispasr;
         inherit buildPlugin;
-      };
+      }
+    );
 
   murmurePkg = if mCfg.package != null then mCfg.package else defaultMurmurePkg;
   murmurePlugin = murmurePkg.passthru.plugin or null;

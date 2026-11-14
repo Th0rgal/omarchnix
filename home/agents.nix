@@ -150,12 +150,12 @@ let
     }) skillFiles;
 
   orbAgentSyncPkg =
-    if pkgs ? orb-agent-sync then
-      pkgs.orb-agent-sync
-    else if (pkgs ? omarchnix) && (pkgs.omarchnix ? orb-agent-sync) then
-      pkgs.omarchnix.orb-agent-sync
-    else
-      pkgs.callPackage ../pkgs/orb-agent-sync.nix { };
+    pkgs.orb-agent-sync or (
+      if (pkgs ? omarchnix) && (pkgs.omarchnix ? orb-agent-sync) then
+        pkgs.omarchnix.orb-agent-sync
+      else
+        pkgs.callPackage ../pkgs/orb-agent-sync.nix { }
+    );
 
   usageUpdateCmd =
     "${orbAgentSyncPkg}/bin/omarchy-orb-agent usage-update"

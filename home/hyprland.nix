@@ -58,6 +58,24 @@ let
       "/usr/share/omarchy";
   omarchyShellCmd =
     if omarchyShellBin != "" then "${omarchyShellBin}/omarchy-shell" else "omarchy-shell";
+  # One definition of the frosted-glass blur: used by the static config and
+  # re-applied after Omarchy's toggles (see below).
+  blurSettings = {
+    enabled = true;
+    size = 10;
+    passes = 3;
+    new_optimizations = true;
+    xray = false;
+    ignore_opacity = true;
+    contrast = 0.85;
+    brightness = 0.98;
+    noise = 0.014;
+    vibrancy = 0.25;
+    vibrancy_darkness = 0.25;
+    popups = true;
+    popups_ignorealpha = 0.05;
+    special = true;
+  };
   workspaceLayoutToggleCmd =
     if omarchyShellBin != "" then
       "${omarchyShellBin}/omarchy-hyprland-workspace-layout-toggle"
@@ -840,6 +858,10 @@ let
           pcall(dofile, user_monitors)
         end
         pcall(require, "default.hypr.toggles")
+        -- Omarchy's Glassy toggles (`default.hypr.glass`) reset blur to size 4 /
+        -- 2 passes each time they load. Put this config's blur back, so it is
+        -- the same at login as after a later reload or power-profile change.
+        hl.config({ decoration = { blur = ${lib.generators.toLua { } blurSettings} } })
       end
     ''}
   '';
@@ -981,22 +1003,7 @@ in
             render_power = 3;
             color = "rgba(00000066)";
           };
-          blur = {
-            enabled = true;
-            size = 10;
-            passes = 3;
-            new_optimizations = true;
-            xray = false;
-            ignore_opacity = true;
-            contrast = 0.85;
-            brightness = 0.98;
-            noise = 0.014;
-            vibrancy = 0.25;
-            vibrancy_darkness = 0.25;
-            popups = true;
-            popups_ignorealpha = 0.05;
-            special = true;
-          };
+          blur = blurSettings;
         };
 
         animations = {

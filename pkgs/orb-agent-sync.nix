@@ -42,6 +42,9 @@ stdenvNoCC.mkDerivation {
     runHook preCheck
     HOME="$TMPDIR/home" mkdir -p "$TMPDIR/home"
     HOME="$TMPDIR/home" "$out/bin/omarchy-orb-agent" --self-test
+    cp ${./test-orb-pending.py} test-orb-pending.py
+    cp ${./orb-agent-sync.py} orb-agent-sync.py
+    ${python3}/bin/python3 test-orb-pending.py
     runHook postCheck
   '';
 

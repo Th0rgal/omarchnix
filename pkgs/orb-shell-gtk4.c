@@ -178,6 +178,11 @@ int main(int argc, char **argv) {
         for (size_t i = 0; i < KEEP_N; ++i) { const char *v = getenv(keep[i]); if (v && (size_t)snprintf(kv[i], sizeof(kv[i]), "%s=%s", keep[i], v) < sizeof(kv[i])) envp[n++] = kv[i]; }
         envp[n] = NULL; execle(locald_bin, locald_bin, (char *)NULL, envp); _exit(127);
     }
+    char discovery[PATH_MAX] = "", temporary[PATH_MAX] = "";
+    if (locald_pid > 0 && lock_fd >= 0 && rt_dir && snprintf(discovery, sizeof(discovery), "%s/orb-locald.json", rt_dir) < (int)sizeof(discovery) && snprintf(temporary, sizeof(temporary), "%s/orb-locald.XXXXXX", rt_dir) < (int)sizeof(temporary)) {
+        int fd = mkstemp(temporary); char *escaped = json_escape_string(token);
+        if (fd >= 0) { fchmod(fd, 0600); if (escaped && dprintf(fd, "{\"port\":%u,\"token\":%s}\n", port, escaped) > 0 && fsync(fd) == 0) rename(temporary, discovery); close(fd); unlink(temporary); } free(escaped);
+    }
 #if defined(ORB_HAS_WEBKITGTK)
     g_set_prgname("orb-desktop"); g_setenv("GTK_USE_PORTAL", "1", FALSE); gtk_init();
     GMainLoop *loop = g_main_loop_new(NULL, FALSE); g_unix_signal_add(SIGTERM, on_quit_sig, loop); g_unix_signal_add(SIGINT, on_quit_sig, loop); g_unix_signal_add(SIGHUP, on_quit_sig, loop);
@@ -203,6 +208,7 @@ int main(int argc, char **argv) {
 #else
     (void)argc; (void)argv;
 #endif
+    if (*discovery) unlink(discovery);
     free(init_js);
     if (locald_pid > 0) {
         kill(locald_pid, SIGTERM); for (int i = 0; i < 25 && waitpid(locald_pid, NULL, WNOHANG) == 0; ++i) usleep(20000);

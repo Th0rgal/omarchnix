@@ -442,6 +442,128 @@ def send_notification(summary: str, body: str = "") -> None:
         pass
 
 
+def notification_rpc(method: str, *args: str) -> str:
+    result = subprocess.run(
+        ["omarchy-shell", "notifications", method, *args],
+        capture_output=True, text=True, timeout=5, check=True,
+    )
+    return result.stdout.strip()
+
+
+def approvals_unlocked() -> bool:
+    try:
+        return notification_rpc("approvalsAllowed") == "yes"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+class NoLocaldRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise RuntimeError("Local RPC redirect refused")
+
+
+def locald_rpc(command: str, args: dict[str, Any]) -> Any:
+    """Use the desktop launcher's private discovery file, never the Core JWT."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    if not runtime:
+        raise RuntimeError("No desktop runtime")
+    path = Path(runtime) / "orb-locald.json"
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd) as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+            raise RuntimeError("Unsafe local RPC discovery file")
+        connection = json.loads(stream.read(8192))
+    port, token = connection.get("port"), connection.get("token")
+    if type(port) is not int or not 1024 <= port <= 65535 or not isinstance(token, str) or len(token) < 32:
+        raise RuntimeError("Invalid local RPC connection")
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/__orb_rpc",
+        data=json.dumps({"command": command, "args": args}).encode(),
+        headers={"Content-Type": "application/json", "X-Orb-Token": token}, method="POST",
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoLocaldRedirect())
+    with opener.open(request, timeout=90 if command == "pending_requests_approve" else 10) as response:
+        envelope = json.load(response)
+    if not isinstance(envelope, dict) or envelope.get("error") or "result" not in envelope:
+        raise RuntimeError("Local RPC failed")
+    return envelope["result"]
+
+
+def pending_items(queue: Any) -> list[dict[str, Any]]:
+    if not isinstance(queue, dict) or not isinstance(queue.get("items"), list):
+        raise ValueError("Malformed approval queue")
+    items = []
+    seen = set()
+    for row in queue["items"]:
+        if not isinstance(row, dict) or row.get("kind") not in ("secret", "privilege", "mission_access"):
+            raise ValueError("Unknown approval kind")
+        fields = ("id", "tier", "target", "risk", "reason", "digest")
+        if any(not isinstance(row.get(key), str) for key in fields) or not row["id"] or not row["digest"]:
+            raise ValueError("Malformed approval item")
+        identity = (row["kind"], row["id"])
+        if identity in seen:
+            raise ValueError("Duplicate approval item")
+        seen.add(identity)
+        request = row.get("request")
+        if not isinstance(request, dict):
+            raise ValueError("Malformed approval scope")
+        # Only scope metadata, never secret values carried by a write request.
+        scope_fields = ("scope", "key", "project_id", "target_project_id", "all_projects",
+                        "target_host", "target_mission_id", "target_title", "allowed_unit",
+                        "ttl_minutes", "ttl_hours", "session_scoped")
+        detail = "\n".join(f"{key}: {request[key]}" for key in scope_fields
+                           if request.get(key) is not None)
+        if "allowed_units" in request:
+            detail += "\nallowed_units: " + json.dumps(request["allowed_units"], ensure_ascii=False)
+        blocked = (row["kind"] == "secret" and row["tier"] != "read") or (
+            row["kind"] == "privilege" and "allowed_units" in request and (
+                not isinstance(request["allowed_units"], list) or len(request["allowed_units"]) > 1))
+        items.append({key: row[key] for key in ("kind", *fields)} | {
+            "requester": str(row.get("requester_label") or row.get("requester_title") or row.get("requester_mission_id") or "Orb"),
+            "detail": detail,
+            "canApprove": not blocked,
+        })
+    return items
+
+
+def cmd_pending_update(argv: list[str]) -> int:
+    try:
+        if not approvals_unlocked():
+            return 0
+        items = pending_items(locald_rpc("pending_requests_list", {}))
+        notification_rpc("syncApprovals", json.dumps(items, ensure_ascii=False))
+        return 0
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        # A failed read is not an empty queue. Keep the last view for retry.
+        return 1
+
+
+def cmd_pending_approve(argv: list[str]) -> int:
+    if len(argv) != 3 or not approvals_unlocked():
+        return 1
+    kind, request_id, digest = argv
+    try:
+        items = pending_items(locald_rpc("pending_requests_list", {}))
+        if not any(i["kind"] == kind and i["id"] == request_id and i["digest"] == digest
+                   and i["canApprove"] for i in items):
+            raise RuntimeError("Request changed or expired")
+        if not approvals_unlocked():
+            return 1
+        # locald owns fingerprint authentication, signing, and the final lock check.
+        # Never retry a mutation or infer approval from transport success.
+        result = locald_rpc("pending_requests_approve", {
+            "kind": kind, "id": request_id, "expected_digest": digest,
+        })
+        print(json.dumps(result, ensure_ascii=False))
+        cmd_pending_update([])
+        return 0
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        if approvals_unlocked():
+            send_notification("Orb approval not completed", "Retry the request after checking Orb and the fingerprint reader.")
+        return 1
+
+
 def upstream_bin(script_name: str) -> str | None:
     up_dir = os.environ.get("OMARCHY_UPSTREAM_BIN_DIR", "").strip()
     if up_dir:
@@ -1271,6 +1393,7 @@ def should_probe_account(account: dict[str, Any], cached_usage: dict[str, Any] |
 
 
 def cmd_usage_update(argv: list[str]) -> int:
+    cmd_pending_update([])
     force = False
     limits_only = False
     orb_only = os.environ.get("OMARCHY_ORB_ONLY") == "1"
@@ -2395,7 +2518,7 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
         print(
-            "Usage: omarchy-orb-agent <usage-update|account-use|account-mode|account-rename|account-add|launch|prompt|--self-test> [args...]"
+            "Usage: omarchy-orb-agent <usage-update|pending-update|pending-approve|account-use|account-mode|account-rename|account-add|launch|prompt|--self-test> [args...]"
         )
         return 0
 
@@ -2405,6 +2528,12 @@ def main(argv: list[str] | None = None) -> int:
         return run_self_test()
     if sub == "usage-update":
         return cmd_usage_update(rest)
+    if sub == "pending-update":
+        return cmd_pending_update(rest)
+    if sub == "pending-approve":
+        return cmd_pending_approve(rest)
+    if sub == "pending-open":
+        return 0 if approvals_unlocked() and focus_or_spawn_orb() else 1
     if sub == "account-use":
         return cmd_account_use(rest)
     if sub == "account-mode":

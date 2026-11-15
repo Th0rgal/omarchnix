@@ -63,6 +63,10 @@
   xdg-utils,
   zlib,
   commandLineArgs ? [ ],
+  # VA-API video decode with zero-copy GL import. Turn off where the VA-API
+  # driver is unreliable: decode then runs on the CPU while compositing stays
+  # on the GPU. Widevine (L3) decodes in software either way.
+  hardwareVideoDecode ? true,
 }:
 let
   pname = "helium";
@@ -139,6 +143,18 @@ let
     gtk3
     gtk4
   ];
+
+  videoFlags =
+    if hardwareVideoDecode then
+      [
+        "--enable-zero-copy"
+        "--enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoEncoder,TouchpadOverscrollHistoryNavigation,OverlayScrollbar"
+      ]
+    else
+      [
+        "--disable-accelerated-video-decode"
+        "--enable-features=TouchpadOverscrollHistoryNavigation,OverlayScrollbar"
+      ];
 
   widevineBootstrap = lib.optionalString (widevineCdm != null) ''
     wv_dir="${widevineCdm}/share/google/chrome/WidevineCdm"
@@ -219,8 +235,7 @@ stdenvNoCC.mkDerivation {
       --suffix PATH : "${lib.makeBinPath [ xdg-utils ]}" \
       ${lib.optionalString (widevineCdm != null) "--run ${lib.escapeShellArg widevineBootstrap}"} \
       --add-flags "--password-store=gnome-libsecret" \
-      --add-flags "--enable-zero-copy" \
-      --add-flags "--enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoEncoder,TouchpadOverscrollHistoryNavigation,OverlayScrollbar" \
+      --add-flags ${lib.escapeShellArg (lib.escapeShellArgs videoFlags)} \
       --add-flags "--disable-features=OutdatedBuildDetector,UseChromeOSDirectVideoDecoder" \
       --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --enable-wayland-ime=true --wayland-text-input-version=3}}" \
       ${lib.optionalString (

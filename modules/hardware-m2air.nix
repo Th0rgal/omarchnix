@@ -154,6 +154,21 @@ in
           };
         };
 
+        # The AVD VA-API driver dropped the memory Chromium exports before the
+        # first decode and freed frames on vaDestroyContext(), so Helium showed
+        # green video. Patch it so Chromium-based browsers get working AVD
+        # hardware decode (H.264/HEVC/VP9). mkAfter: runs after the overlay
+        # that defines the package.
+        nixpkgs.overlays = lib.mkAfter [
+          (_final: prev: {
+            libva-v4l2_request-sofus13 = prev.libva-v4l2_request-sofus13.overrideAttrs (old: {
+              patches = (old.patches or [ ]) ++ [
+                ../pkgs/patches/libva-v4l2-request-avd-exported-surfaces.patch
+              ];
+            });
+          })
+        ];
+
         services.pipewire.wireplumber.configPackages = [
           (pkgs.writeTextDir "share/wireplumber/scripts/linking/asahi-relink-rawmics.lua" ''
             -- Ensure the Apple Silicon HPAI beamforming mic filter (`audio_effect.*-mic`,

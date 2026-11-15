@@ -1,0 +1,294 @@
+libva-v4l2_request (sofus13 1.3): keep frames visible to clients that hold
+exported surfaces (fixes green video in Chromium/Helium on Apple AVD).
+
+1. Chromium exports every VA surface once, before its first decode, and then
+   displays that dma-buf. The driver handed out zeroed standalone backing for
+   the unbound surface and dropped it on first bind, decoding into a separate
+   CAPTURE buffer, so Chromium only ever showed zeros (green). Backing that was
+   really exported is now kept and each decode is copied into it at
+   vaEndPicture() (synchronously, with dma-buf cache sync).
+
+2. vaDestroyContext() freed every CAPTURE buffer, so surfaces the client still
+   held (end of stream, resolution change) lost their pixels. Decodes are now
+   finished and the buffer's dma-buf is handed over to the surface first.
+
+--- a/src/context.c
++++ b/src/context.c
+@@ -335,6 +335,65 @@
+ 	}
+ }
+ 
++/*
++ * VA surfaces outlive the context that decoded into them: a client may keep
++ * showing (or read back) a frame after vaDestroyContext(), e.g. across a
++ * resolution change or at end of stream. Before the CAPTURE pool is torn
++ * down, finish every decode still bound to a surface and hand the buffer's
++ * dma-buf over to the surface as standalone backing. The exported dma-buf
++ * keeps the vb2 memory alive after STREAMOFF and close(), so the pixels stay
++ * valid; without this the surface fell back to fresh zeroed backing, which
++ * shows as a green frame.
++ */
++static void preserve_bound_surfaces(struct v4l2r_context *ctx)
++{
++	for (unsigned int i = 0; i < ctx->nb_captures; i++) {
++		struct v4l2r_capture_buffer *capture = &ctx->captures[i];
++		struct v4l2r_surface *surface = capture->surface;
++		struct v4l2r_surface_backing *backing;
++		struct v4l2r_frame_view view;
++
++		if (!surface || surface->capture_index != (int)i)
++			continue;
++
++		/* Submit any held frame, wait for the decode and conversion. */
++		if (v4l2r_surface_ready(surface) != VA_STATUS_SUCCESS)
++			continue;
++
++		/* With a conversion chain the client-visible pixels already
++		 * live in the surface's own backing. */
++		if (ctx->conv || surface->backing)
++			continue;
++
++		if (v4l2r_surface_capture_view(surface, false, &view) !=
++		    VA_STATUS_SUCCESS)
++			continue;
++
++		backing = calloc(1, sizeof(*backing));
++		if (!backing)
++			continue;
++
++		backing->pixelformat = view.pixelformat;
++		backing->width = view.width;
++		backing->height = view.height;
++		backing->pitch = view.pitch;
++		backing->nb_planes = view.nb_planes;
++		for (unsigned int p = 0; p < VIDEO_MAX_PLANES; p++)
++			backing->dmabuf_fd[p] = -1;
++		for (unsigned int p = 0; p < view.nb_planes; p++) {
++			backing->plane_size[p] = view.plane_size[p];
++			/* Steal the fd; capture_buffer_cleanup() skips -1. */
++			backing->dmabuf_fd[p] = capture->dmabuf_fd[p];
++			capture->dmabuf_fd[p] = -1;
++		}
++
++		surface->backing = backing;
++		v4l2r_trace("preserve surface 0x%08x: CAPTURE buffer #%u "
++			    "handed over as standalone backing\n",
++			    surface->id, i);
++	}
++}
++
+ static void free_list_push(struct v4l2r_context *ctx, int index)
+ {
+ 	unsigned int tail = (ctx->free_head + ctx->free_count) %
+@@ -646,8 +705,10 @@
+ 	/* The decode context provides the real storage now; drop any
+ 	 * standalone backing from pre-decode export probing. With a
+ 	 * conversion chain the backing IS the presented storage - keep it
+-	 * (v4l2r_surface_convert_backing replaces a mismatched one). */
+-	if (!ctx->conv)
++	 * (v4l2r_surface_convert_backing replaces a mismatched one). Backing
++	 * a client actually exported is kept too: the client may display that
++	 * dma-buf, so decodes are published into it at vaEndPicture(). */
++	if (!ctx->conv && !(surface->backing && surface->backing->exported))
+ 		v4l2r_surface_free_backing(surface);
+ 
+ 	if (starting) {
+@@ -883,6 +944,9 @@
+ 	if (!ctx)
+ 		return VA_STATUS_ERROR_INVALID_CONTEXT;
+ 
++	if (ctx->video_fd >= 0 && ctx->streaming)
++		preserve_bound_surfaces(ctx);
++
+ 	if (ctx->video_fd >= 0 && ctx->streaming) {
+ 		type = ctx->output_format.type;
+ 		ioctl(ctx->video_fd, VIDIOC_STREAMOFF, &type);
+@@ -1005,6 +1069,17 @@
+ 	status = ctx->vpp ? v4l2r_vpp_end_picture(ctx) :
+ 		 ctx->codec->end_picture(ctx);
+ 
++	/* Clients such as Chromium export every surface once, before its
++	 * first decode, and then display that dma-buf without syncing. Make
++	 * the decoded frame land in that exported memory before returning. */
++	if (status == VA_STATUS_SUCCESS && !ctx->vpp && ctx->pic.target &&
++	    ctx->pic.target->backing && ctx->pic.target->backing->exported) {
++		VAStatus publish = v4l2r_surface_publish_backing(ctx->pic.target);
++		if (publish != VA_STATUS_SUCCESS)
++			v4l2r_log("failed to publish surface 0x%08x to its "
++				  "exported backing\n", ctx->pic.target->id);
++	}
++
+ 	ctx->in_picture = false;
+ 	ctx->pic.output = NULL;
+ 	ctx->pic.target = NULL;
+--- a/src/surface.c
++++ b/src/surface.c
+@@ -18,6 +18,8 @@
+ #include <sys/mman.h>
+ #include <unistd.h>
+ 
++#include <linux/dma-buf.h>
++
+ #include <linux/videodev2.h>
+ 
+ #include <drm_fourcc.h>
+@@ -611,7 +613,8 @@
+ 		    v4l2r_surface_convert_backing(drv, surface) !=
+ 		    VA_STATUS_SUCCESS)
+ 			return VA_STATUS_ERROR_OPERATION_FAILED;
+-	} else if (surface->ctx && surface->capture_index >= 0) {
++	} else if (surface->ctx && surface->capture_index >= 0 &&
++		   !(surface->backing && surface->backing->exported)) {
+ 		return v4l2r_surface_capture_view(surface, need_maps, view);
+ 	}
+ 
+@@ -655,6 +658,109 @@
+ 	return VA_STATUS_SUCCESS;
+ }
+ 
++static void dmabuf_sync(int fd, uint64_t flags)
++{
++	struct dma_buf_sync sync = { .flags = flags };
++
++	if (fd < 0)
++		return;
++	while (ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) < 0 &&
++	       (errno == EINTR || errno == EAGAIN))
++		;
++}
++
++/* Base pointer and pitch of plane @plane (0 = luma, 1 = chroma) of a linear
++ * NV12/P010 view, contiguous or with one memory plane per component. */
++static uint8_t *linear_plane(const struct v4l2r_frame_view *view,
++			     unsigned int plane, int *fd)
++{
++	if (view->nb_planes >= 2) {
++		*fd = view->dmabuf_fd[plane];
++		return view->map[plane];
++	}
++	*fd = view->dmabuf_fd[0];
++	return (uint8_t *)view->map[0] +
++	       (plane ? (size_t)view->pitch * view->height : 0);
++}
++
++VAStatus v4l2r_surface_publish_backing(struct v4l2r_surface *surface)
++{
++	struct v4l2r_surface_backing *backing = surface->backing;
++	struct v4l2r_frame_view src, dst;
++	VAStatus status;
++
++	if (!backing || !backing->exported || !surface->ctx ||
++	    surface->ctx->conv || surface->capture_index < 0)
++		return VA_STATUS_SUCCESS;
++
++	uint64_t t0 = v4l2r_now_ns();
++
++	status = v4l2r_sync_capture(surface->ctx, surface->capture_index);
++	if (status != VA_STATUS_SUCCESS)
++		return status;
++
++	status = v4l2r_surface_capture_view(surface, true, &src);
++	if (status != VA_STATUS_SUCCESS)
++		return status;
++
++	memset(&dst, 0, sizeof(dst));
++	dst.info = v4l2r_format_by_pixelformat(backing->pixelformat);
++	dst.pixelformat = backing->pixelformat;
++	dst.width = backing->width;
++	dst.height = backing->height;
++	dst.pitch = backing->pitch;
++	dst.nb_planes = backing->nb_planes;
++	for (unsigned int i = 0; i < backing->nb_planes; i++) {
++		if (!backing->map[i]) {
++			void *addr = mmap(NULL, backing->plane_size[i],
++					  PROT_READ | PROT_WRITE, MAP_SHARED,
++					  backing->dmabuf_fd[i], 0);
++			if (addr == MAP_FAILED)
++				return VA_STATUS_ERROR_OPERATION_FAILED;
++			backing->map[i] = addr;
++		}
++		dst.map[i] = backing->map[i];
++		dst.dmabuf_fd[i] = backing->dmabuf_fd[i];
++		dst.plane_size[i] = backing->plane_size[i];
++	}
++
++	/* Only plain linear 4:2:0 layouts of the same format are copied. */
++	if (!src.info || !dst.info ||
++	    src.info->drm_format != dst.info->drm_format ||
++	    src.info->drm_modifier != DRM_FORMAT_MOD_LINEAR ||
++	    dst.info->drm_modifier != DRM_FORMAT_MOD_LINEAR ||
++	    (src.info->drm_format != DRM_FORMAT_NV12 &&
++	     src.info->drm_format != DRM_FORMAT_P010))
++		return VA_STATUS_ERROR_UNSUPPORTED_RT_FORMAT;
++
++	uint32_t rows = src.height < dst.height ? src.height : dst.height;
++	uint32_t row_bytes = src.pitch < dst.pitch ? src.pitch : dst.pitch;
++
++	for (unsigned int p = 0; p < 2; p++) {
++		int sfd, dfd;
++		uint8_t *s = linear_plane(&src, p, &sfd);
++		uint8_t *d = linear_plane(&dst, p, &dfd);
++		uint32_t n = p ? (rows + 1) / 2 : rows;
++
++		dmabuf_sync(sfd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ);
++		dmabuf_sync(dfd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE);
++		if (src.pitch == dst.pitch) {
++			memcpy(d, s, (size_t)src.pitch * n);
++		} else {
++			for (uint32_t y = 0; y < n; y++)
++				memcpy(d + (size_t)y * dst.pitch,
++				       s + (size_t)y * src.pitch, row_bytes);
++		}
++		dmabuf_sync(dfd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE);
++		dmabuf_sync(sfd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ);
++	}
++
++	v4l2r_trace("publish surface 0x%08x buf #%d -> exported backing: "
++		    "%.2f ms\n", surface->id, surface->capture_index,
++		    (v4l2r_now_ns() - t0) / 1e6);
++	return VA_STATUS_SUCCESS;
++}
++
+ /*
+  * Describe the surface memory layout for DRM consumers, following the
+  * layout rules of the FFmpeg v4l2-request hwcontext.
+@@ -787,6 +893,13 @@
+ 	if (status != VA_STATUS_SUCCESS)
+ 		return status;
+ 
++	/* Standalone backing handed out here (e.g. Chromium exports every
++	 * surface before its first decode and keeps the dma-buf) must stay
++	 * the surface's storage; see v4l2r_surface_publish_backing(). */
++	if (surface->backing && surface->backing->nb_planes &&
++	    view.dmabuf_fd[0] == surface->backing->dmabuf_fd[0])
++		surface->backing->exported = true;
++
+ 	return fill_prime_descriptor(&view, flags, descriptor);
+ }
+ 
+--- a/src/v4l2_request.h
++++ b/src/v4l2_request.h
+@@ -164,6 +164,10 @@
+ 	uint32_t plane_size[VIDEO_MAX_PLANES];
+ 	int dmabuf_fd[VIDEO_MAX_PLANES];
+ 	void *map[VIDEO_MAX_PLANES];
++	/* Handed out through vaExportSurfaceHandle(): the client may keep
++	 * displaying this memory, so it stays the surface's presented storage
++	 * across decode binding and each decode is published into it. */
++	bool exported;
+ };
+ 
+ struct v4l2r_surface {
+@@ -640,6 +644,12 @@
+ 				    bool need_maps,
+ 				    struct v4l2r_frame_view *view);
+ 
++/* A surface exported before its first decode hands out standalone backing
++ * memory, while decodes land in a context CAPTURE buffer. Copy the finished
++ * decode into the exported backing so the client sees the frame. No-op for
++ * surfaces without standalone backing. */
++VAStatus v4l2r_surface_publish_backing(struct v4l2r_surface *surface);
++
+ /* Export the dma-buf fds of a context CAPTURE buffer (idempotent). */
+ int v4l2r_export_capture_dmabufs(struct v4l2r_context *ctx,
+ 				 struct v4l2r_capture_buffer *capture,

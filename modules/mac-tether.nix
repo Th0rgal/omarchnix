@@ -593,6 +593,9 @@ in
       uid = 992;
       group = "orb-tether";
       isSystemUser = true;
+      # "*" = no password login, but not "locked": with UsePAM no, sshd refuses
+      # key logins for accounts whose hash starts with "!" (the NixOS default).
+      hashedPassword = "*";
       home = "/var/empty";
       shell = "${pkgs.bash}/bin/bash";
       description = "Dedicated unprivileged SSH gate user for Touch ID MacBook tether leases";

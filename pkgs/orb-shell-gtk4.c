@@ -184,7 +184,7 @@ int main(int argc, char **argv) {
         if (fd >= 0) { fchmod(fd, 0600); if (escaped && dprintf(fd, "{\"port\":%u,\"token\":%s}\n", port, escaped) > 0 && fsync(fd) == 0) rename(temporary, discovery); close(fd); unlink(temporary); } free(escaped);
     }
 #if defined(ORB_HAS_WEBKITGTK)
-    g_set_prgname("orb-desktop"); g_setenv("GTK_USE_PORTAL", "1", FALSE); gtk_init();
+    g_set_prgname(dev_url && *dev_url ? "orb-desktop-dev" : "orb-desktop"); g_setenv("GTK_USE_PORTAL", "1", FALSE); gtk_init();
     GMainLoop *loop = g_main_loop_new(NULL, FALSE); g_unix_signal_add(SIGTERM, on_quit_sig, loop); g_unix_signal_add(SIGINT, on_quit_sig, loop); g_unix_signal_add(SIGHUP, on_quit_sig, loop);
     GtkCssProvider *css = gtk_css_provider_new(); gtk_css_provider_load_from_string(css, "window, window.background { background-color: rgba(0,0,0,0); background-image: none; }");
     if (gdk_display_get_default()) gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);

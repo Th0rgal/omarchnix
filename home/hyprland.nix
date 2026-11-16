@@ -1257,7 +1257,7 @@ in
         {
           name = "orb-vibrancy";
           match = {
-            class = "^(orb-desktop|\\.orb-desktop-unwrapped|orb)$";
+            class = "^(orb-desktop|orb-desktop-dev|\\.orb-desktop-unwrapped|orb)$";
           };
           rounding = theme.ui.rounding;
           border_size = theme.ui.borderSize;

@@ -189,6 +189,10 @@ let
         substituteInPlace "$out/shell/plugins/panels/monitor/Panel.qml" \
           --replace-fail $'                text: root.current ? root.current.title : Commons.I18n.t("monitor.display")\n                textFormat: Text.PlainText\n                color: root.bar.foreground\n                font.family: root.bar.fontFamily\n                font.pixelSize: Style.font.title\n                font.bold: true' $'                text: root.current ? root.current.title : Commons.I18n.t("monitor.display")\n                textFormat: Text.PlainText\n                color: root.bar.foreground\n                font.family: Style.font.menuFamily\n                font.pixelSize: Style.font.heroTitle\n                font.weight: Font.DemiBold'
 
+        # Display panel: dragging or ctrl+arrows in the layout map only stages an
+        # arrangement; Apply / Enter sends it to the displays, Cancel / Esc drops it.
+        patch -p1 -d "$out/shell/plugins/panels/monitor" < ${./patches/omarchy-shell-monitor-layout-confirm.patch}
+
         substituteInPlace "$out/bin/omarchy-theme-set-browser" \
           --replace-fail 'omarchy-theme-set-browser-policy "''${THEME_HEX_COLOR#\#}" <&0 &' 'if [ "''${saw_any}" = "true" ]; then omarchy-theme-set-browser-policy "''${THEME_HEX_COLOR#\#}" <&0 & policy_pid=$!; else policy_pid=""; fi' \
           --replace-fail 'policy_pid=$!' ':' \

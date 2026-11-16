@@ -411,9 +411,15 @@ let
           end
         end
       '')
+      # Option + Left-Shift + 1..0 stays on the cursor's screen; Option + Right-Shift + 1..0
+      # sends the window to that Space on the OTHER screen (and follows).
       (mkBind "ALT + SHIFT + ${code}" ''
         function()
           if _G.__omarchnix_multiscreen then
+            if hl.is_key_down and hl.is_key_down("Shift_R") and not hl.is_key_down("Shift_L") then
+              _G.__omarchnix_multiscreen.move_window_to_other_slot(${slotStr}, true)
+              return
+            end
             _G.__omarchnix_multiscreen.move_window_to_cursor_slot(${slotStr}, true)
           else
             hl.dispatch(hl.dsp.window.move({ workspace = ${slotStr} }))

@@ -103,6 +103,9 @@ in
             --replace-fail '@TOUCHID_MONITOR_BIN@' "${touchIdMonitorBin}/bin/touchid-monitor"
         '';
       };
+      display-keepalive = final.omarchnix.buildPlugin {
+        src = ../pkgs/plugins/display-keepalive;
+      };
       workspace-wallpapers = final.omarchnix.buildPlugin {
         src = ../pkgs/plugins/workspace-wallpapers;
       };

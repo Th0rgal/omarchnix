@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "th0rgal.display-keepalive",
+  "name": "External Display Keepalive",
+  "version": "1.0.0",
+  "author": "Thomas Marchand",
+  "license": "MIT",
+  "description": "Keeps external displays lit on Apple Silicon by presenting a one-pixel frame twice a second while the desktop is otherwise static.",
+  "kinds": [
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "DisplayKeepalive.qml"
+  }
+}

@@ -1,0 +1,139 @@
+--- a/Panel.qml	2026-11-16 11:11:59.059257875 +0000
++++ b/Panel.qml	2026-11-16 11:12:19.612036664 +0000
+@@ -629,7 +629,7 @@
+   function placeShown(side) {
+     if (!current || !layoutMovable) return
+     var name = current.name
+-    applyLayout(function() { return Model.placeDisplay(layoutRects, name, side) })
++    applyLayout(function() { return Model.placeDisplay(arrangeRects, name, side) })
+   }
+ 
+   function closeRotateMenu() {
+@@ -639,19 +639,39 @@
+   // A moved display stays where it was put in the map until the state read
+   // after the move catches up, instead of snapping back for a moment.
+   property var pendingRects: null
+-  readonly property var shownRects: pendingRects || layoutRects
++  // An arrangement worked out in the map but not applied yet: dragging and
++  // ctrl+h/j/k/l only stage it here, and Apply (or Enter) sends it to the
++  // displays. Cancel (or Esc) drops it. Further moves build on the staged one.
++  property var stagedRects: null
++  readonly property var arrangeRects: stagedRects || layoutRects
++  readonly property var shownRects: stagedRects || pendingRects || layoutRects
++  // A scale, rotation or mirror change resizes the boxes a staged
++  // arrangement was fitted around, so it no longer holds.
++  onLayoutRectsChanged: stagedRects = null
+ 
+   // Apply the arrangement `place` works out from layoutRects, unless it
+   // leaves everything where it was. Behind another command it waits its turn
+   // and is worked out again then, from the sizes that command left.
+   function applyLayout(place) {
+     var rects = place()
+-    if (!rects || Model.sameLayout(rects, Model.normalizeLayout(Model.copyRects(layoutRects)))) return
++    if (!rects) return
++    // Back where the displays really are: nothing left to confirm.
++    stagedRects = Model.sameLayout(rects, Model.normalizeLayout(Model.copyRects(layoutRects))) ? null : rects
++  }
++
++  function confirmLayout() {
++    var rects = stagedRects
++    if (!rects) return
++    stagedRects = null
+     pendingRects = rects
+-    if (actionBusy) queuedActions = queuedActions.concat([{ layout: place }])
++    if (actionBusy) queuedActions = queuedActions.concat([{ layout: function() { return rects } }])
+     else runAction(layoutCommand(rects))
+   }
+ 
++  function cancelLayout() {
++    stagedRects = null
++  }
++
+   function layoutCommand(rects) {
+     var args = ["omarchy-hyprland-monitor-layout"]
+     for (var i = 0; i < rects.length; i++)
+@@ -708,6 +728,7 @@
+   // the cursor until hover or the first navigation key.
+   onOpenedChanged: {
+     closeRotateMenu()
++    stagedRects = null
+     if (opened) {
+       refresh()
+       selectedName = ""
+@@ -940,11 +961,14 @@
+       }
+       onActivateRequested: {
+         if (root.rotateMenuName !== "") root.applyRotateMenu()
++        else if (root.stagedRects && (!root.cursorActive || root.focusSection === "layout")) root.confirmLayout()
+         else if (root.cursorActive) root.activateCursor()
+       }
+-      // Esc closes the rotate menu first, then the panel.
++      // Esc closes the rotate menu first, then drops a staged arrangement,
++      // then closes the panel.
+       onCloseRequested: {
+         if (root.rotateMenuName !== "") root.closeRotateMenu()
++        else if (root.stagedRects) root.cancelLayout()
+         else root.close()
+       }
+       onTabRequested: function(direction) { root.switchPanel(direction) }
+@@ -1523,18 +1547,49 @@
+             // its hint instead. Its room stays reserved and it appears without
+             // a fade, so nothing shifts as the pointer crosses the map.
+             Text {
+-              readonly property bool shown: layoutHover.hovered || (root.cursorActive &&
++              readonly property bool shown: root.stagedRects !== null || layoutHover.hovered || (root.cursorActive &&
+                 (root.focusSection === "layout" || (!root.layoutMovable && root.focusSection === "mirror")))
+               width: parent.width
+               horizontalAlignment: Text.AlignHCenter
+               wrapMode: Text.WordWrap
+               textFormat: Text.PlainText
+-              text: root.layoutMovable ? Commons.I18n.t("monitor.layoutHint") : Commons.I18n.t("monitor.rotateHint")
++              text: root.stagedRects ? "not applied yet \u00b7 enter to apply \u00b7 esc to cancel"
++                : root.layoutMovable ? Commons.I18n.t("monitor.layoutHint") : Commons.I18n.t("monitor.rotateHint")
+               color: Qt.darker(root.bar.foreground, 1.55)
+               font.family: root.bar.fontFamily
+               font.pixelSize: Style.font.caption
+               opacity: shown ? 1 : 0
+             }
++
++            // Nothing moves on the real displays until this is confirmed.
++            Row {
++              visible: root.stagedRects !== null
++              anchors.horizontalCenter: parent.horizontalCenter
++              spacing: Style.space(8)
++
++              Button {
++                text: "Cancel"
++                fontSize: Style.font.caption
++                foreground: root.bar.foreground
++                fontFamily: root.bar.fontFamily
++                horizontalPadding: Style.spacing.sm
++                verticalPadding: Style.spacing.controlPaddingY
++                bordered: true
++                onClicked: root.cancelLayout()
++              }
++
++              Button {
++                text: "Apply"
++                fontSize: Style.font.caption
++                foreground: root.bar.foreground
++                fontFamily: root.bar.fontFamily
++                horizontalPadding: Style.spacing.sm
++                verticalPadding: Style.spacing.controlPaddingY
++                bordered: true
++                active: true
++                onClicked: root.confirmLayout()
++              }
++            }
+           }
+         }
+       }
+@@ -1841,7 +1896,7 @@
+             screenRect.dragX = 0
+             screenRect.dragY = 0
+             var snap = Style.space(8) / map.ratio
+-            if (moved) root.applyLayout(function() { return Model.dropDisplay(root.layoutRects, name, x, y, snap) })
++            if (moved) root.applyLayout(function() { return Model.dropDisplay(root.arrangeRects, name, x, y, snap) })
+             else root.selectDisplay(name)
+           }
+           onCanceled: {

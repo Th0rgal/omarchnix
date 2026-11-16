@@ -254,6 +254,12 @@ in
         default = 0.5;
         description = "Touchpad scroll speed factor in Hyprland (`0.5` smooths Apple MTP trackpad scrolling to match macOS inertia feel).";
       };
+
+      tapToClick = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Whether a light tap clicks (and tap-then-drag drags). `false` matches macOS's default: only pressing the trackpad clicks, so brushing or resting a finger never does.";
+      };
     };
 
     widevine = {

@@ -1036,8 +1036,8 @@ in
           touchpad = {
             natural_scroll = cfg.touchpad.naturalScroll;
             scroll_factor = cfg.touchpad.scrollFactor;
-            tap_to_click = true;
-            tap_and_drag = true;
+            tap_to_click = cfg.touchpad.tapToClick;
+            tap_and_drag = cfg.touchpad.tapToClick;
             disable_while_typing = true;
             clickfinger_behavior = true;
           };

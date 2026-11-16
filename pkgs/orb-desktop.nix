@@ -514,6 +514,7 @@ stdenv.mkDerivation {
     Type=Application
     Categories=Development;
     Keywords=orb;dev;hmr;vite;
+    StartupWMClass=orb-desktop-dev
     EOF
     cat > "$out/bin/.orb-signer" <<'PY'
     #!${python3}/bin/python3

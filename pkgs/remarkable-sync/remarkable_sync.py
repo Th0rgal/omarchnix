@@ -31,6 +31,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 UPLOADABLE = {".pdf", ".epub"}
+# Top-level cloud folders that are not part of the library.
+SKIPPED_ROOTS = {"trash"}
 RMAPI = os.environ.get("REMARKABLE_SYNC_RMAPI", "rmapi")
 INOTIFYWAIT = os.environ.get("REMARKABLE_SYNC_INOTIFYWAIT", "inotifywait")
 
@@ -96,7 +98,9 @@ class Sync:
                 None,
             )
             if payload:
-                rel = rel_dir / (stem + Path(payload).suffix.lower())
+                ext = Path(payload).suffix.lower()
+                # A document named "health.pdf" stays health.pdf, not health.pdf.pdf.
+                rel = rel_dir / (stem if stem.lower().endswith(ext) else stem + ext)
                 dst = self.visible / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 fd, tmp = tempfile.mkstemp(dir=self.tmp)
@@ -123,8 +127,19 @@ class Sync:
             shutil.rmtree(work, ignore_errors=True)
 
     def pull(self) -> None:
-        # Download outside the lock: it is the slow part, and the watcher
-        # only needs the lock to read the manifest.
+        # One pull at a time: a timer run while a long first download is
+        # still going would write into the same tree.
+        with open(self.state / "pull.lock", "w") as guard:
+            try:
+                fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                log("a pull is already running")
+                return
+            self._pull()
+
+    def _pull(self) -> None:
+        # Download outside the manifest lock: it is the slow part, and the
+        # watcher only needs that lock to read the manifest.
         self.rmapi("mget", "-o", str(self.raw), "-i", "-d", "/")
         with self.locked():
             data = self.load_manifest()
@@ -132,6 +147,8 @@ class Sync:
             seen: set[str] = set()
             for bundle in sorted(self.raw.rglob("*.rmdoc")):
                 raw_rel = bundle.relative_to(self.raw)
+                if raw_rel.parts[0] in SKIPPED_ROOTS:
+                    continue
                 mtime = bundle.stat().st_mtime
                 prev = next(
                     (k for k, v in published.items() if v["raw"] == str(raw_rel)),
@@ -189,7 +206,7 @@ class Sync:
         if path.suffix.lower() not in UPLOADABLE or not path.is_file():
             return False
         rel = path.relative_to(self.visible)
-        if any(part.startswith(".") for part in rel.parts):
+        if any(part.startswith(".") for part in rel.parts) or rel.parts[0] in SKIPPED_ROOTS:
             return False
         data = self.load_manifest()
         key = str(rel)

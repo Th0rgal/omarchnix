@@ -26,6 +26,7 @@ typedef struct {
     int ruid;
     char *comm;
     GPtrArray *argv; /* char* */
+    gboolean zombie;
 } ProcInfo;
 
 typedef struct {
@@ -251,9 +252,10 @@ static GPtrArray *read_proc_cmdline(int pid) {
     return arr;
 }
 
-static void read_proc_status(int pid, int *ppid_out, int *ruid_out) {
+static void read_proc_status(int pid, int *ppid_out, int *ruid_out, gboolean *zombie_out) {
     *ppid_out = 0;
     *ruid_out = -1;
+    *zombie_out = FALSE;
     char path[64];
     snprintf(path, sizeof(path), "/proc/%d/status", pid);
     FILE *fp = fopen(path, "re");
@@ -264,8 +266,11 @@ static void read_proc_status(int pid, int *ppid_out, int *ruid_out) {
             *ppid_out = atoi(line + 5);
         } else if (strncmp(line, "Uid:", 4) == 0) {
             *ruid_out = atoi(line + 4);
+        } else if (strncmp(line, "State:", 6) == 0) {
+            const char *st = line + 6;
+            while (*st == ' ' || *st == '\t') st++;
+            *zombie_out = (*st == 'Z' || *st == 'X');
         }
-        if (*ppid_out > 0 && *ruid_out >= 0) break;
     }
     fclose(fp);
 }
@@ -368,7 +373,9 @@ static void inspect_caller(CallerInfo *out) {
             pi->pid = pid;
             pi->comm = g_strdup(comm_buf);
             pi->argv = argv;
-            read_proc_status(pid, &pi->ppid, &pi->ruid);
+            gboolean zombie = FALSE;
+            read_proc_status(pid, &pi->ppid, &pi->ruid, &zombie);
+            pi->zombie = zombie;
             g_hash_table_insert(procs, GINT_TO_POINTER(pid), pi);
         }
         closedir(d);
@@ -390,6 +397,7 @@ static void inspect_caller(CallerInfo *out) {
     g_hash_table_iter_init(&iter, procs);
     while (g_hash_table_iter_next(&iter, &key, &val)) {
         ProcInfo *pi = (ProcInfo *)val;
+        if (pi->zombie) continue;   /* exited but not reaped: not asking for anything */
         if (strcmp(pi->comm, "fprintd-verify") == 0 || argv0_base_is(pi->argv, "fprintd-verify")) {
             if (pi->pid > best_fp_pid) best_fp_pid = pi->pid;
         }
@@ -513,6 +521,12 @@ static void on_fprint_signal(
         if (g_strcmp0(signal_name, "VerifyFingerSelected") == 0 && parameters) {
             const char *finger = NULL;
             g_variant_get(parameters, "(&s)", &finger);
+            /* VerifyFingerSelected only comes with a new VerifyStart, so a session
+             * still marked active is stale (its end signal was missed, e.g. the
+             * client died mid-verify). Left latched, it would hide every later
+             * prompt until the monitor restarts. */
+            ctx->session_active = FALSE;
+            ctx->session_suppressed = FALSE;
             start_session_if_needed(ctx, finger ? finger : "");
         } else if (g_strcmp0(signal_name, "VerifyStatus") == 0 && parameters) {
             const char *status = NULL;

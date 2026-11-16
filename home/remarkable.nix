@@ -13,8 +13,9 @@ let
   rCfg = cfg.remarkable;
 
   syncDir = "${cfg.baseDir}/reMarkable";
-  # rmapi's default token file; its presence means `remarkable setup` ran.
-  tokenFile = "%h/.rmapi";
+  # rmapi's token file (XDG location, as rmapi writes it when `~/.rmapi` does
+  # not already exist); its presence means `remarkable setup` ran.
+  tokenFile = "%h/.config/rmapi/rmapi.conf";
 
   remarkableSync = pkgs.writeShellApplication {
     name = "remarkable-sync";

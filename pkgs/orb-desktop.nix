@@ -1,5 +1,6 @@
 {
   lib,
+  bash,
   stdenv,
   nodejs,
   pnpm,
@@ -464,6 +465,40 @@ stdenv.mkDerivation {
     Categories=Development;Utility;
     StartupWMClass=orb-desktop
     EOF
+    cat > "$out/bin/.orb-dev" <<'SH'
+    #!${bash}/bin/bash
+    # `orb dev`: run the Orb UI from a local checkout with instant reload (Vite HMR)
+    # inside the normal desktop shell. ORB_DEV_DIR picks the checkout (default ~/work/orb),
+    # ORB_VITE_PORT the port (default 1430). The dev window runs beside the regular app.
+    set -euo pipefail
+    export PATH="${lib.makeBinPath [ nodejs pnpm ]}:$PATH"
+    here="$(dirname "$(readlink -f "$0")")"
+    src="''${ORB_DEV_DIR:-$HOME/work/orb}/orb"
+    port="''${ORB_VITE_PORT:-1430}"
+    url="http://127.0.0.1:$port/"
+    [ -f "$src/package.json" ] || { echo "orb dev: no Orb checkout at $src (set ORB_DEV_DIR)" >&2; exit 1; }
+    up() { (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; }
+    vite=""
+    if up; then
+      echo "orb dev: reusing the dev server already on $url"
+    else
+      cd "$src"
+      [ -d node_modules ] || pnpm install --frozen-lockfile
+      log="''${XDG_RUNTIME_DIR:-/tmp}/orb-dev-vite.log"
+      pnpm dev --host 127.0.0.1 --port "$port" --strictPort >"$log" 2>&1 &
+      vite=$!
+      trap '[ -n "$vite" ] && kill "$vite" 2>/dev/null || true' EXIT INT TERM
+      for _ in $(seq 1 240); do
+        up && break
+        kill -0 "$vite" 2>/dev/null || { echo "orb dev: Vite exited, see $log" >&2; tail -n 20 "$log" >&2; exit 1; }
+        sleep 0.25
+      done
+      up || { echo "orb dev: Vite did not answer on $url, see $log" >&2; exit 1; }
+      echo "orb dev: Vite on $url (log: $log); edits under $src/src reload instantly"
+    fi
+    ORB_DEV_URL="$url" "$here/orb" "$@"
+    SH
+    chmod 0755 "$out/bin/.orb-dev"
     cat > "$out/bin/.orb-signer" <<'PY'
     #!${python3}/bin/python3
     ${linuxSigner}
@@ -496,6 +531,7 @@ stdenv.mkDerivation {
       --set-default NIX_SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
       --set ORB_UI_ROOT "$out/share/orb" \
       --run ${lib.escapeShellArg ''
+        if [ "''${1:-}" = dev ]; then shift; exec "$(dirname "$(readlink -f "$0")")/.orb-dev" "$@"; fi
         if [ -d /run/opengl-driver/share ]; then
           export XDG_DATA_DIRS="/run/opengl-driver/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
         fi

@@ -471,7 +471,12 @@ stdenv.mkDerivation {
     # inside the normal desktop shell. ORB_DEV_DIR picks the checkout (default ~/work/orb),
     # ORB_VITE_PORT the port (default 1430). The dev window runs beside the regular app.
     set -euo pipefail
-    export PATH="${lib.makeBinPath [ nodejs pnpm ]}:$PATH"
+    export PATH="${
+      lib.makeBinPath [
+        nodejs
+        pnpm
+      ]
+    }:$PATH"
     here="$(dirname "$(readlink -f "$0")")"
     src="''${ORB_DEV_DIR:-$HOME/work/orb}/orb"
     port="''${ORB_VITE_PORT:-1430}"
@@ -499,6 +504,17 @@ stdenv.mkDerivation {
     ORB_DEV_URL="$url" "$here/orb" "$@"
     SH
     chmod 0755 "$out/bin/.orb-dev"
+    cat > "$out/share/applications/orb-dev.desktop" <<EOF
+    [Desktop Entry]
+    Name=Orb Dev
+    Comment=Orb from your local checkout (~/work/orb) with instant reload
+    Exec=$out/bin/orb dev
+    Icon=orb
+    Terminal=false
+    Type=Application
+    Categories=Development;
+    Keywords=orb;dev;hmr;vite;
+    EOF
     cat > "$out/bin/.orb-signer" <<'PY'
     #!${python3}/bin/python3
     ${linuxSigner}

@@ -163,6 +163,12 @@ in
             default = 0.5;
             description = "Default touchpad scroll speed factor passed into Home Manager (`0.5` smooths Apple MTP trackpad scrolling).";
           };
+
+          tapToClick = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Default for tap-to-click (and tap-and-drag) passed into Home Manager (`false` matches macOS: only pressing the trackpad clicks).";
+          };
         };
 
         murmure = {
@@ -276,6 +282,7 @@ in
                 touchpad = {
                   naturalScroll = lib.mkDefault cfg.desktop.touchpad.naturalScroll;
                   scrollFactor = lib.mkDefault cfg.desktop.touchpad.scrollFactor;
+                  tapToClick = lib.mkDefault cfg.desktop.touchpad.tapToClick;
                 };
                 murmure.enable = lib.mkDefault cfg.desktop.murmure.enable;
                 widevine.enable = lib.mkDefault cfg.desktop.widevine.enable;

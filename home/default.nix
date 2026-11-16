@@ -427,6 +427,7 @@ in
     ./mac-tether.nix
     ./flea.nix
     ./cloud-mounts.nix
+    ./remarkable.nix
     ./rbw.nix
     ./mutable-json.nix
     ./agents.nix

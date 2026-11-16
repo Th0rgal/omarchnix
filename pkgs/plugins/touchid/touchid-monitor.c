@@ -42,6 +42,8 @@ typedef struct {
     guint sub_id;
     gboolean session_active;
     gboolean session_suppressed;
+    gboolean finger_seen;
+    gint64 session_started_us;
 } MonitorCtx;
 
 static void proc_info_free(gpointer p) {
@@ -495,6 +497,8 @@ static void start_session_if_needed(MonitorCtx *ctx, const char *finger) {
     inspect_caller(&ci);
     ctx->session_active = TRUE;
     ctx->session_suppressed = ci.suppressed;
+    ctx->finger_seen = FALSE;
+    ctx->session_started_us = g_get_monotonic_time();
     if (ci.suppressed) {
         emit_simple_event(ctx, "suppressed");
     } else {
@@ -532,9 +536,15 @@ static void on_fprint_signal(
             const char *status = NULL;
             gboolean done = FALSE;
             g_variant_get(parameters, "(&sb)", &status, &done);
-            if (status && !ctx->session_suppressed) {
+            if (status && ctx->session_active && !ctx->session_suppressed) {
                 if (strcmp(status, "verify-match") == 0) {
                     emit_done_event(ctx, "match", NULL, done);
+                } else if (strcmp(status, "verify-no-match") == 0 && !ctx->finger_seen) {
+                    /* The Aurora driver reports a verify stopped by its client
+                     * (SSH giving up, a cancelled request) as no-match. Nothing
+                     * touched the sensor, so it is a cancellation, not a red
+                     * "fingerprint did not match". */
+                    emit_simple_event(ctx, "stop");
                 } else if (strcmp(status, "verify-no-match") == 0) {
                     emit_done_event(ctx, "no-match", NULL, done);
                 } else if (strcmp(status, "verify-retry-scan") == 0 ||
@@ -567,20 +577,26 @@ static void on_fprint_signal(
             g_variant_unref(v_needed);
             if (needed && !ctx->session_active) {
                 start_session_if_needed(ctx, "");
-            } else if (!needed && ctx->session_active) {
-                if (!ctx->session_suppressed) {
-                    emit_simple_event(ctx, "stop");
-                }
-                ctx->session_active = FALSE;
-                ctx->session_suppressed = FALSE;
             }
+            /* finger-needed=false does not end a session: the Aurora driver
+             * clears it as soon as the enclave is armed, a few milliseconds
+             * after VerifyStart, which closed the HUD before the user could
+             * touch. The session ends on the final VerifyStatus instead (the
+             * driver sends one even when the client stops the verify), and
+             * the HUD's own watchdog covers a client that vanishes. */
         }
 
         GVariant *v_present = g_variant_lookup_value(changed, "finger-present", G_VARIANT_TYPE_BOOLEAN);
         if (v_present) {
             gboolean present = g_variant_get_boolean(v_present);
             g_variant_unref(v_present);
-            if (ctx->session_active && !ctx->session_suppressed) {
+            /* The Aurora driver also reports finger-present the instant the
+             * enclave arms, with nothing on the sensor; only a later one is a
+             * real touch. */
+            if (present && g_get_monotonic_time() - ctx->session_started_us > 300000)
+                ctx->finger_seen = TRUE;
+            if (ctx->session_active && !ctx->session_suppressed &&
+                (!present || ctx->finger_seen)) {
                 emit_simple_event(ctx, present ? "finger-down" : "finger-up");
             }
         }

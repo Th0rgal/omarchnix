@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  osConfig ? { },
   ...
 }:
 let
@@ -79,6 +80,12 @@ let
   workspaceWallpapersPlugin =
     overlayPlugins.workspace-wallpapers or (buildPlugin {
       src = ../pkgs/plugins/workspace-wallpapers;
+    });
+
+  displayKeepaliveId = "th0rgal.display-keepalive";
+  displayKeepalivePlugin =
+    overlayPlugins.display-keepalive or (buildPlugin {
+      src = ../pkgs/plugins/display-keepalive;
     });
 
   slantedWorkspacesPlugin =
@@ -482,6 +489,15 @@ in
       };
     };
 
+    externalDisplayKeepalive = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = osConfig.omarchnix.hardware.m2air.enable or false;
+        defaultText = lib.literalExpression "osConfig.omarchnix.hardware.m2air.enable or false";
+        description = "Present a one-pixel frame twice a second on external displays (`th0rgal.display-keepalive`). Apple's display coprocessor drops the signal to an external display after a few seconds without a page flip, so a static desktop makes the monitor go dark until the pointer moves.";
+      };
+    };
+
     wallpapers = {
       enable = lib.mkOption {
         type = lib.types.bool;
@@ -654,6 +670,13 @@ in
             animation = "none";
           }
         ];
+      })
+
+      (lib.mkIf mCfg.externalDisplayKeepalive.enable {
+        programs.omarchnix.plugins.locked.${displayKeepaliveId} = {
+          package = displayKeepalivePlugin;
+          enable = true;
+        };
       })
 
       (lib.mkIf mCfg.wallpapers.enable {

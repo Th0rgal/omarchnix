@@ -16,6 +16,17 @@ let
     src = ../pkgs/plugins/omarchnix-clipboard;
   };
 
+  orbGrantPkg = pkgs.callPackage ../pkgs/orb-grant.nix { };
+
+  agentGrantsPlugin = omarchyLib.buildPlugin {
+    inherit pkgs;
+    src = ../pkgs/plugins/omarchnix-agent-grants;
+    postInstall = ''
+      substituteInPlace "$out/Service.qml" \
+        --replace-fail '@ORB_GRANT_BIN@' "${orbGrantPkg}/bin/orb-grant"
+    '';
+  };
+
   appearanceBarPlugin = omarchyLib.buildPlugin {
     inherit pkgs;
     src = ../pkgs/plugins/omarchnix-appearance;
@@ -484,6 +495,11 @@ in
       };
       "omarchnix.clipboard" = {
         package = lib.mkDefault clipboardBarPlugin;
+        enable = lib.mkDefault true;
+        section = lib.mkDefault "right";
+      };
+      "omarchnix.agent-grants" = {
+        package = lib.mkDefault agentGrantsPlugin;
         enable = lib.mkDefault true;
         section = lib.mkDefault "right";
       };

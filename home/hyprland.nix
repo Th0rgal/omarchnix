@@ -449,6 +449,38 @@ let
     ]
   ) workspaceIndices;
 
+  # Wrap hl.monitor (as Omarchy's wide-gamut.lua does for cm) so a bitdepth
+  # survives every later rule, from the config or a `hyprctl eval` command.
+  monitorBitdepthLua = lib.optionalString (cfg.monitorBitdepth != { }) ''
+    do
+      local depths = ${lib.generators.toLua { } cfg.monitorBitdepth}
+      local function depth_for(output)
+        if depths[output] then return depths[output] end
+        local rule_desc = output:match("^desc:(.+)$")
+        for key, v in pairs(depths) do
+          local prefix = key:match("^desc:(.+)$")
+          if rule_desc and prefix and rule_desc:sub(1, #prefix) == prefix then return v end
+        end
+        for _, m in ipairs(hl.get_monitors()) do
+          if m.name == output then
+            local d = m.description or ""
+            for key, v in pairs(depths) do
+              local prefix = key:match("^desc:(.+)$")
+              if prefix and d:sub(1, #prefix) == prefix then return v end
+            end
+          end
+        end
+      end
+      local monitor = hl.monitor
+      hl.monitor = function(rule)
+        if type(rule) == "table" and rule.bitdepth == nil then
+          rule.bitdepth = depth_for(rule.output or "")
+        end
+        return monitor(rule)
+      end
+    end
+  '';
+
   omarchyMultiScreenBootstrapLua = lib.optionalString (cfg.shell.backend == "omarchy-shell") ''
     do
       local omarchy_path = ${builtins.toJSON "${omarchySharePath}"}
@@ -457,6 +489,7 @@ let
       if ok_boot then
         pcall(require, "default.hypr.helpers")
         pcall(require, "default.hypr.wide-gamut")
+        ${monitorBitdepthLua}
         pcall(require, "default.hypr.monitor-workspaces")
         pcall(require, "default.hypr.pop")
       end

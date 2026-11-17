@@ -242,6 +242,25 @@ in
       };
     };
 
+    monitorBitdepth = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.enum [
+          8
+          10
+        ]
+      );
+      default = { };
+      example = {
+        "desc:LG Electronics LG HDR 4K" = 10;
+      };
+      description = ''
+        Per-monitor colour depth, keyed by output name (`DP-2`) or `desc:` prefix
+        of the monitor description. Applied to every Hyprland monitor rule,
+        including the ones Omarchy's Display panel and monitor commands issue.
+        10-bit avoids banding when wide-gamut colour management is on.
+      '';
+    };
+
     touchpad = {
       naturalScroll = lib.mkOption {
         type = lib.types.bool;

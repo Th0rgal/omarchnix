@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchnix.agent-grants",
+  "name": "Agent Access",
+  "version": "1.0.0",
+  "author": "Omarchnix",
+  "license": "MIT",
+  "description": "Short-lived SSH certificates that let coding agents reach approved hosts for up to 24 hours after one YubiKey touch (orb-grant).",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Agent Access",
+    "description": "Shows active agent SSH grants with time left; renew with one touch or revoke.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

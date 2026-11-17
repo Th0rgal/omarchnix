@@ -32,6 +32,7 @@ in
           "clock"
         ];
         modules-right = [
+          "custom/agent-grant"
           "wireplumber"
           "backlight"
           "network"
@@ -55,6 +56,14 @@ in
         clock = {
           format = "{:%a %d %b  %H:%M}";
           tooltip-format = "<tt>{calendar}</tt>";
+        };
+
+        # Active agent SSH grants (orb-grant): hidden when none, countdown in the tooltip.
+        "custom/agent-grant" = {
+          exec = "orb-grant bar";
+          return-type = "json";
+          interval = 60;
+          on-click = "orb-grant status | ${pkgs.libnotify}/bin/notify-send 'Agent grants' \"$(cat)\"";
         };
 
         wireplumber = {

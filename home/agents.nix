@@ -173,7 +173,7 @@ in
   config = lib.mkIf (cfg.enable && cfg.agents.enable) {
     home.packages = lib.optionals cfg.agents.orbSync.enable [
       orbAgentSyncPkg
-    ];
+    ] ++ [ (pkgs.callPackage ../pkgs/orb-grant.nix { }) ];
 
     home.file = lib.mkIf cfg.agents.installSkills (
       (mkSkillFilesFor ".agents/skills/omarchnix")

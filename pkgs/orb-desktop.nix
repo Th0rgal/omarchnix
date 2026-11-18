@@ -9,6 +9,8 @@
   python3,
   pkg-config,
   gtk4,
+  gtk3,
+  webkitgtk_4_1,
   webkitgtk_6_0,
   wrapGAppsHook4,
   makeWrapper,
@@ -412,7 +414,9 @@ stdenv.mkDerivation {
   ];
 
   buildInputs = [
+    gtk3
     gtk4
+    webkitgtk_4_1
     webkitgtk_6_0
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
@@ -423,9 +427,15 @@ stdenv.mkDerivation {
 
   dontWrapGApps = true;
 
-  # Support both locked GTK3 orbSrc revisions and the new GTK4 + WebKitGTK 6.0 shell (`tauri://localhost/`).
+  # Build the shell shipped by Orb for GTK3 revisions.  The GTK4 shim is only
+  # needed for revisions that have already migrated to WebKitGTK 6.0.  Keeping
+  # the upstream GTK3 shell intact avoids replacing a known-good Wayland path
+  # with the compatibility shim when the input is still GTK3.
   postPatch = ''
     if ! grep -q '<webkit/webkit.h>' main.c; then
+      # GTK3/WebKitGTK 4.1 is the upstream Linux shell.
+      :
+    else
       cp ${./orb-shell-gtk4.c} main.c
       substituteInPlace Makefile \
         --replace-fail 'gtk+-3.0 webkit2gtk-4.1' 'gtk4 webkitgtk-6.0'
@@ -573,7 +583,7 @@ stdenv.mkDerivation {
   };
 
   meta = {
-    description = "Orb desktop client (GTK4 + WebKitGTK 6.0 shell + orb-locald)";
+    description = "Orb desktop client (upstream GTK/WebKit shell with GTK4 compatibility)";
     mainProgram = "orb";
     platforms = lib.platforms.linux;
   };

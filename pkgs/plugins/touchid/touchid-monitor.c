@@ -121,13 +121,12 @@ static gboolean is_suppressed_comm(const char *s) {
     if (!s || !*s) return FALSE;
     return strcmp(s, "hyprlock") == 0 ||
            strcmp(s, "swaylock") == 0 ||
-           strcmp(s, "gtklock") == 0 ||
-           strcmp(s, "polkit-agent-helper-1") == 0 ||
-           strstr(s, "polkit-agent-helper") != NULL;
+           strcmp(s, "gtklock") == 0;
 }
 
 static gboolean is_suppressed_layer_ns(const char *ns) {
     if (!ns) return FALSE;
+    /* A Polkit helper can outlive its dialog. Only the mapped dialog owns the prompt. */
     return strcmp(ns, "omarchy-polkit") == 0 ||
            strcmp(ns, "omarchy-lock") == 0 ||
            strcmp(ns, "hyprlock") == 0;

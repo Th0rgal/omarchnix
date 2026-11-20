@@ -362,6 +362,11 @@ let
 
         sed -i '/^exec omasnap /d' "$out/bin/omarchy-capture-screenshot"
         cat >> "$out/bin/omarchy-capture-screenshot" <<'EOF'
+        # Crop the original compositor frame so the selection cursor and
+        # fractional-scale freeze overlay never become part of a clipboard shot.
+        if [[ $* == "region copy" ]]; then
+          exec ${omarchyPython}/bin/python3 ${./omarchy-shell/frozen-region.py}
+        fi
         if command -v omasnap >/dev/null 2>&1; then
           exec omasnap "''${omasnap_args[@]}"
         fi

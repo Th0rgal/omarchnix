@@ -355,6 +355,11 @@ let
           "$out/bin/omarchy-battery-charge-limit" \
           "$out/bin/omarchy-power-consumers"
 
+        # Transfer the freeze to the screenshot caller only after a successful pick.
+        substituteInPlace "$out/bin/omarchy-capture-region" \
+          --replace-fail '[[ $KEEP_FREEZE == true ]] && return' \
+            '[[ $KEEP_FREEZE == true && -n ''${SELECTION:-} ]] && return'
+
         sed -i '/^exec omasnap /d' "$out/bin/omarchy-capture-screenshot"
         cat >> "$out/bin/omarchy-capture-screenshot" <<'EOF'
         if command -v omasnap >/dev/null 2>&1; then

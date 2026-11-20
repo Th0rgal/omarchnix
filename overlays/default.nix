@@ -148,7 +148,7 @@ in
   orb-desktop = final.callPackage ../pkgs/orb-desktop.nix {
     orbSrc = inputs.orb;
     sandboxed-sh = final.callPackage "${inputs.orb}/nix/package.nix" {
-      inherit (final) turbo-lean;
+      turbo-lean = final.callPackage "${inputs.orb}/nix/turbo-lean.nix" { };
     };
   };
   sandboxed-sh = final.orb-desktop.passthru.sandboxed-sh;

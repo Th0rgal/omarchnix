@@ -47,6 +47,10 @@ let
     lockfile="''${XDG_RUNTIME_DIR:-/tmp}/omarchnix-screenshot.lock"
     exec 9>"$lockfile"
     ${flock} -n 9 || exit 0
+    ${lib.optionalString (omarchyShellBin != "") ''
+      "${omarchyShellBin}/omarchy-capture-screenshot" region copy 9>&-
+      exit $?
+    ''}
     region="$(${slurp} 9>&-)" || exit 0
     exec 9>&-
     [ -n "$region" ] || exit 0

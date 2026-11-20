@@ -355,8 +355,18 @@ let
           "$out/bin/omarchy-battery-charge-limit" \
           "$out/bin/omarchy-power-consumers"
 
+        # Transfer the freeze to the screenshot caller only after a successful pick.
+        substituteInPlace "$out/bin/omarchy-capture-region" \
+          --replace-fail '[[ $KEEP_FREEZE == true ]] && return' \
+            '[[ $KEEP_FREEZE == true && -n ''${SELECTION:-} ]] && return'
+
         sed -i '/^exec omasnap /d' "$out/bin/omarchy-capture-screenshot"
         cat >> "$out/bin/omarchy-capture-screenshot" <<'EOF'
+        # Crop the original compositor frame so the selection cursor and
+        # fractional-scale freeze overlay never become part of a clipboard shot.
+        if [[ $* == "region copy" ]]; then
+          exec ${omarchyPython}/bin/python3 ${./omarchy-shell/frozen-region.py}
+        fi
         if command -v omasnap >/dev/null 2>&1; then
           exec omasnap "''${omasnap_args[@]}"
         fi

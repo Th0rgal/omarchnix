@@ -14,9 +14,16 @@ permissions:
 
 jobs:
   evaluate:
-    # Evaluation is architecture-independent: all three nixosConfigurations
-    # must evaluate cleanly before anything builds.
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+            hosts: m2air m2air-aurora spark rehearsal vm
+          - runner: ubuntu-latest
+            system: x86_64-linux
+            hosts: workstation
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
@@ -25,20 +32,12 @@ jobs:
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
       - name: Evaluate all hosts
         run: |
-          nix eval .#nixosConfigurations.m2air.config.system.build.toplevel.drvPath --raw
-          nix eval .#nixosConfigurations.m2air-aurora.config.system.build.toplevel.drvPath --raw
-          nix eval .#nixosConfigurations.spark.config.system.build.toplevel.drvPath --raw
-          nix eval .#nixosConfigurations.workstation.config.system.build.toplevel.drvPath --raw
-          nix eval .#nixosConfigurations.rehearsal.config.system.build.toplevel.drvPath --raw
-          nix eval .#nixosConfigurations.vm.config.system.build.toplevel.drvPath --raw
-          nix eval .#checks.x86_64-linux.modules-eval.drvPath --raw
-          nix eval .#checks.aarch64-linux.modules-eval.drvPath --raw
-          nix eval .#checks.x86_64-linux.omarchy-compat.drvPath --raw
-          nix eval .#checks.aarch64-linux.omarchy-compat.drvPath --raw
-          nix eval .#checks.x86_64-linux.aurora-sep.drvPath --raw
-          nix eval .#checks.aarch64-linux.aurora-sep.drvPath --raw
-          nix eval .#checks.x86_64-linux.security.drvPath --raw
-          nix eval .#checks.aarch64-linux.security.drvPath --raw
+          for host in ${{ matrix.hosts }}; do
+            nix eval ".#nixosConfigurations.$host.config.system.build.toplevel.drvPath" --raw
+          done
+          for check in modules-eval omarchy-compat aurora-sep security; do
+            nix eval ".#checks.${{ matrix.system }}.$check.drvPath" --raw
+          done
 
   format:
     runs-on: ubuntu-latest

@@ -156,6 +156,8 @@ let
             "$out/libexec/omarchnix-kdeconnect-helper.py"
           substituteInPlace "$out/libexec/omarchnix-kdeconnect-helper.py" \
             --replace-fail "@KDECONNECT_CLI@" "${kdeconnectPkg}/bin/kdeconnect-cli" \
+            --replace-fail "@SCRCPY_BIN@" "${lib.optionalString sCfg.kdeconnect.androidMirroring.enable "${pkgs.scrcpy}/bin/scrcpy"}" \
+            --replace-fail "@ZENITY_BIN@" "${pkgs.zenity}/bin/zenity" \
             --replace-fail "@IP_BIN@" "${pkgs.iproute2}/bin/ip" \
             --replace-fail "@SSHFS_BIN@" "${pkgs.sshfs}/bin/sshfs" \
             --replace-fail "@FUSERMOUNT3_BIN@" "/run/wrappers/bin/fusermount3" \
@@ -168,13 +170,16 @@ let
           makeWrapper "$out/libexec/omarchnix-kdeconnect-helper.py" "$out/bin/omarchnix-kdeconnect-helper" \
             --prefix GI_TYPELIB_PATH : "${pkgs.glib.out}/lib/girepository-1.0" \
             --prefix PATH : "/run/wrappers/bin:${
-              lib.makeBinPath [
-                pkgs.sshfs
-                pkgs.fuse3
-                pkgs.glib
-                pkgs.iproute2
-                pkgs.xdg-utils
-              ]
+              lib.makeBinPath (
+                [
+                  pkgs.sshfs
+                  pkgs.fuse3
+                  pkgs.glib
+                  pkgs.iproute2
+                  pkgs.xdg-utils
+                ]
+                ++ lib.optional sCfg.kdeconnect.androidMirroring.enable pkgs.android-tools
+              )
             }:/run/current-system/sw/bin" \
             --set-default OMARCHNIX_KDECONNECT_SEED_ADDRESSES ${lib.escapeShellArg (builtins.toJSON sCfg.kdeconnect.customAddresses)}
         ''
@@ -305,6 +310,7 @@ in
     };
 
     kdeconnect = {
+      androidMirroring.enable = lib.mkEnableOption "Android screen control using scrcpy and an authorized ADB device";
       enable = lib.mkEnableOption "KDE Connect bidirectional clipboard, file, and phone sync (`kdeconnectd`)";
 
       package = lib.mkOption {

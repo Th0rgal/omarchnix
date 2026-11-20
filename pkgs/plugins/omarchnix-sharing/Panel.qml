@@ -51,7 +51,6 @@ Panel {
   readonly property bool kcAvailable: engine ? engine.kdeconnectAvailable : false
   readonly property var kcConnected: engine ? engine.kdeconnectConnectedDevices : []
   readonly property var kcPairable: engine ? engine.kdeconnectPairableDevices : []
-  readonly property var kcOffline: engine ? engine.kdeconnectOfflineDevices : []
   readonly property var kcAllDevices: engine ? engine.kdeconnectDevices : []
   readonly property var kcPairPrompt: engine ? engine.kdeconnectPairPrompt : null
   readonly property var kcCustomIps: engine ? engine.kdeconnectCustomAddresses : []
@@ -59,6 +58,8 @@ Panel {
   readonly property string kcMeshIface: engine ? engine.kdeconnectLocalMeshIface : ""
   readonly property string kcLanIp: engine ? engine.kdeconnectLocalLanIp : ""
 
+  readonly property var kcPaired: kcAllDevices.filter(d => d.paired)
+  property string expandedPhone: ""
   property bool showPairSetup: false
 
   readonly property color barIconTint: {
@@ -724,8 +725,8 @@ Panel {
               PanelSectionHeader {
                 Layout.fillWidth: true
                 foreground: root.foreground
-                text: root.kcConnected.length > 0
-                  ? ("PAIRED PHONES (" + root.kcConnected.length + ")")
+                text: root.kcPaired.length > 0
+                  ? ("PAIRED PHONES (" + root.kcPaired.length + ")")
                   : "PAIRED PHONES"
               }
 
@@ -755,12 +756,14 @@ Panel {
               }
             }
 
-            // Connected paired phone cards
+            // Paired phones stay accessible when their network connection drops.
             Repeater {
-              model: root.kcConnected
+              model: root.kcPaired
 
               BorderSurface {
+                id: phoneCard
                 required property var modelData
+                readonly property bool expanded: root.expandedPhone === modelData.id
                 Layout.fillWidth: true
                 implicitHeight: devCol.implicitHeight + Style.space(16)
                 color: "transparent"
@@ -779,15 +782,13 @@ Panel {
                     Layout.fillWidth: true
                     spacing: Style.space(6)
 
-                    Text {
+                    Ui.Button {
                       Layout.fillWidth: true
-                      textFormat: Text.PlainText
-                      text: "󰄜  " + String(modelData.name || "Phone")
-                      color: root.foreground
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.bodySmall
-                      font.bold: true
-                      elide: Text.ElideRight
+                      foreground: root.foreground
+                      selected: phoneCard.expanded
+                      text: String(modelData.name || "Phone") + (modelData.connected ? " · Connected" : " · Offline")
+                      tooltipText: "Phone details"
+                      onClicked: root.expandedPhone = phoneCard.expanded ? "" : modelData.id
                     }
 
                     Text {
@@ -805,18 +806,7 @@ Panel {
                     spacing: Style.space(4)
 
                     Ui.Button {
-                      Layout.fillWidth: true
-                      bordered: true
-                      foreground: root.foreground
-                      fontSize: Style.font.caption
-                      iconText: "󰅌"
-                      text: "Clip"
-                      tooltipText: "Send laptop clipboard to " + String(modelData.name || "phone")
-                      onClicked: if (root.engine) root.engine.sendClipboardToPhone(modelData.id, modelData.name)
-                    }
-
-                    Ui.Button {
-                      visible: !modelData.caps || modelData.caps.share !== false
+                      visible: modelData.connected && modelData.caps.share
                       Layout.fillWidth: true
                       bordered: true
                       selected: !!(root.engine && root.engine.stagedFiles && root.engine.stagedFiles.length > 0)
@@ -830,6 +820,48 @@ Panel {
                       onClicked: if (root.engine) root.engine.pickAndSendToPhone(modelData)
                     }
 
+                  }
+
+                  Text {
+                    visible: phoneCard.expanded && !modelData.connected
+                    Layout.fillWidth: true
+                    text: "Open KDE Connect on your phone to reconnect."
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.Wrap
+                  }
+
+                  RowLayout {
+                    visible: phoneCard.expanded
+                    Layout.fillWidth: true
+                    Ui.Button {
+                      visible: typeof modelData.clipboardEnabled === "boolean"
+                      selected: modelData.clipboardEnabled === true
+                      bordered: true
+                      foreground: root.foreground
+                      text: "Share clipboard · " + (selected ? "On" : "Off")
+                      onClicked: root.engine.runKdeconnectCmd(["clipboard-setting", modelData.id, selected ? "off" : "on"])
+                    }
+                    Ui.Button {
+                      visible: modelData.connected && modelData.caps.clipboard && modelData.clipboardEnabled === true
+                      bordered: true
+                      foreground: root.foreground
+                      text: "Send clipboard"
+                      onClicked: root.engine.sendClipboardToPhone(modelData.id, modelData.name)
+                    }
+                  }
+
+                  RowLayout {
+                    visible: phoneCard.expanded
+                    Layout.fillWidth: true
+                    Ui.Button {
+                      visible: modelData.mirroring === true
+                      bordered: true
+                      foreground: root.foreground
+                      text: "Open phone"
+                      onClicked: root.engine.runKdeconnectCmd(["open-phone", modelData.id])
+                    }
                     Ui.Button {
                       visible: !!(modelData.caps && modelData.caps.sftp)
                       bordered: true
@@ -853,22 +885,56 @@ Panel {
                       onClicked: if (root.engine) root.engine.ringPhone(modelData.id, modelData.name)
                     }
                   }
+
+                  RowLayout {
+                    visible: phoneCard.expanded
+                    Layout.fillWidth: true
+                    Ui.Button {
+                      visible: modelData.caps.notifications
+                      bordered: true
+                      foreground: root.foreground
+                      text: "Reply…"
+                      tooltipText: "Reply to a phone notification"
+                      onClicked: root.engine.runKdeconnectCmd(["notifications", modelData.id])
+                    }
+                    Ui.Button {
+                      visible: modelData.caps.messages
+                      bordered: true
+                      foreground: root.foreground
+                      text: "Messages"
+                      onClicked: root.engine.runKdeconnectCmd(["messages", modelData.id])
+                    }
+                    Ui.Button {
+                      visible: modelData.caps.media
+                      bordered: true
+                      foreground: root.foreground
+                      text: "Play / pause"
+                      onClicked: root.engine.runKdeconnectCmd(["media", modelData.id])
+                    }
+                  }
+
+                  Text {
+                    visible: phoneCard.expanded && (modelData.recentFiles || []).length > 0
+                    Layout.fillWidth: true
+                    textFormat: Text.PlainText
+                    text: "Recently received\n" + (modelData.recentFiles || []).join("\n")
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WrapAnywhere
+                  }
                 }
               }
             }
 
             // Compact hint when no phone is currently connected and setup is collapsed
             Text {
-              visible: root.kcConnected.length === 0 && !root.showPairSetup
+              visible: root.kcPaired.length === 0 && !root.showPairSetup
               Layout.fillWidth: true
               textFormat: Text.PlainText
               text: {
                 if (root.kcPairable.length > 0) {
                   return "Found " + root.kcPairable[0].name + " — click Pair (" + root.kcPairable.length + ") above to connect."
-                }
-                if (root.kcOffline.length > 0) {
-                  var names = root.kcOffline.map(function(d) { return d.name }).join(", ")
-                  return names + " offline — open KDE Connect on your phone to sync clipboard."
                 }
                 return "Open KDE Connect on iOS or Android (LAN or lean-mesh) and click Pair / IP."
               }

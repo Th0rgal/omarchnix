@@ -147,9 +147,8 @@ in
   };
   orb-desktop = final.callPackage ../pkgs/orb-desktop.nix {
     orbSrc = inputs.orb;
-    sandboxed-sh = final.callPackage "${inputs.orb}/nix/package.nix" {
-      inherit (final) turbo-lean;
-    };
+    # Orb's release pairs the backend with its audited turbo-lean revision.
+    sandboxed-sh = inputs.orb.packages.${final.stdenv.hostPlatform.system}.orb-core;
   };
   sandboxed-sh = final.orb-desktop.passthru.sandboxed-sh;
   folio-desktop = inputs.folio.packages.${final.stdenv.hostPlatform.system}.folio-desktop;

@@ -1,4 +1,5 @@
 """Copy a region from compositor pixels captured before the interactive picker."""
+from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import os
@@ -19,17 +20,26 @@ def output_bounds(outputs):
         scale = output["scale"]
         x, y = output["x"], output["y"]
         bounds.append((x, y, x + round(width / scale), y + round(height / scale), scale))
-    return (min(b[0] for b in bounds), min(b[1] for b in bounds),
-            max(b[2] for b in bounds), max(b[3] for b in bounds), max(b[4] for b in bounds))
+    return bounds
 
 
 def main():
     outputs = json.loads(subprocess.check_output(["hyprctl", "monitors", "-j"]))
-    left, top, right, bottom, scale = output_bounds(outputs)
+    bounds = output_bounds(outputs)
+    left, top = min(b[0] for b in bounds), min(b[1] for b in bounds)
+    right, bottom = max(b[2] for b in bounds), max(b[3] for b in bounds)
     geometry = f"{left},{top} {right-left}x{bottom-top}"
     with tempfile.TemporaryDirectory(dir=os.environ.get("XDG_RUNTIME_DIR")) as tmp:
-        frame = Path(tmp) / "frame.ppm"
-        subprocess.run(["grim", "-s", str(scale), "-g", geometry, "-t", "ppm", frame], check=True)
+        # grim chooses the highest scale of the outputs touched by the selection.
+        # Freeze the available resolutions before slurp takes the pointer grab.
+        def capture(scale):
+            frame = Path(tmp) / f"frame-{scale}.ppm"
+            subprocess.run(["grim", "-s", str(scale), "-g", geometry, "-t", "ppm", frame], check=True)
+            return scale, frame
+
+        scales = {b[4] for b in bounds}
+        with ThreadPoolExecutor(max_workers=len(scales)) as pool:
+            frames = dict(pool.map(capture, scales))
         pick = subprocess.run(["omarchy-capture-region", "region"], capture_output=True, text=True)
         if pick.returncode:
             return
@@ -41,6 +51,9 @@ def main():
             raise ValueError("selection outside captured desktop")
         def pixel(value):
             return math.floor(value * scale + 0.5)
+        scale = max(s for l, t, r, b, s in bounds
+                    if x < r and l < x + width and y < b and t < y + height)
+        frame = frames[scale]
         cx, cy = pixel(x-left), pixel(y-top)
         # grim truncates scaled region dimensions, including at fractional scale.
         cw, ch = max(1, int(width * scale)), max(1, int(height * scale))

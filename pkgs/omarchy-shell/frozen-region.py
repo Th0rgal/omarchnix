@@ -42,7 +42,8 @@ def main():
         def pixel(value):
             return math.floor(value * scale + 0.5)
         cx, cy = pixel(x-left), pixel(y-top)
-        cw, ch = pixel(x+width-left)-cx, pixel(y+height-top)-cy
+        # grim truncates scaled region dimensions, including at fractional scale.
+        cw, ch = max(1, int(width * scale)), max(1, int(height * scale))
         image = Path(tmp) / "selection.png"
         subprocess.run(["magick", frame, "-crop", f"{cw}x{ch}+{cx}+{cy}", "+repage", image], check=True)
         with image.open("rb") as stream:

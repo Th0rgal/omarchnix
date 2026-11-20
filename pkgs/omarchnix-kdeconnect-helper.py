@@ -25,6 +25,11 @@ FUSERMOUNT3_BIN = "@FUSERMOUNT3_BIN@"
 GIO_BIN = "@GIO_BIN@"
 XDG_OPEN_BIN = "@XDG_OPEN_BIN@"
 
+SCRCPY_BIN = "@SCRCPY_BIN@"
+ZENITY_BIN = "@ZENITY_BIN@"
+CLIPBOARD = "kdeconnect_clipboard"
+NOTIFICATIONS = "org.kde.kdeconnect.device.notifications"
+
 BUS_NAME = "org.kde.kdeconnect"
 DAEMON_PATH = "/modules/kdeconnect"
 DAEMON_IFACE = "org.kde.kdeconnect.daemon"
@@ -339,6 +344,15 @@ def build_snapshot(conn: Gio.DBusConnection, seed_once: bool = False) -> dict[st
             except Exception:
                 loaded = []
 
+        supported = props.get("supportedPlugins", [])
+        clipboard_enabled = None
+        if paired and (CLIPBOARD in supported or not reachable):
+            try:
+                clipboard_enabled = dbus_call(conn, dev_path, DEVICE_IFACE, "isPluginEnabled",
+                                              GLib.Variant("(s)", (CLIPBOARD,)), "(b)")[0]
+            except GLib.Error:
+                pass
+
         battery_pct = -1
         charging = False
         if "kdeconnect_battery" in loaded:
@@ -377,7 +391,13 @@ def build_snapshot(conn: Gio.DBusConnection, seed_once: bool = False) -> dict[st
                 "verificationKey": str(props.get("verificationKey") or ""),
                 "battery": battery_pct,
                 "charging": charging,
+                "clipboardEnabled": clipboard_enabled,
+                "mirroring": bool(SCRCPY_BIN and not SCRCPY_BIN.startswith("@") and
+                                  any(p in supported for p in ("kdeconnect_sms", "kdeconnect_telephony"))),
                 "caps": {
+                    "notifications": "kdeconnect_notifications" in loaded,
+                    "messages": "kdeconnect_sms" in loaded,
+                    "media": "kdeconnect_mprisremote" in loaded,
                     "clipboard": "kdeconnect_clipboard" in loaded,
                     "share": "kdeconnect_share" in loaded,
                     "ring": "kdeconnect_findmyphone" in loaded,
@@ -406,11 +426,30 @@ def cmd_watch(conn: Gio.DBusConnection) -> int:
 
     loop = GLib.MainLoop()
     pending = {"timer": 0}
+    recent_files: dict[str, list[str]] = {}
+
+    def on_file_received(_conn, _sender, path, _iface, _signal, params):
+        parts = path.split("/")
+        if len(parts) != 6 or parts[1:4] != ["modules", "kdeconnect", "devices"]:
+            return
+        uri = params.unpack()[0]
+        if not uri.startswith("file:///"):
+            return
+        name = Gio.File.new_for_uri(uri).get_basename()
+        if name:
+            device_id = parts[4]
+            previous = recent_files.get(device_id, [])
+            recent_files[device_id] = [name] + [item for item in previous if item != name][:4]
+            schedule_refresh()
+
 
     def flush_snapshot() -> bool:
         pending["timer"] = 0
         try:
-            emit_json(build_snapshot(conn, seed_once=False))
+            snapshot = build_snapshot(conn, seed_once=False)
+            for device in snapshot["devices"]:
+                device["recentFiles"] = recent_files.get(device["id"], [])
+            emit_json(snapshot)
         except BrokenPipeError:
             loop.quit()
         except Exception:
@@ -443,6 +482,10 @@ def cmd_watch(conn: Gio.DBusConnection) -> int:
         Gio.DBusSignalFlags.NONE,
         schedule_refresh,
     )
+    conn.signal_subscribe(BUS_NAME, SHARE_IFACE, "shareReceived", None, None,
+                          Gio.DBusSignalFlags.NONE, on_file_received)
+    conn.signal_subscribe(None, "org.omarchnix.Sharing", "PreferencesChanged",
+                          "/org/omarchnix/Sharing", None, Gio.DBusSignalFlags.NONE, schedule_refresh)
     conn.signal_subscribe(
         "org.freedesktop.DBus",
         "org.freedesktop.DBus",
@@ -569,6 +612,57 @@ def cmd_browse_files(conn: Gio.DBusConnection, dev_id: str) -> int:
     return 0
 
 
+def open_android_phone() -> int:
+    if not SCRCPY_BIN or SCRCPY_BIN.startswith("@"):
+        raise ValueError("Android mirroring is disabled")
+    result = subprocess.run(["adb", "devices", "-l"], capture_output=True,
+                            text=True, timeout=10, check=True)
+    rows = []
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == "device":
+            model = next((v[6:] for v in parts[2:] if v.startswith("model:")), "Android")
+            rows.extend([parts[0], model])
+    if not rows:
+        raise ValueError("Enable USB debugging on Android, connect a data cable and approve this laptop, or pair using adb over Wi-Fi.")
+    # KDE Connect IDs and ADB serials are independent. Require an explicit target.
+    choice = subprocess.run([ZENITY_BIN, "--list", "--title=Open Android phone",
+                             "--text=Choose the authorized Android device to open",
+                             "--column=ADB device", "--column=Model", *rows],
+                            capture_output=True, text=True)
+    if choice.returncode == 1:
+        return 0
+    choice.check_returncode()
+    return subprocess.run([SCRCPY_BIN, "--serial", choice.stdout.strip(),
+                           "--no-clipboard-autosync"]).returncode
+
+
+def reply_to_notification(conn: Gio.DBusConnection, dev_path: str) -> int:
+    path = dev_path + "/notifications"
+    ids = dbus_call(conn, path, NOTIFICATIONS, "activeNotifications", None, "(as)")[0]
+    iface = NOTIFICATIONS + ".notification"
+    rows = []
+    for nid in ids:
+        try:
+            props = dbus_call(conn, path + "/" + nid, PROPS_IFACE, "GetAll",
+                              GLib.Variant("(s)", (iface,)), "(a{sv})")[0]
+        except GLib.Error:
+            continue  # Withdrawn while the dialog was opening
+        if props.get("replyId"):
+            rows.extend([nid, props.get("appName", ""), props.get("title", ""), props.get("text", "")])
+    if not rows:
+        raise ValueError("No phone notifications currently accept a reply")
+    cells = "\n".join(" ".join(cell.splitlines()) for cell in rows) + "\n"
+    choice = subprocess.run([ZENITY_BIN, "--list", "--no-markup", "--title=Reply to notification",
+                             "--column=ID", "--hide-column=1", "--column=App",
+                             "--column=Title", "--column=Message"], input=cells, capture_output=True, text=True)
+    if choice.returncode == 1:
+        return 0
+    choice.check_returncode()
+    dbus_call(conn, path + "/" + choice.stdout.strip(), iface, "reply")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "snapshot"
     conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
@@ -619,7 +713,7 @@ def main(argv: list[str]) -> int:
             targets = [
                 d["id"]
                 for d in snap.get("devices", [])
-                if d.get("connected") and d.get("caps", {}).get("clipboard")
+                if d.get("connected") and d.get("clipboardEnabled") and d.get("caps", {}).get("clipboard")
             ]
             if not targets:
                 sys.stderr.write("No connected phone with clipboard sync enabled\n")
@@ -633,6 +727,10 @@ def main(argv: list[str]) -> int:
         if not is_safe_device_id(target):
             sys.stderr.write("Invalid device ID\n")
             return 1
+        if not any(d["id"] == target and d["clipboardEnabled"] and d["caps"]["clipboard"]
+                   for d in build_snapshot(conn)["devices"]):
+            sys.stderr.write("Clipboard sharing is off or the phone is offline\n")
+            return 1
         res = run_kdeconnect_cli(["--device", target, "--send-clipboard"])
         if res.returncode != 0:
             sys.stderr.write((res.stderr or "Clipboard send failed").strip() + "\n")
@@ -644,6 +742,38 @@ def main(argv: list[str]) -> int:
     dev_id = argv[2]
     dev_path = f"{DAEMON_PATH}/devices/{dev_id}"
 
+    if cmd in ("clipboard-setting", "open-phone", "notifications", "messages", "media"):
+        if not dbus_call(conn, dev_path, DEVICE_IFACE, "isPaired", None, "(b)")[0]:
+            raise ValueError("Phone is no longer paired")
+    if cmd == "clipboard-setting":
+        if len(argv) != 4 or argv[3] not in ("on", "off"):
+            raise ValueError("Choose on or off")
+        dbus_call(conn, dev_path, DEVICE_IFACE, "setPluginEnabled",
+                  GLib.Variant("(sb)", (CLIPBOARD, argv[3] == "on")))
+        # KDE emits pluginsChanged only when the set of loaded plugins changes.
+        # Offline preferences also need to reach every running panel.
+        conn.emit_signal(None, "/org/omarchnix/Sharing", "org.omarchnix.Sharing",
+                         "PreferencesChanged", None)
+        conn.flush_sync(None)
+        return 0
+    if cmd == "open-phone":
+        return open_android_phone()
+    if cmd == "messages":
+        return subprocess.run([str(pathlib.Path(KDECONNECT_CLI).with_name("kdeconnect-sms")),
+                               "--device", dev_id]).returncode
+    if cmd == "notifications":
+        return reply_to_notification(conn, dev_path)
+    if cmd == "media":
+        iface = "org.kde.kdeconnect.device.mprisremote"
+        path = dev_path + "/mprisremote"
+        props = dbus_call(conn, path, PROPS_IFACE, "GetAll", GLib.Variant("(s)", (iface,)), "(a{sv})")[0]
+        if not props.get("playerList"):
+            raise ValueError("Start a media player on the phone first")
+        if props.get("player") not in props["playerList"]:
+            dbus_call(conn, path, PROPS_IFACE, "Set", GLib.Variant("(ssv)", (
+                iface, "player", GLib.Variant("s", props["playerList"][0]))))
+        dbus_call(conn, path, iface, "sendAction", GLib.Variant("(s)", ("PlayPause",)))
+        return 0
     if cmd == "pair":
         dbus_call(conn, dev_path, DEVICE_IFACE, "requestPairing")
         return 0
@@ -702,4 +832,7 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    try:
+        sys.exit(main(sys.argv))
+    except (GLib.Error, ValueError, OSError, subprocess.SubprocessError) as error:
+        sys.exit(str(error))

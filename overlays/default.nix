@@ -149,6 +149,7 @@ in
     orbSrc = inputs.orb;
     # Orb's release pairs the backend with its audited turbo-lean revision.
     sandboxed-sh = final.callPackage "${inputs.orb}/nix/package.nix" {
+      buildDesktop = true;
       turbo-lean = final.callPackage "${inputs.orb}/nix/turbo-lean.nix" {
         # Cargo.lock is read during evaluation, including on non-native CI hosts.
         turboLeanSrc = builtins.fetchTree {

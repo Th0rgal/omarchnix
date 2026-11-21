@@ -82,6 +82,7 @@ let
     pkgs.xdg-terminal-exec
     pkgs.xdg-user-dirs
     pkgs.xdg-utils
+    pkgs.zenity
     pkgs.zbar
   ];
 
@@ -188,6 +189,9 @@ let
 
         substituteInPlace "$out/shell/plugins/panels/monitor/Panel.qml" \
           --replace-fail $'                text: root.current ? root.current.title : Commons.I18n.t("monitor.display")\n                textFormat: Text.PlainText\n                color: root.bar.foreground\n                font.family: root.bar.fontFamily\n                font.pixelSize: Style.font.title\n                font.bold: true' $'                text: root.current ? root.current.title : Commons.I18n.t("monitor.display")\n                textFormat: Text.PlainText\n                color: root.bar.foreground\n                font.family: Style.font.menuFamily\n                font.pixelSize: Style.font.heroTitle\n                font.weight: Font.DemiBold'
+
+        install -Dm755 ${./omarchy-shell/wifi-password.py} "$out/bin/omarchnix-wifi-password"
+        patch -p1 -d "$out/shell/plugins/panels/network" < ${./patches/omarchy-shell-wifi-password.patch}
 
         # Display panel: dragging or ctrl+arrows in the layout map only stages an
         # arrangement; Apply / Enter sends it to the displays, Cancel / Esc drops it.

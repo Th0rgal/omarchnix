@@ -34,6 +34,7 @@
 }:
 let
   version = "0.13.0";
+  hasHybridSidebar = builtins.pathExists "${orbSrc}/linux_shell/gtk_leanui.c";
 
   # Upstream `orb` (`nix/package.nix`) stages `lean-sys` offline and compiles
   # all Lean 4 modules once via `turbo-lean` + `clang`/`lld`; add `autoPatchelfHook`
@@ -455,6 +456,11 @@ stdenv.mkDerivation {
   buildPhase = ''
     runHook preBuild
     make CC="${clang}/bin/clang" HAS_WEBKIT=1 orb-desktop
+    ${lib.optionalString hasHybridSidebar ''
+      mkdir -p ../lean/OrbDesktop/c
+      ln -s "${orbSrc}/lean/OrbDesktop/c/sidebar_host.h" ../lean/OrbDesktop/c/sidebar_host.h
+      make CC="${clang}/bin/clang" HAS_WEBKIT=1 orb-sidebar-host.so
+    ''}
     ./orb-desktop --self-test
     runHook postBuild
   '';
@@ -490,6 +496,20 @@ stdenv.mkDerivation {
     Categories=Development;Utility;
     StartupWMClass=orb-desktop
     EOF
+    ${lib.optionalString hasHybridSidebar ''
+      install -Dm0755 orb-sidebar-host.so "$out/lib/orb-sidebar-host.so"
+      cat > "$out/share/applications/orb-leanui-hybrid.desktop" <<EOF
+      [Desktop Entry]
+      Name=Orb LeanUI Hybrid
+      Comment=LeanUI sidebar with Orb WebKit pages
+      Exec=$out/bin/orb --leanui-hybrid
+      Icon=orb
+      Terminal=false
+      Type=Application
+      Categories=Development;
+      StartupWMClass=orb-desktop
+      EOF
+    ''}
     cat > "$out/bin/.orb-dev" <<'SH'
     #!${bash}/bin/bash
     # `orb dev`: run the Orb UI from a local checkout with instant reload (Vite HMR)
@@ -595,6 +615,13 @@ stdenv.mkDerivation {
         if [ -d /run/opengl-driver/share/glvnd/egl_vendor.d ]; then
           export __EGL_VENDOR_LIBRARY_DIRS="/run/opengl-driver/share/glvnd/egl_vendor.d"
         fi
+        ${lib.optionalString hasHybridSidebar ''
+          if [ "''${1:-}" = --leanui-hybrid ]; then
+            shift
+            host="$(dirname "$(readlink -f "$0")")/../lib/orb-sidebar-host.so"
+            exec "${sandboxedShOffline}/bin/orb-desktop-native" --gtk-sidebar-host "$host" "$@"
+          fi
+        ''}
       ''}
   '';
 

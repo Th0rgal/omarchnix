@@ -19,6 +19,7 @@
   openssl,
   libnotify,
   xdg-utils,
+  wl-clipboard,
   cacert,
   clang,
   gst_all_1,
@@ -475,6 +476,17 @@ stdenv.mkDerivation {
     Categories=Development;Utility;
     StartupWMClass=orb-desktop
     EOF
+    cat > "$out/share/applications/orb-leanui.desktop" <<EOF
+    [Desktop Entry]
+    Name=Orb LeanUI
+    Comment=Native Orb desktop trial
+    Exec=$out/bin/orb --leanui
+    Icon=orb
+    Terminal=false
+    Type=Application
+    Categories=Development;Utility;
+    StartupWMClass=orb-desktop
+    EOF
     cat > "$out/bin/.orb-dev" <<'SH'
     #!${bash}/bin/bash
     # `orb dev`: run the Orb UI from a local checkout with instant reload (Vite HMR)
@@ -547,6 +559,7 @@ stdenv.mkDerivation {
           libnotify
           python3
           xdg-utils
+          wl-clipboard
         ]
       }" \
       --set ORB_LOCALD_BIN "${sandboxedShOffline}/bin/orb-locald" \
@@ -558,6 +571,7 @@ stdenv.mkDerivation {
       --set-default NIX_SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
       --set ORB_UI_ROOT "$out/share/orb" \
       --run ${lib.escapeShellArg ''
+        if [ "''${1:-}" = --leanui ]; then shift; exec "${sandboxedShOffline}/bin/orb-desktop-native" "$@"; fi
         if [ "''${1:-}" = dev ]; then shift; exec "$(dirname "$(readlink -f "$0")")/.orb-dev" "$@"; fi
         if [ -d /run/opengl-driver/share ]; then
           export XDG_DATA_DIRS="/run/opengl-driver/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"

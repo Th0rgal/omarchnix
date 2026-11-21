@@ -618,6 +618,7 @@ stdenv.mkDerivation {
         ${lib.optionalString hasHybridSidebar ''
           if [ "''${1:-}" = --leanui-hybrid ]; then
             shift
+            export ORB_LOCALD_PORT="''${ORB_LOCALD_PORT:-19579}"
             host="$(dirname "$(readlink -f "$0")")/../lib/orb-sidebar-host.so"
             exec "${sandboxedShOffline}/bin/orb-desktop-native" --gtk-sidebar-host "$host" "$@"
           fi

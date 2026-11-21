@@ -1,6 +1,6 @@
 # `omarchnix`
 
-Declarative Omarchy-compatible NixOS & Home Manager workstation stack across **`aarch64-linux`** (Apple Silicon M-series via Asahi Linux, NVIDIA Grace / DGX Spark) and **`x86_64-linux`** workstations and VMs.
+Declarative Omarchy-compatible NixOS and Home Manager desktop stack developed on the MacBook Air M2. QEMU guests support screenshots and desktop testing on ARM and x86 Linux. The flake also exports example UEFI workstation configurations for downstream users.
 
 See [`docs/VISION.md`](docs/VISION.md) for the full architecture, [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-19`) for recorded design decisions, and [`docs/showcase.md`](docs/showcase.md) to reproduce the desktop screenshots below in QEMU/KVM.
 
@@ -22,7 +22,7 @@ Native `2560×1600` (`1.6x` HiDPI) Wayland captures of the `starship-subtle` gla
 
 ## Reusable Flake Outputs
 
-`omarchnix` is designed to be consumed as a reusable flake input by your own personal NixOS & Home Manager configuration repo (for example, see [`Th0rgal/nixos-config`](https://github.com/Th0rgal/nixos-config) for a full personal MacBook Air M2 + DGX Spark setup):
+`omarchnix` is designed to be consumed as a reusable flake input by your own personal NixOS & Home Manager configuration repo (for example, see [`Th0rgal/nixos-config`](https://github.com/Th0rgal/nixos-config) for a personal MacBook Air M2 setup with ARM and x86 QEMU test guests):
 
 ```nix
 {

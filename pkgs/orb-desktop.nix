@@ -567,6 +567,7 @@ stdenv.mkDerivation {
           zenity
         ]
       }" \
+      --set ORB_ACCOUNT_LAUNCHER "$out/bin/orb" \
       --set ORB_LOCALD_BIN "${sandboxedShOffline}/bin/orb-locald" \
       --set ORB_SIGNER_BIN "$out/bin/.orb-signer" \
       --set-default ORB_VOICE_PYTHON "${python3}/bin/python3" \
@@ -577,6 +578,7 @@ stdenv.mkDerivation {
       --set ORB_UI_ROOT "$out/share/orb" \
       --run ${lib.escapeShellArg ''
         if [ "''${1:-}" = --leanui ]; then shift; exec "${sandboxedShOffline}/bin/orb-desktop-native" "$@"; fi
+        if [ "''${1:-}" = --webkit ]; then shift; fi
         if [ "''${1:-}" = dev ]; then shift; exec "$(dirname "$(readlink -f "$0")")/.orb-dev" "$@"; fi
         if [ -d /run/opengl-driver/share ]; then
           export XDG_DATA_DIRS="/run/opengl-driver/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"

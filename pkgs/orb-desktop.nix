@@ -461,6 +461,7 @@ stdenv.mkDerivation {
     runHook preInstall
     mkdir -p "$out/bin" "$out/share/orb" "$out/share/applications" "$out/share/pixmaps"
     install -m 0755 orb-desktop "$out/bin/.orb-desktop-unwrapped"
+    ln -s "${sandboxedShOffline}/bin/sandboxed-mcp" "$out/bin/sandboxed-mcp"
     cp -r ${orb-ui}/. "$out/share/orb/"
     if [ -f "${orbSrc}/macos_shell/icons/icon.png" ]; then
       install -m 0644 "${orbSrc}/macos_shell/icons/icon.png" "$out/share/pixmaps/orb.png"

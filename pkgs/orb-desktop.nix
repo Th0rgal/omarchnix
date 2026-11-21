@@ -20,6 +20,8 @@
   libnotify,
   xdg-utils,
   wl-clipboard,
+  pulseaudio,
+  zenity,
   cacert,
   clang,
   gst_all_1,
@@ -561,6 +563,8 @@ stdenv.mkDerivation {
           python3
           xdg-utils
           wl-clipboard
+          pulseaudio
+          zenity
         ]
       }" \
       --set ORB_LOCALD_BIN "${sandboxedShOffline}/bin/orb-locald" \

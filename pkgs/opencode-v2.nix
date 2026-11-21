@@ -1,6 +1,4 @@
-# OpenCode v2 CLI built from the upstream flake sources on aarch64-linux (nixpkgs lags
-# behind there), with auto-update disabled and ripgrep on PATH. Other systems use
-# nixpkgs' `opencode`.
+# Use the same pinned CLI on the Mac and its x86 test guest.
 {
   lib,
   stdenv,
@@ -10,7 +8,14 @@
   ripgrep,
   wayland,
 }:
-if stdenv.hostPlatform.system == "aarch64-linux" then
+let
+  inherit (stdenv.hostPlatform) system;
+  nodeModulesHashes = {
+    aarch64-linux = "sha256-L0rDvr0j/+R8bSErWXO1xTPac5rVamUny4clIThzSUk=";
+    x86_64-linux = "sha256-N/VSSutmwwP1S7P0miONCyIXGKBpv9lrIIW9u+4dqnk=";
+  };
+in
+if builtins.hasAttr system nodeModulesHashes then
   let
     opencodeVersion = "2.2.7";
     opencodeSrc = fetchFromGitHub {
@@ -21,7 +26,7 @@ if stdenv.hostPlatform.system == "aarch64-linux" then
     };
     opencodeNodeModules = callPackage "${opencodeSrc}/nix/node_modules.nix" {
       rev = "v${opencodeVersion}";
-      hash = "sha256-L0rDvr0j/+R8bSErWXO1xTPac5rVamUny4clIThzSUk=";
+      hash = nodeModulesHashes.${system};
     };
   in
   (callPackage "${opencodeSrc}/nix/opencode.nix" {

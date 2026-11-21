@@ -40,7 +40,7 @@ stdenvNoCC.mkDerivation {
     Terminal=false
     Type=Application
     Categories=Office;Calendar;
-    StartupWMClass=helium-calendar.notion.so__-Default
+    StartupWMClass=chrome-calendar.notion.so__-Default
     EOF
     runHook postInstall
   '';

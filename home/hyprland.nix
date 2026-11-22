@@ -904,6 +904,82 @@ let
         -- 2 passes each time they load. Put this config's blur back, so it is
         -- the same at login as after a later reload or power-profile change.
         hl.config({ decoration = { blur = ${lib.generators.toLua { } blurSettings} } })
+
+        -- Ensure the active monitor layout always covers global (0, 0).
+        -- Omarchy's monitor-settings.lua restores each display's saved position
+        -- independently (e.g. eDP-1 at 480x1440 below an external monitor at
+        -- 0x0). When that external monitor is unplugged, eDP-1 stays orphaned
+        -- at 480x1440 with no output covering (0, 0). Chromium on Wayland
+        -- reports (0, 0) for window positions, so extension popups (Rabby,
+        -- MetaMask, etc.) calling chrome.windows.create({ type = "popup", ... })
+        -- fail with "Bounds must be at least 50% within visible screen space"
+        -- and never open.
+        local function logical_size(m)
+          local scale = (m.scale and m.scale > 0) and m.scale or 1
+          local w = (m.width or 0) / scale
+          local h = (m.height or 0) / scale
+          local tr = (m.transform or 0) % 4
+          if tr == 1 or tr == 3 then
+            return h, w
+          end
+          return w, h
+        end
+
+        local function normalize_monitor_origin()
+          local mons = {}
+          for _, m in ipairs(hl.get_monitors()) do
+            if not m.is_mirror and not m.disabled then
+              mons[#mons + 1] = m
+            end
+          end
+          if #mons == 0 then return end
+
+          local min_x, min_y = nil, nil
+          for _, m in ipairs(mons) do
+            local lw, lh = logical_size(m)
+            if m.x <= 0 and m.y <= 0 and (m.x + lw) > 0 and (m.y + lh) > 0 then
+              return
+            end
+            if min_x == nil or m.x < min_x then min_x = m.x end
+            if min_y == nil or m.y < min_y then min_y = m.y end
+          end
+
+          if not min_x or not min_y or (min_x == 0 and min_y == 0) then
+            return
+          end
+
+          -- Shift active monitors together so the top-leftmost sits at (0, 0)
+          -- without modifying ~/.local/state/omarchy/monitors/settings.
+          for _, m in ipairs(mons) do
+            local nx = math.floor((m.x - min_x) + 0.5)
+            local ny = math.floor((m.y - min_y) + 0.5)
+            hl.monitor({
+              output = m.name,
+              position = tostring(nx) .. "x" .. tostring(ny),
+            })
+          end
+        end
+
+        local function reconcile_monitor_origin(reapply_saved)
+          -- When an external display is plugged back in after shifting eDP-1
+          -- to 0x0, re-apply Omarchy's saved layout across all connected
+          -- monitors first so the multi-monitor arrangement is restored.
+          if reapply_saved and o and o.monitor_settings and o.monitor_settings.apply then
+            pcall(o.monitor_settings.apply, false)
+          end
+          normalize_monitor_origin()
+        end
+
+        hl.timer(function() reconcile_monitor_origin(false) end, { type = "oneshot", timeout = 50 })
+        hl.on("hyprland.start", function()
+          hl.timer(function() reconcile_monitor_origin(false) end, { type = "oneshot", timeout = 100 })
+        end)
+        hl.on("monitor.removed", function()
+          hl.timer(function() reconcile_monitor_origin(false) end, { type = "oneshot", timeout = 100 })
+        end)
+        hl.on("monitor.added", function()
+          hl.timer(function() reconcile_monitor_origin(true) end, { type = "oneshot", timeout = 150 })
+        end)
       end
     ''}
   '';

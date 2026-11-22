@@ -103,6 +103,8 @@ jobs:
           set -euxo pipefail
           (
           set -euxo pipefail
+          # Orb.Spec and the Asahi kernel compete for the ARM runner during a cold build.
+          nix build .#orb-desktop -j1 -L --no-link
           M2AIR_SYS="$(nix build .#nixosConfigurations.m2air.config.system.build.toplevel -L --no-link --print-out-paths)"
           INSTALL_BL="$(nix build .#nixosConfigurations.m2air.config.system.build.installBootLoader -L --no-link --print-out-paths)"
           AURORA_STAGE2="$(nix build .#nixosConfigurations.m2air-aurora.config.system.build.auroraStage2 -L --no-link --print-out-paths)"

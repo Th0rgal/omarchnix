@@ -597,6 +597,9 @@ stdenv.mkDerivation {
       --set-default NIX_SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
       --set ORB_UI_ROOT "$out/share/orb" \
       --run ${lib.escapeShellArg ''
+        ${lib.optionalString hasHybridSidebar ''
+          if [ "$#" -eq 0 ] && [ "''${ORB_DEFAULT_UI:-}" = hybrid ]; then set -- --leanui-hybrid; fi
+        ''}
         if [ "''${1:-}" = --leanui ]; then shift; exec "${sandboxedShOffline}/bin/orb-desktop-native" "$@"; fi
         if [ "''${1:-}" = --webkit ]; then shift; fi
         if [ "''${1:-}" = dev ]; then shift; exec "$(dirname "$(readlink -f "$0")")/.orb-dev" "$@"; fi

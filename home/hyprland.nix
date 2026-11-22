@@ -30,7 +30,7 @@ let
   # Keep Orb in the normal UWSM graphical-session scope. The package selects
   # the upstream GTK/WebKit shell for the pinned GTK3 Orb revision.
   orbBinary = if pkgs ? orb-desktop then "${pkgs.orb-desktop}/bin/orb" else "orb";
-  orb = "uwsm-app -- ${orbBinary}";
+  orb = "uwsm-app -- ${orbBinary} --leanui-hybrid";
   shellLock =
     if cfg.shell.package != null then
       "${cfg.shell.package}/bin/omarchy-shell lock lock"

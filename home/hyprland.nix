@@ -1029,11 +1029,14 @@ in
           local target = w or (hl.active_window and hl.active_window())
           passthrough_win_addr = target and target.address or nil
           passthrough_forced_fs = (with_fs == true)
+          _G.__omarchnix_passthrough = true
           local f = io.open(passthrough_flag, "w")
           if f then f:write(passthrough_forced_fs and "fs\n" or "1\n"); f:close() end
           if passthrough_forced_fs then
             hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set" }))
           end
+          -- Suppress host 3-finger horizontal workspace swipe while in passthrough
+          pcall(function() hl.config({ gestures = { workspace_swipe_distance = 100000 } }) end)
           hl.dispatch(hl.dsp.submap("passthrough"))
           hl.dispatch(hl.dsp.exec_cmd("notify-send -t 2000 'Parent Shortcuts OFF' 'Forwarded to window (Option+G to return)'"))
         end
@@ -1042,7 +1045,9 @@ in
           local should_unset_fs = (unset_fs == true) or (unset_fs == nil and passthrough_forced_fs)
           passthrough_win_addr = nil
           passthrough_forced_fs = false
+          _G.__omarchnix_passthrough = false
           os.remove(passthrough_flag)
+          pcall(function() hl.config({ gestures = { workspace_swipe_distance = 180 } }) end)
           hl.dispatch(hl.dsp.submap("reset"))
           if should_unset_fs then
             hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "unset" }))
@@ -1371,6 +1376,7 @@ in
           direction = "right";
           action = mkLuaInline ''
             function()
+              if _G.__omarchnix_passthrough then return end
               local w = hl.get_active_window()
               if not w or not w.workspace then return end
               local id = tonumber(w.workspace.id) or 1
@@ -1386,6 +1392,7 @@ in
           direction = "left";
           action = mkLuaInline ''
             function()
+              if _G.__omarchnix_passthrough then return end
               local w = hl.get_active_window()
               if not w or not w.workspace then return end
               local id = tonumber(w.workspace.id) or 1

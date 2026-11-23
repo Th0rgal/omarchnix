@@ -104,6 +104,7 @@ let
 
   focusCursorMonitorBeforeExec = cmd: ''
     function()
+      if _G.__omarchnix_passthrough then return end
       local m = hl.get_monitor_at_cursor and hl.get_monitor_at_cursor()
       if m and not m.focused then
         hl.dispatch(hl.dsp.focus({ monitor = m.name }))

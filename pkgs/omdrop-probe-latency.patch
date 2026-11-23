@@ -1,0 +1,26 @@
+--- a/userspace/omdrop-broadcom.sh
++++ b/userspace/omdrop-broadcom.sh
+@@ -213,8 +213,11 @@
+     [[ -n $was ]] && printf '%s' "$was" > "$TRACE"
+     return 1
+   fi
+-  sleep 3
+   n=$(dmesg | awk '/awdl txstatus/' | grep -c 'tx_status=0x' || true)
++  if (( n < 15 )); then
++    sleep 3
++    n=$(dmesg | awk '/awdl txstatus/' | grep -c 'tx_status=0x' || true)
++  fi
+   [[ -n $was ]] && printf '%s' "$was" > "$TRACE"
+   printf '%s' "$n"
+ }
+@@ -305,7 +308,9 @@
+     iovar_set awdl "$(le32 0)"; sleep 2
+     iovar_set awdl "$(le32 1)"; sleep 3
+     ip link set "$IF" promisc on 2>/dev/null; ip link set "$IF" allmulticast on 2>/dev/null
+-    for wait in 7 30; do
++    # Probe immediately. If it fails, its three-second collection window
++    # plus four seconds here preserves the original delayed retry.
++    for wait in 0 4 30; do
+       sleep "$wait"
+       n=$(probe_completions) || return 2
+       log "gate: enable $try, probe 20 frames -> $n completions"

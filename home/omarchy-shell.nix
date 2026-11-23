@@ -176,7 +176,7 @@ let
     center = [
       {
         id = "omarchy.clock";
-        format = "dddd HH:mm";
+        format = "dddd d MMM HH:mm";
         formatAlt = "d MMMM 'W'ww yyyy";
       }
     ];

@@ -70,9 +70,8 @@ in
           else
             "${hyprctl} dispatch 'hl.dsp.dpms(\"on\")'"
         }${lib.optionalString dimKbd "; ${kbdRestoreCmd}"}${
-          lib.optionalString (
-            shellPkg != null
-          ) "; ${shellPkg}/bin/omarchy-shell lock resume >/dev/null 2>&1 || true"
+          lib.optionalString (shellPkg != null)
+            "; ${shellPkg}/bin/omarchy-shell lock resume >/dev/null 2>&1 || true; ${shellPkg}/bin/omarchy-shell -q omarchy.clock refresh >/dev/null 2>&1 || true; ${shellPkg}/bin/omarchy-shell -q omarchy.elsewhen refresh >/dev/null 2>&1 || true"
         }";
         ignore_dbus_inhibit = false;
       };

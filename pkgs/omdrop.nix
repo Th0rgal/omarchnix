@@ -89,6 +89,7 @@ let
     pname = "omdrop-awdl";
     version = awdlVersion;
     src = omdropAwdlSrc;
+    patches = [ ./omdrop-probe-latency.patch ];
     dontBuild = true;
     # Keep real script files intact at exact paths annotated in Polkit policy.
     dontPatchShebangs = true;

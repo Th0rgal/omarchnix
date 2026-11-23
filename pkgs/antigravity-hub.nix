@@ -208,6 +208,43 @@ if stdenv.hostPlatform.isLinux then
                   }
               }
           });
+          // Sync Electron nativeTheme.themeSource (which drives renderer CSS
+          // prefers-color-scheme and nativeTheme 'updated' events) directly from
+          // Omarchy's colors.toml so live dark/light switches work reliably on
+          // Hyprland even if xdg-desktop-portal restarts or misses SettingChanged.
+          const _omFs = require('fs');
+          const _omPath = require('path');
+          const _syncOmarchyThemeSource = () => {
+              try {
+                  const home = process.env.HOME || electron_1.app.getPath('home');
+                  const colorsToml = _omFs.readFileSync(_omPath.join(home, '.local/state/omarchy/current/theme/colors.toml'), 'utf-8');
+                  const m = colorsToml.match(/^\\s*mode\\s*=\\s*["']?(light|dark)["']?/m);
+                  if (m) {
+                      const desired = m[1] === 'light' ? 'light' : 'dark';
+                      if (electron_1.nativeTheme.themeSource !== desired) {
+                          electron_1.nativeTheme.themeSource = desired;
+                      }
+                  }
+              }
+              catch (_) {
+              }
+          };
+          electron_1.app.on('ready', () => {
+              _syncOmarchyThemeSource();
+              let _omThemeTimer = null;
+              const _scheduleOmThemeSync = () => {
+                  if (_omThemeTimer) clearTimeout(_omThemeTimer);
+                  _omThemeTimer = setTimeout(_syncOmarchyThemeSource, 120);
+              };
+              try {
+                  const home = process.env.HOME || electron_1.app.getPath('home');
+                  const currentDir = _omPath.join(home, '.local/state/omarchy/current');
+                  _omFs.watch(currentDir, _scheduleOmThemeSync);
+                  _omFs.watch(_omPath.join(currentDir, 'theme'), _scheduleOmThemeSync);
+              }
+              catch (_) {
+              }
+          });
       }
       """ + needle_gpu_oom,
           1,
@@ -281,6 +318,7 @@ if stdenv.hostPlatform.isLinux then
       substituteInPlace "$out/bin/.antigravity-orig" \
         --replace-fail "${antigravity-hub}" "$out"
       makeShellWrapper "$out/bin/.antigravity-orig" "$out/bin/antigravity" \
+        --set-default GTK_USE_PORTAL "1" \
         --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--enable-wayland-ime=true --wayland-text-input-version=3}}"
     '';
   }

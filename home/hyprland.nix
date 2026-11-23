@@ -47,6 +47,10 @@ let
     lockfile="''${XDG_RUNTIME_DIR:-/tmp}/omarchnix-screenshot.lock"
     exec 9>"$lockfile"
     ${flock} -n 9 || exit 0
+    ${lib.optionalString (omarchyShellBin != "") ''
+      "${omarchyShellBin}/omarchy-capture-screenshot" region copy 9>&-
+      exit $?
+    ''}
     region="$(${slurp} 9>&-)" || exit 0
     exec 9>&-
     [ -n "$region" ] || exit 0
@@ -998,6 +1002,94 @@ in
     extraConfig = lib.mkMerge [
       (lib.mkOrder 100 omarchyMultiScreenBootstrapLua)
       (lib.mkOrder 900 omarchyMultiScreenRuntimeLua)
+      (lib.mkOrder 950 ''
+        -- Remote/VM fullscreen + keyboard passthrough submap.
+        -- Pressing `Option + F` on a VNC / remote desktop window (`TigerVNC`, `vncviewer`,
+        -- `Moonlight`, `virt-viewer`, etc.) enters true fullscreen (over the top status bar
+        -- & dock) and forwards all WM shortcuts to the remote desktop.
+        -- Press `Option + F` (or `Cmd/Ctrl + Option + G`) again — or simply close the VNC
+        -- window — to automatically exit passthrough and return shortcuts to host Hyprland.
+        local passthrough_flag = "/tmp/omarchnix-passthrough.active"
+        local passthrough_win_addr = nil
+
+        local function is_remote_window(w)
+          if not w then return false end
+          local cls = (w.class or ""):lower()
+          local title = (w.title or ""):lower()
+          return cls:find("vnc", 1, true) ~= nil
+            or title:find("tigervnc", 1, true) ~= nil
+            or cls:find("moonlight", 1, true) ~= nil
+            or cls:find("remmina", 1, true) ~= nil
+            or cls:find("virt%-viewer") ~= nil
+            or cls:find("wlfreerdp", 1, true) ~= nil
+        end
+
+        local function enter_passthrough(w)
+          local target = w or (hl.active_window and hl.active_window())
+          passthrough_win_addr = target and target.address or nil
+          local f = io.open(passthrough_flag, "w")
+          if f then f:write("1\n"); f:close() end
+          hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set" }))
+          hl.dispatch(hl.dsp.submap("passthrough"))
+          hl.dispatch(hl.dsp.exec_cmd("notify-send -t 2000 'Fullscreen Grab ON' 'Shortcuts forwarded to remote (Option+F to exit)'"))
+        end
+
+        local function exit_passthrough(unset_fs)
+          passthrough_win_addr = nil
+          os.remove(passthrough_flag)
+          hl.dispatch(hl.dsp.submap("reset"))
+          if unset_fs ~= false then
+            hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "unset" }))
+          end
+          hl.dispatch(hl.dsp.exec_cmd("notify-send -t 1500 'Fullscreen Grab OFF' 'Returned to host Hyprland'"))
+        end
+
+        -- `Option + F`: auto-grab fullscreen on VNC/remote windows, normal fullscreen elsewhere.
+        hl.bind("ALT + F", function()
+          local w = hl.active_window and hl.active_window()
+          if is_remote_window(w) then
+            enter_passthrough(w)
+          else
+            hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen" }))
+          end
+        end)
+
+        hl.bind("SUPER + ALT + G", function() enter_passthrough(nil) end)
+        hl.bind("CTRL + ALT + G", function() enter_passthrough(nil) end)
+
+        hl.define_submap("passthrough", function()
+          hl.bind("ALT + F", function() exit_passthrough(true) end)
+          hl.bind("SUPER + ALT + G", function() exit_passthrough(true) end)
+          hl.bind("CTRL + ALT + G", function() exit_passthrough(true) end)
+          -- Keep laptop lid clamshell working without breaking passthrough mode
+          hl.bind("switch:on:Lid Switch", hl.dsp.exec_cmd(${builtins.toJSON lidCloseCmd}), { locked = true })
+          hl.bind("switch:off:Lid Switch", hl.dsp.exec_cmd(${builtins.toJSON lidClamshellCmd}), { locked = true })
+          hl.bind("switch:on:Apple SMC power/lid events", hl.dsp.exec_cmd(${builtins.toJSON lidCloseCmd}), { locked = true })
+          hl.bind("switch:off:Apple SMC power/lid events", hl.dsp.exec_cmd(${builtins.toJSON lidClamshellCmd}), { locked = true })
+        end)
+
+        -- Auto-exit passthrough if the grabbed VNC/remote window closes or dies
+        local function on_remote_window_gone(ev)
+          local pf = io.open(passthrough_flag, "r")
+          if not pf then return end
+          pf:close()
+          local closed_win = ev and (ev.window or ev)
+          local closed_addr = closed_win and closed_win.address or nil
+          if (passthrough_win_addr and closed_addr == passthrough_win_addr)
+             or is_remote_window(closed_win) then
+            exit_passthrough(false)
+          end
+        end
+        hl.on("window.close", on_remote_window_gone)
+        hl.on("window.destroy", on_remote_window_gone)
+
+        -- Restore passthrough submap automatically if Hyprland reloads (e.g. lid close/clamshell)
+        local pf = io.open(passthrough_flag, "r")
+        if pf then
+          pf:close()
+          hl.dispatch(hl.dsp.submap("passthrough"))
+        end
+      '')
     ];
 
     settings = {
@@ -1563,7 +1655,7 @@ in
           focusCursorMonitorAndExec (builtins.toJSON workspaceLayoutToggleBackCmd)
         ))
         (mkBind "ALT + SHIFT + D" (focusCursorMonitorAndExec (builtins.toJSON monitorPanelToggleCmd)))
-        (mkBind "ALT + F" ''hl.dsp.window.fullscreen({ mode = "fullscreen" })'')
+        # Note: `ALT + F` is bound in the passthrough block above (auto-grab on VNC/remote windows, normal fullscreen elsewhere).
         (mkBind "ALT + M" ''hl.dsp.window.fullscreen({ mode = "maximized" })'')
         (mkBind "ALT + P" "hl.dsp.window.pseudo()")
         (mkBind "ALT + E" ''hl.dsp.layout("togglesplit")'')

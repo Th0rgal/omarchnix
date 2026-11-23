@@ -159,7 +159,8 @@ let
           --replace-fail '    readonly property string menuFamily: root.menuFontFamily' $'    readonly property string menuFamily: root.menuFontFamily\n    readonly property int heroTitle: root.fontToken("hero-title", root.fontPx(1.5))'
 
         substituteInPlace "$out/shell/plugins/panels/clock/BarWidget.qml" \
-          --replace-fail '    return date.toLocaleString(root.formatLocale, activeFormat.replace(/ww/g, week))' '    return date.toLocaleString(root.formatLocale, activeFormat.replace(/ww/g, week)).toLowerCase()'
+          --replace-fail '    return date.toLocaleString(root.formatLocale, activeFormat.replace(/ww/g, week))' '    return date.toLocaleString(root.formatLocale, activeFormat.replace(/ww/g, week)).toLowerCase()' \
+          --replace-fail $'  function refresh() {\n    displayDate = new Date()\n    if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()\n  }' $'  function refresh() {\n    displayDate = new Date()\n    clock.arm()\n    if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()\n  }'
 
         substituteInPlace "$out/shell/plugins/panels/clock/Panel.qml" \
           --replace-fail $'                font.family: root.contentFontFamily\n                font.pixelSize: 52\n                font.bold: true' $'                font.family: Style.font.menuFamily\n                font.pixelSize: 52\n                font.weight: Font.DemiBold'
@@ -190,11 +191,11 @@ let
         substituteInPlace "$out/shell/plugins/panels/monitor/Panel.qml" \
           --replace-fail $'                text: root.current ? root.current.title : Commons.I18n.t("monitor.display")\n                textFormat: Text.PlainText\n                color: root.bar.foreground\n                font.family: root.bar.fontFamily\n                font.pixelSize: Style.font.title\n                font.bold: true' $'                text: root.current ? root.current.title : Commons.I18n.t("monitor.display")\n                textFormat: Text.PlainText\n                color: root.bar.foreground\n                font.family: Style.font.menuFamily\n                font.pixelSize: Style.font.heroTitle\n                font.weight: Font.DemiBold'
 
+        # Display panel: dragging or ctrl+arrows in the layout map only stages an
+        # arrangement; Apply / Enter sends it to the displays, Cancel / Esc drops it.
         install -Dm755 ${./omarchy-shell/wifi-password.py} "$out/bin/omarchnix-wifi-password"
         patch -p1 -d "$out/shell/plugins/panels/network" < ${./patches/omarchy-shell-wifi-password.patch}
 
-        # Display panel: dragging or ctrl+arrows in the layout map only stages an
-        # arrangement; Apply / Enter sends it to the displays, Cancel / Esc drops it.
         patch -p1 -d "$out/shell/plugins/panels/monitor" < ${./patches/omarchy-shell-monitor-layout-confirm.patch}
 
         substituteInPlace "$out/bin/omarchy-theme-set-browser" \
@@ -359,8 +360,18 @@ let
           "$out/bin/omarchy-battery-charge-limit" \
           "$out/bin/omarchy-power-consumers"
 
+        # Transfer the freeze to the screenshot caller only after a successful pick.
+        substituteInPlace "$out/bin/omarchy-capture-region" \
+          --replace-fail '[[ $KEEP_FREEZE == true ]] && return' \
+            '[[ $KEEP_FREEZE == true && -n ''${SELECTION:-} ]] && return'
+
         sed -i '/^exec omasnap /d' "$out/bin/omarchy-capture-screenshot"
         cat >> "$out/bin/omarchy-capture-screenshot" <<'EOF'
+        # Crop the original compositor frame so the selection cursor and
+        # fractional-scale freeze overlay never become part of a clipboard shot.
+        if [[ $* == "region copy" ]]; then
+          exec ${omarchyPython}/bin/python3 ${./omarchy-shell/frozen-region.py}
+        fi
         if command -v omasnap >/dev/null 2>&1; then
           exec omasnap "''${omasnap_args[@]}"
         fi

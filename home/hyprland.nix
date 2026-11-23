@@ -1003,13 +1003,19 @@ in
         -- Enters true fullscreen (over the top status bar & dock) and forwards all
         -- WM shortcuts (`Option + 1..9`, `Option + Space`, `Option + F`, etc.)
         -- straight to the focused VNC / Moonlight / VM window until pressed again.
+        -- Persists across lid-close / clamshell monitor reloads via a marker file.
+        local passthrough_flag = "/tmp/omarchnix-passthrough.active"
+
         local function enter_passthrough()
+          local f = io.open(passthrough_flag, "w")
+          if f then f:write("1\n"); f:close() end
           hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set" }))
           hl.dispatch(hl.dsp.submap("passthrough"))
           hl.dispatch(hl.dsp.exec_cmd("notify-send -t 2000 'Fullscreen Grab ON' 'All shortcuts forwarded to remote (Cmd/Ctrl+Option+G to exit)'"))
         end
 
         local function exit_passthrough()
+          os.remove(passthrough_flag)
           hl.dispatch(hl.dsp.submap("reset"))
           hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "unset" }))
           hl.dispatch(hl.dsp.exec_cmd("notify-send -t 1500 'Fullscreen Grab OFF' 'Returned to host Hyprland'"))
@@ -1021,7 +1027,19 @@ in
         hl.define_submap("passthrough", function()
           hl.bind("SUPER + ALT + G", exit_passthrough)
           hl.bind("CTRL + ALT + G", exit_passthrough)
+          -- Keep laptop lid clamshell working without breaking passthrough mode
+          hl.bind("switch:on:Lid Switch", hl.dsp.exec_cmd(${builtins.toJSON lidCloseCmd}), { locked = true })
+          hl.bind("switch:off:Lid Switch", hl.dsp.exec_cmd(${builtins.toJSON lidClamshellCmd}), { locked = true })
+          hl.bind("switch:on:Apple SMC power/lid events", hl.dsp.exec_cmd(${builtins.toJSON lidCloseCmd}), { locked = true })
+          hl.bind("switch:off:Apple SMC power/lid events", hl.dsp.exec_cmd(${builtins.toJSON lidClamshellCmd}), { locked = true })
         end)
+
+        -- Restore passthrough submap automatically if Hyprland reloads (e.g. lid close/clamshell)
+        local pf = io.open(passthrough_flag, "r")
+        if pf then
+          pf:close()
+          hl.dispatch(hl.dsp.submap("passthrough"))
+        end
       '')
     ];
 

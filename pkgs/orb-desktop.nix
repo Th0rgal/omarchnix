@@ -622,20 +622,20 @@ stdenv.mkDerivation {
           export __EGL_VENDOR_LIBRARY_DIRS="/run/opengl-driver/share/glvnd/egl_vendor.d"
         fi
         ${lib.optionalString hasHybridSidebar ''
-          if [ "''${1:-}" = --leanui-hybrid ]; then
-            shift
-            if [ -z "''${ORB_LOCALD_PORT:-}" ]; then
-              ORB_LOCALD_PORT="$("${python3}/bin/python3" -c 'import socket
-for p in range(19579, 19679):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        if s.connect_ex(("127.0.0.1", p)) != 0:
-            print(p); break
-' 2>/dev/null || echo 19579)"
-              export ORB_LOCALD_PORT
-            fi
-            host="$(dirname "$(readlink -f "$0")")/../lib/orb-sidebar-host.so"
-            exec "${sandboxedShOffline}/bin/orb-desktop-native" --gtk-sidebar-host "$host" "$@"
-          fi
+                    if [ "''${1:-}" = --leanui-hybrid ]; then
+                      shift
+                      if [ -z "''${ORB_LOCALD_PORT:-}" ]; then
+                        ORB_LOCALD_PORT="$("${python3}/bin/python3" -c 'import socket
+          for p in range(19579, 19679):
+              with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                  if s.connect_ex(("127.0.0.1", p)) != 0:
+                      print(p); break
+          ' 2>/dev/null || echo 19579)"
+                        export ORB_LOCALD_PORT
+                      fi
+                      host="$(dirname "$(readlink -f "$0")")/../lib/orb-sidebar-host.so"
+                      exec "${sandboxedShOffline}/bin/orb-desktop-native" --gtk-sidebar-host "$host" "$@"
+                    fi
         ''}
       ''}
   '';

@@ -36,7 +36,20 @@ PanelWindow {
     return mode
   }
 
+  property bool passthroughActive: false
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (event.name === "submap") {
+        window.passthroughActive = (event.data.trim() === "passthrough")
+        if (window.passthroughActive) window.revealed = false
+      }
+    }
+  }
+
   readonly property bool shown: !!dock
+    && !passthroughActive
     && appCount > 0
     && workspaceId >= 1
     && (dock.allWorkspaces || dock.isFloating(workspaceId))

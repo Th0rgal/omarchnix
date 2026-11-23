@@ -1035,8 +1035,8 @@ in
           if passthrough_forced_fs then
             hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set" }))
           end
-          -- Suppress host 3-finger horizontal workspace swipe while in passthrough
-          pcall(function() hl.config({ gestures = { workspace_swipe_distance = 100000 } }) end)
+          -- Suppress host 3-finger horizontal workspace swipe while in passthrough (max allowed is 2000)
+          pcall(function() hl.config({ gestures = { workspace_swipe_distance = 2000 } }) end)
           hl.dispatch(hl.dsp.submap("passthrough"))
           hl.dispatch(hl.dsp.exec_cmd("notify-send -t 2000 'Parent Shortcuts OFF' 'Forwarded to window (Option+G to return)'"))
         end

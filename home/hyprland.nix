@@ -998,6 +998,31 @@ in
     extraConfig = lib.mkMerge [
       (lib.mkOrder 100 omarchyMultiScreenBootstrapLua)
       (lib.mkOrder 900 omarchyMultiScreenRuntimeLua)
+      (lib.mkOrder 950 ''
+        -- Remote/VM keyboard passthrough submap (`Cmd + Option + G` or `Ctrl + Option + G` to toggle).
+        -- Enters true fullscreen (over the top status bar & dock) and forwards all
+        -- WM shortcuts (`Option + 1..9`, `Option + Space`, `Option + F`, etc.)
+        -- straight to the focused VNC / Moonlight / VM window until pressed again.
+        local function enter_passthrough()
+          hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set" }))
+          hl.dispatch(hl.dsp.submap("passthrough"))
+          hl.dispatch(hl.dsp.exec_cmd("notify-send -t 2000 'Fullscreen Grab ON' 'All shortcuts forwarded to remote (Cmd/Ctrl+Option+G to exit)'"))
+        end
+
+        local function exit_passthrough()
+          hl.dispatch(hl.dsp.submap("reset"))
+          hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "unset" }))
+          hl.dispatch(hl.dsp.exec_cmd("notify-send -t 1500 'Fullscreen Grab OFF' 'Returned to host Hyprland'"))
+        end
+
+        hl.bind("SUPER + ALT + G", enter_passthrough)
+        hl.bind("CTRL + ALT + G", enter_passthrough)
+
+        hl.define_submap("passthrough", function()
+          hl.bind("SUPER + ALT + G", exit_passthrough)
+          hl.bind("CTRL + ALT + G", exit_passthrough)
+        end)
+      '')
     ];
 
     settings = {

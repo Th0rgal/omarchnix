@@ -10,6 +10,26 @@ fi
 
 with_state="${1:+1}"
 
+if [[ -r /var/lib/sidesystem/power-profile ]]; then
+  active=$(tr -d '\r\n ' < /var/lib/sidesystem/power-profile 2>/dev/null || true)
+  case "$active" in
+    power-saver | balanced | performance) ;;
+    *) active="balanced" ;;
+  esac
+  for p in power-saver balanced performance; do
+    if [[ -n $with_state ]]; then
+      if [[ $p == "$active" ]]; then
+        printf '%s\t1\n' "$p"
+      else
+        printf '%s\t0\n' "$p"
+      fi
+    else
+      printf '%s\n' "$p"
+    fi
+  done
+  exit 0
+fi
+
 if [[ -r /sys/devices/system/cpu/cpufreq/policy0/scaling_driver ]] &&
    [[ $(</sys/devices/system/cpu/cpufreq/policy0/scaling_driver) == "apple-cpufreq" ]]; then
   state_dir="${OMARCHY_POWERPROFILES_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/powerprofiles}"

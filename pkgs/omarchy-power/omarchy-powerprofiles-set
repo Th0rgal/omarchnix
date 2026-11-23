@@ -33,6 +33,11 @@ profile_available() {
   [[ " ${profiles[*]} " == *" $1 "* ]]
 }
 
+is_sidesystem=false
+if [[ -w /var/lib/sidesystem/power-profile-req ]]; then
+  is_sidesystem=true
+fi
+
 is_apple_cpufreq=false
 if [[ -r /sys/devices/system/cpu/cpufreq/policy0/scaling_driver ]] &&
    [[ $(</sys/devices/system/cpu/cpufreq/policy0/scaling_driver) == "apple-cpufreq" ]]; then
@@ -181,7 +186,10 @@ apply_apple_silicon_profile() {
 }
 
 mkdir -p "$state_dir"
-if [[ $is_apple_cpufreq == "true" ]]; then
+if [[ $is_sidesystem == "true" ]]; then
+  printf '%s\n' "$profile" > /var/lib/sidesystem/power-profile-req 2>/dev/null || true
+  printf '%s\n' "$profile" > "$state_dir/active"
+elif [[ $is_apple_cpufreq == "true" ]]; then
   apply_apple_silicon_profile "$profile"
   printf '%s\n' "$profile" >"$state_dir/active"
 else

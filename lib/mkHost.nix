@@ -31,6 +31,7 @@ let
       spark = "spark";
       workstation = "workstation";
       vm = "vm";
+      container = "container";
     }
     .${platform} or null;
 

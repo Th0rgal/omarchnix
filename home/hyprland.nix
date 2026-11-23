@@ -1480,7 +1480,21 @@ in
         (mkBind "ALT + Return" (focusCursorMonitorAndExec "terminal"))
         (mkBind "ALT + B" (focusCursorMonitorAndExec "browser"))
         (mkBind "ALT + W" (focusCursorMonitorAndExec "fileManager"))
-        (mkBind "ALT + O" (focusCursorMonitorAndExec ''"${orb}"''))
+        (mkBind "ALT + O" ''
+          function()
+            for _, w in ipairs(hl.get_windows()) do
+              if w.class == "orb-desktop" or w.class == ".orb-desktop-unwrapped" or w.class == "orb" then
+                hl.dispatch(hl.dsp.focus({ window = w }))
+                return
+              end
+            end
+            local m = hl.get_monitor_at_cursor and hl.get_monitor_at_cursor()
+            if m and not m.focused then
+              hl.dispatch(hl.dsp.focus({ monitor = m.name }))
+            end
+            hl.dispatch(hl.dsp.exec_cmd("${orb}"))
+          end
+        '')
         (mkBind "ALT + SPACE" (focusCursorMonitorAndExec "launcher"))
         (mkBind "ALT + SHIFT + SPACE" (focusCursorMonitorAndExec "appLauncher"))
         (mkBind "ALT + TAB" ''

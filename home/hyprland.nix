@@ -1003,14 +1003,15 @@ in
       (lib.mkOrder 100 omarchyMultiScreenBootstrapLua)
       (lib.mkOrder 900 omarchyMultiScreenRuntimeLua)
       (lib.mkOrder 950 ''
-        -- Remote/VM fullscreen + keyboard passthrough submap.
-        -- Pressing `Option + F` on a VNC / remote desktop window (`TigerVNC`, `vncviewer`,
-        -- `Moonlight`, `virt-viewer`, etc.) enters true fullscreen (over the top status bar
-        -- & dock) and forwards all WM shortcuts to the remote desktop.
-        -- Press `Option + F` (or `Cmd/Ctrl + Option + G`) again — or simply close the VNC
-        -- window — to automatically exit passthrough and return shortcuts to host Hyprland.
+        -- Remote/VM keyboard passthrough submap (`Option + G` is always intercepted by host).
+        -- * `Option + G`: toggle passthrough (disables all other host shortcuts so they go
+        --   straight to the child window/VNC). Always intercepted by host — never reaches child.
+        -- * `Option + F` on a VNC/remote window: goes fullscreen AND enters passthrough
+        --   (inside passthrough, `Option + F` is forwarded to the child so you can fullscreen
+        --   apps inside the remote desktop; press `Option + G` — or close the VNC window — to exit).
         local passthrough_flag = "/tmp/omarchnix-passthrough.active"
         local passthrough_win_addr = nil
+        local passthrough_forced_fs = false
 
         local function is_remote_window(w)
           if not w then return false end
@@ -1024,43 +1025,56 @@ in
             or cls:find("wlfreerdp", 1, true) ~= nil
         end
 
-        local function enter_passthrough(w)
+        local function enter_passthrough(w, with_fs)
           local target = w or (hl.active_window and hl.active_window())
           passthrough_win_addr = target and target.address or nil
+          passthrough_forced_fs = (with_fs == true)
+          _G.__omarchnix_passthrough = true
           local f = io.open(passthrough_flag, "w")
-          if f then f:write("1\n"); f:close() end
-          hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set" }))
+          if f then f:write(passthrough_forced_fs and "fs\n" or "1\n"); f:close() end
+          if passthrough_forced_fs then
+            hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set" }))
+          end
+          -- Suppress host 3-finger horizontal workspace swipe while in passthrough (max allowed is 2000)
+          pcall(function() hl.config({ gestures = { workspace_swipe_distance = 2000 } }) end)
           hl.dispatch(hl.dsp.submap("passthrough"))
-          hl.dispatch(hl.dsp.exec_cmd("notify-send -t 2000 'Fullscreen Grab ON' 'Shortcuts forwarded to remote (Option+F to exit)'"))
+          hl.dispatch(hl.dsp.exec_cmd("notify-send -t 2000 'Parent Shortcuts OFF' 'Forwarded to window (Option+G to return)'"))
         end
 
         local function exit_passthrough(unset_fs)
+          local should_unset_fs = (unset_fs == true) or (unset_fs == nil and passthrough_forced_fs)
           passthrough_win_addr = nil
+          passthrough_forced_fs = false
+          _G.__omarchnix_passthrough = false
           os.remove(passthrough_flag)
+          pcall(function() hl.config({ gestures = { workspace_swipe_distance = 180 } }) end)
           hl.dispatch(hl.dsp.submap("reset"))
-          if unset_fs ~= false then
+          if should_unset_fs then
             hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "unset" }))
           end
-          hl.dispatch(hl.dsp.exec_cmd("notify-send -t 1500 'Fullscreen Grab OFF' 'Returned to host Hyprland'"))
+          hl.dispatch(hl.dsp.exec_cmd("notify-send -t 1500 'Parent Shortcuts ON' 'Returned to host Hyprland'"))
         end
 
         -- `Option + F`: auto-grab fullscreen on VNC/remote windows, normal fullscreen elsewhere.
         hl.bind("ALT + F", function()
           local w = hl.active_window and hl.active_window()
           if is_remote_window(w) then
-            enter_passthrough(w)
+            enter_passthrough(w, true)
           else
             hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen" }))
           end
         end)
 
-        hl.bind("SUPER + ALT + G", function() enter_passthrough(nil) end)
-        hl.bind("CTRL + ALT + G", function() enter_passthrough(nil) end)
+        -- `Option + G`: always intercepted by parent to toggle disabling parent shortcuts.
+        hl.bind("ALT + G", function() enter_passthrough(nil, false) end)
+        hl.bind("SUPER + ALT + G", function() enter_passthrough(nil, false) end)
+        hl.bind("CTRL + ALT + G", function() enter_passthrough(nil, false) end)
 
         hl.define_submap("passthrough", function()
-          hl.bind("ALT + F", function() exit_passthrough(true) end)
-          hl.bind("SUPER + ALT + G", function() exit_passthrough(true) end)
-          hl.bind("CTRL + ALT + G", function() exit_passthrough(true) end)
+          -- Always intercepted by parent — never forwarded to child VNC/VM.
+          hl.bind("ALT + G", function() exit_passthrough(nil) end)
+          hl.bind("SUPER + ALT + G", function() exit_passthrough(nil) end)
+          hl.bind("CTRL + ALT + G", function() exit_passthrough(nil) end)
           -- Keep laptop lid clamshell working without breaking passthrough mode
           hl.bind("switch:on:Lid Switch", hl.dsp.exec_cmd(${builtins.toJSON lidCloseCmd}), { locked = true })
           hl.bind("switch:off:Lid Switch", hl.dsp.exec_cmd(${builtins.toJSON lidClamshellCmd}), { locked = true })
@@ -1362,6 +1376,7 @@ in
           direction = "right";
           action = mkLuaInline ''
             function()
+              if _G.__omarchnix_passthrough then return end
               local w = hl.get_active_window()
               if not w or not w.workspace then return end
               local id = tonumber(w.workspace.id) or 1
@@ -1377,6 +1392,7 @@ in
           direction = "left";
           action = mkLuaInline ''
             function()
+              if _G.__omarchnix_passthrough then return end
               local w = hl.get_active_window()
               if not w or not w.workspace then return end
               local id = tonumber(w.workspace.id) or 1

@@ -10,6 +10,7 @@
   pkg-config,
   gtk4,
   gtk3,
+  glib-networking,
   webkitgtk_4_1,
   webkitgtk_6_0,
   wrapGAppsHook4,
@@ -420,6 +421,7 @@ stdenv.mkDerivation {
   buildInputs = [
     gtk3
     gtk4
+    glib-networking
     webkitgtk_4_1
     webkitgtk_6_0
     gst_all_1.gstreamer
@@ -572,6 +574,7 @@ stdenv.mkDerivation {
   postFixup = ''
     makeWrapper "$out/bin/.orb-desktop-unwrapped" "$out/bin/orb" \
       "''${gappsWrapperArgs[@]}" \
+      --prefix GIO_EXTRA_MODULES : "${glib-networking}/lib/gio/modules" \
       --set-default GTK_USE_PORTAL 1 \
       --prefix PATH : "/run/current-system/sw/bin:${
         lib.makeBinPath [
@@ -621,7 +624,15 @@ stdenv.mkDerivation {
         ${lib.optionalString hasHybridSidebar ''
           if [ "''${1:-}" = --leanui-hybrid ]; then
             shift
-            export ORB_LOCALD_PORT="''${ORB_LOCALD_PORT:-19579}"
+            if [ -z "''${ORB_LOCALD_PORT:-}" ]; then
+              ORB_LOCALD_PORT="$("${python3}/bin/python3" -c 'import socket
+for p in range(19579, 19679):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(("127.0.0.1", p)) != 0:
+            print(p); break
+' 2>/dev/null || echo 19579)"
+              export ORB_LOCALD_PORT
+            fi
             host="$(dirname "$(readlink -f "$0")")/../lib/orb-sidebar-host.so"
             exec "${sandboxedShOffline}/bin/orb-desktop-native" --gtk-sidebar-host "$host" "$@"
           fi

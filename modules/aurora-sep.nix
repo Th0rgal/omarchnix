@@ -25,6 +25,28 @@ let
     else
       null;
 
+  # Standalone local-built wrapper for `omarchy-hw-laptop-closed` so neither
+  # `omarchy-hw-laptop-closed-bin` nor `pam.d` pulls the ~2.4 GiB `omarchy-shell`
+  # closure (and avoids shipping trivial derivations + huge closures to remote builders).
+  omarchyHwLaptopClosedBin =
+    if omarchyShellPkg == null then
+      null
+    else
+      pkgs.runCommandLocal "omarchy-hw-laptop-closed-bin" { } ''
+        mkdir -p "$out/bin"
+        if [ -f "${omarchyShellPkg}/share/omarchy/bin/omarchy-hw-laptop-closed" ]; then
+          install -Dm755 "${omarchyShellPkg}/share/omarchy/bin/omarchy-hw-laptop-closed" "$out/libexec/omarchy-hw-laptop-closed"
+          cat > "$out/bin/omarchy-hw-laptop-closed" <<EOF
+        #!${pkgs.bash}/bin/bash
+        export PATH="${config.systemd.package}/bin:\$PATH"
+        exec "$out/libexec/omarchy-hw-laptop-closed" "\$@"
+        EOF
+          chmod +x "$out/bin/omarchy-hw-laptop-closed"
+        else
+          ln -s "${omarchyShellPkg}/bin/omarchy-hw-laptop-closed" "$out/bin/omarchy-hw-laptop-closed"
+        fi
+      '';
+
   peripheralAdmissionScript =
     if inputs ? nixos-aurora then
       "${inputs.nixos-aurora}/firmware/aurora-peripheral-firmware.sh"
@@ -36,7 +58,7 @@ let
         modprobe aop || true
       '';
 
-  admission = pkgs.runCommand "aurora-peripheral-admission" { } ''
+  admission = pkgs.runCommandLocal "aurora-peripheral-admission" { } ''
     install -Dm755 ${peripheralAdmissionScript} "$out/bin/aurora-peripheral-admission"
     patchShebangs "$out/bin/aurora-peripheral-admission"
   '';
@@ -483,6 +505,18 @@ in
         };
         description = "Configuration sections written to `/etc/aurora-fido/aurora-fido.conf`.";
       };
+
+      preferTouchIdForSsh = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Prefer the built-in Aurora Touch ID FIDO2 device in OpenSSH (`SSH_SK_HELPER`)
+          when another FIDO2 security key (such as a YubiKey) is also plugged in,
+          avoiding OpenSSH's extra device-selection touch while keeping the external
+          security key fully usable in browsers. Override per command with
+          `AURORA_SSH_PREFER_TOUCHID=0`.
+        '';
+      };
     };
   };
 
@@ -522,13 +556,10 @@ in
         installStage2Cli
         touchIdStatusCli
       ]
-      ++ lib.optionals (omarchyShellPkg != null) [
+      ++ lib.optionals (omarchyHwLaptopClosedBin != null) [
         # Expose /run/current-system/sw/bin/omarchy-hw-laptop-closed system-wide
         # for clamshell lid-state checks in PAM and Polkit.
-        (pkgs.runCommand "omarchy-hw-laptop-closed-bin" { } ''
-          mkdir -p "$out/bin"
-          ln -s "${omarchyShellPkg}/bin/omarchy-hw-laptop-closed" "$out/bin/omarchy-hw-laptop-closed"
-        '')
+        omarchyHwLaptopClosedBin
       ];
 
       system.build = lib.optionalAttrs (checkedAuroraStage2 != null) {
@@ -773,7 +804,7 @@ in
                     modulePath = "${pkgs.pam}/lib/security/pam_exec.so";
                     args = [
                       "quiet"
-                      "${omarchyShellPkg}/bin/omarchy-hw-laptop-closed"
+                      "${omarchyHwLaptopClosedBin}/bin/omarchy-hw-laptop-closed"
                     ];
                   };
                 };
@@ -788,8 +819,8 @@ in
           # Dedicated fingerprint stack for omarchy-shell's Quickshell lock screen
           # (shell/plugins/lock/Service.qml checks /etc/pam.d/omarchy-lock-fingerprint).
           omarchy-lock-fingerprint.text = ''
-            ${lib.optionalString (omarchyShellPkg != null)
-              "auth [success=die default=ignore] ${pkgs.pam}/lib/security/pam_exec.so quiet ${omarchyShellPkg}/bin/omarchy-hw-laptop-closed"
+            ${lib.optionalString (omarchyHwLaptopClosedBin != null)
+              "auth [success=die default=ignore] ${pkgs.pam}/lib/security/pam_exec.so quiet ${omarchyHwLaptopClosedBin}/bin/omarchy-hw-laptop-closed"
             }
             auth required ${config.services.fprintd.package}/lib/security/pam_fprintd.so timeout=90
             account include login
@@ -999,23 +1030,124 @@ in
     })
 
     # Optional Touch ID FIDO2/U2F security key (WebAuthn passkeys + SSH ecdsa-sk).
-    (lib.mkIf (cfg.enable && cfg.fido.enable && (pkgs ? aurora-fido)) {
-      boot.kernelModules = [ "uhid" ];
-      environment.systemPackages = [ pkgs.aurora-fido ];
-      environment.etc."aurora-fido/aurora-fido.conf".source = fidoConf;
-      services.udev.packages = [ pkgs.aurora-fido ];
-      systemd.packages = [ pkgs.aurora-fido ];
-      systemd.services.aurora-fido = {
-        wantedBy = [ "multi-user.target" ];
-        path = [
-          config.systemd.package
-          pkgs.util-linux
-          pkgs.libnotify
-          pkgs.glib.bin
-        ];
-        restartTriggers = [ fidoConf ];
-      };
-    })
+    (lib.mkIf (cfg.enable && cfg.fido.enable && (pkgs ? aurora-fido)) (
+      let
+        auroraSshSkPreferSrc = pkgs.writeText "aurora-ssh-sk-prefer.c" ''
+          #define _GNU_SOURCE
+          #include <dlfcn.h>
+          #include <stdint.h>
+          #include <stdlib.h>
+          #include <string.h>
+
+          typedef struct fido_dev_info fido_dev_info_t;
+          #define FIDO_OK 0
+
+          static const fido_dev_info_t *preferred_list = NULL;
+          static size_t preferred_idx = 0;
+
+          static int is_aurora_touchid(const fido_dev_info_t *di) {
+              static int16_t (*real_vendor)(const fido_dev_info_t *) = NULL;
+              static int16_t (*real_product)(const fido_dev_info_t *) = NULL;
+              static const char *(*real_product_str)(const fido_dev_info_t *) = NULL;
+              if (!di) return 0;
+              if (!real_vendor) real_vendor = dlsym(RTLD_NEXT, "fido_dev_info_vendor");
+              if (!real_product) real_product = dlsym(RTLD_NEXT, "fido_dev_info_product");
+              if (!real_product_str) real_product_str = dlsym(RTLD_NEXT, "fido_dev_info_product_string");
+              if (real_product_str) {
+                  const char *prod = real_product_str(di);
+                  if (prod && strstr(prod, "Aurora Touch ID") != NULL) return 1;
+              }
+              if (real_vendor && real_product) {
+                  return real_vendor(di) == 0x1209 && real_product(di) == 0x0001;
+              }
+              return 0;
+          }
+
+          int fido_dev_info_manifest(fido_dev_info_t *devlist, size_t ilen, size_t *olen) {
+              static int (*real_manifest)(fido_dev_info_t *, size_t, size_t *) = NULL;
+              static const fido_dev_info_t *(*real_ptr)(const fido_dev_info_t *, size_t) = NULL;
+              if (!real_manifest) real_manifest = dlsym(RTLD_NEXT, "fido_dev_info_manifest");
+              if (!real_ptr) real_ptr = dlsym(RTLD_NEXT, "fido_dev_info_ptr");
+
+              preferred_list = NULL;
+              preferred_idx = 0;
+
+              int rc = real_manifest(devlist, ilen, olen);
+              if (rc != FIDO_OK || !olen || *olen <= 1) return rc;
+
+              const char *env = getenv("AURORA_SSH_PREFER_TOUCHID");
+              if (env && strcmp(env, "0") == 0) return rc;
+
+              for (size_t i = 0; i < *olen; ++i) {
+                  const fido_dev_info_t *di = real_ptr(devlist, i);
+                  if (is_aurora_touchid(di)) {
+                      preferred_list = devlist;
+                      preferred_idx = i;
+                      *olen = 1;
+                      break;
+                  }
+              }
+              return rc;
+          }
+
+          const fido_dev_info_t *fido_dev_info_ptr(const fido_dev_info_t *devlist, size_t idx) {
+              static const fido_dev_info_t *(*real_ptr)(const fido_dev_info_t *, size_t) = NULL;
+              if (!real_ptr) real_ptr = dlsym(RTLD_NEXT, "fido_dev_info_ptr");
+
+              if (preferred_list && devlist == preferred_list && idx == 0) {
+                  return real_ptr(devlist, preferred_idx);
+              }
+              return real_ptr(devlist, idx);
+          }
+
+          void fido_dev_info_free(fido_dev_info_t **devlist_p, size_t len) {
+              static void (*real_free)(fido_dev_info_t **, size_t) = NULL;
+              if (!real_free) real_free = dlsym(RTLD_NEXT, "fido_dev_info_free");
+
+              if (devlist_p && *devlist_p == preferred_list) {
+                  preferred_list = NULL;
+                  preferred_idx = 0;
+              }
+              real_free(devlist_p, len);
+          }
+        '';
+        auroraSshSkPreferLib =
+          pkgs.runCommand "aurora-ssh-sk-prefer"
+            {
+              nativeBuildInputs = [ pkgs.stdenv.cc ];
+            }
+            ''
+              mkdir -p "$out/lib"
+              "$CC" -O2 -Wall -Wextra -shared -fPIC \
+                ${auroraSshSkPreferSrc} \
+                -o "$out/lib/libaurora-ssh-sk-prefer.so" -ldl
+            '';
+        auroraSshSkHelper = pkgs.writeShellScriptBin "aurora-ssh-sk-helper" ''
+          export LD_PRELOAD="${auroraSshSkPreferLib}/lib/libaurora-ssh-sk-prefer.so''${LD_PRELOAD:+:$LD_PRELOAD}"
+          exec "${config.programs.ssh.package}/libexec/ssh-sk-helper" "$@"
+        '';
+      in
+      {
+        boot.kernelModules = [ "uhid" ];
+        environment.systemPackages = [ pkgs.aurora-fido ];
+        environment.sessionVariables = lib.mkIf cfg.fido.preferTouchIdForSsh {
+          SSH_SK_HELPER = "${auroraSshSkHelper}/bin/aurora-ssh-sk-helper";
+        };
+        environment.etc."aurora-fido/aurora-fido.conf".source = fidoConf;
+        services.udev.packages = [ pkgs.aurora-fido ];
+        systemd.packages = [ pkgs.aurora-fido ];
+        systemd.services.aurora-fido = {
+          wantedBy = [ "multi-user.target" ];
+          path = [
+            config.systemd.package
+            pkgs.util-linux
+            pkgs.libnotify
+            pkgs.glib.bin
+          ];
+          restartTriggers = [ fidoConf ];
+        };
+      }
+    ))
 
     # Aurora kernel v2 speaker protection (`speakerguardd-v2` + legacy `speakersafetyd` gate)
     # so `linux-aurora` speaker amp controls (`Amp Gain Volume`) are managed by `speakerguardd-v2`
@@ -1041,7 +1173,7 @@ in
             sgPkg
           ];
           auroraAudioTuningLink =
-            pkgs.runCommand "aurora-audio-tuning-link"
+            pkgs.runCommandLocal "aurora-audio-tuning-link"
               {
                 passthru.compressFirmware = false;
               }

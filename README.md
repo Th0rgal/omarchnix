@@ -1,6 +1,6 @@
 # `omarchnix`
 
-Declarative Omarchy-compatible NixOS and Home Manager desktop stack developed on the MacBook Air M2. QEMU guests support screenshots and desktop testing on ARM and x86 Linux. The flake also exports example UEFI workstation configurations for downstream users.
+Declarative Omarchy-compatible NixOS and Home Manager desktop stack built for the **MacBook Air M2** (Apple Silicon / Asahi) and the **Motorola Razr 60 Ultra** (running natively side-by-side with Android as a `systemd` Linux container — managed via the [**SideSystem**](https://github.com/Th0rgal/sidesystem) cover-screen companion app and Bluetooth HID bridge). QEMU guests support screenshots and desktop testing on ARM and x86 Linux, and the flake also exports example UEFI workstation configurations for downstream users.
 
 See [`docs/VISION.md`](docs/VISION.md) for the full architecture, [`docs/decisions.md`](docs/decisions.md) (`DR-1`..`DR-19`) for recorded design decisions, and [`docs/showcase.md`](docs/showcase.md) to reproduce the desktop screenshots below in QEMU/KVM.
 
@@ -86,6 +86,7 @@ Native `2560×1600` (`1.6x` HiDPI) Wayland captures of the `starship-subtle` gla
 | --- | --- | --- | --- |
 | `m2air` | `aarch64-linux` | MacBook Air M2 (Asahi) | Primary Apple Silicon daily driver on stock `nixos-apple-silicon` + `alx.sh` Stage 2 + removable ARM64 UEFI GRUB (`EFI/BOOT/BOOTAA64.EFI`, `configurationLimit = 2`, UUID-mounted ESP + LUKS2 `cryptroot`, `asahi-audio` DSP, 1.6x HiDPI, dual-boot macOS). |
 | `m2air-aurora` | `aarch64-linux` | MacBook Air M2 (Aurora SEP) | `m2air` plus `aurora-silicon/nixos-aurora`: Secure Enclave, Touch ID (`fprintd`) for the lock screen, `sudo` and Polkit, and FIDO2 (`aurora-fido`). Runs as a daily driver on hardware; enable it with `omarchnix-install-stage2 /boot`, reboot, then `fprintd-enroll` (`docs/install-m2air.md` §4). |
+| `razr` (`platform = "container"`) | `aarch64-linux` | Motorola Razr 60 Ultra (Android GKI) | Full NixOS + Hyprland desktop running natively side-by-side with Android in a `droidspaces` container (no VM, no dual boot, shared 5G/Wi-Fi). Managed by [**`Th0rgal/sidesystem`**](https://github.com/Th0rgal/sidesystem) (Orb-style Android cover-screen app + exclusive Bluetooth keyboard/mouse HID bridge). |
 | `spark` | `aarch64-linux` | NVIDIA Grace / DGX Spark | ARM64 UEFI server & workstation (`systemd-boot`, hardened + Hyprland desktop). |
 | `workstation` | `x86_64-linux` | AMD / Intel desktop & cloud | Generic `x86_64-linux` UEFI workstation (`systemd-boot`, hardened + Hyprland desktop). |
 | `rehearsal` | `aarch64-linux` | Scaleway Mac mini M2 Pro (`M2-L-ASAHI`) | Disposable BootROM dress rehearsal target with poweroff->reboot guard (`docs/runbook-scaleway.md`). |

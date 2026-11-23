@@ -57,6 +57,7 @@ in
           "spark"
           "workstation"
           "vm"
+          "container"
         ];
         default = "workstation";
         description = ''
@@ -65,6 +66,7 @@ in
           - `spark`: ARM64 (`aarch64-linux`) UEFI server/workstation (e.g. NVIDIA Grace / DGX Spark) with systemd-boot.
           - `workstation`: Generic `x86_64-linux` or `aarch64-linux` UEFI workstation with systemd-boot.
           - `vm`: QEMU/KVM virtual machine target with systemd-boot.
+          - `container`: Linux container guest (e.g. systemd-nspawn / LXC on an Android or Linux host; enables `boot.isContainer`, disables bootloaders/EFI, and defaults `omarchnix.hardening.enable` to `false` since the host owns firewall and kernel sysctls).
         '';
       };
 
@@ -500,7 +502,7 @@ in
         auto-optimise-store = lib.mkDefault false;
       };
 
-      nix.optimise.automatic = lib.mkDefault true;
+      nix.optimise.automatic = lib.mkIf (cfg.profile != "container") (lib.mkDefault true);
 
       # Keep /nix/store, user profiles, /tmp, journals, and crash dumps bounded automatically.
       programs.nh = {
@@ -544,7 +546,15 @@ in
       };
     })
 
-    (lib.mkIf (cfg.enable && cfg.profile != "asahi") {
+    (lib.mkIf (cfg.enable && cfg.profile == "container") {
+      boot.isContainer = lib.mkDefault true;
+      boot.loader.systemd-boot.enable = lib.mkDefault false;
+      boot.loader.grub.enable = lib.mkDefault false;
+      boot.loader.efi.canTouchEfiVariables = lib.mkDefault false;
+      omarchnix.hardening.enable = lib.mkDefault false;
+    })
+
+    (lib.mkIf (cfg.enable && cfg.profile != "asahi" && cfg.profile != "container") {
       boot.loader.systemd-boot.enable = lib.mkDefault true;
       boot.loader.efi.canTouchEfiVariables = lib.mkDefault true;
     })

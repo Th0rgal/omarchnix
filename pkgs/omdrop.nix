@@ -305,13 +305,18 @@ let
         postInstall = patchPluginScript;
       }
     else
-      pkgs.runCommand "omdrop-plugin-${pluginVersion}" { } ''
-        mkdir -p "$out"
-        cp -r --no-preserve=mode,ownership "${omdropPluginSrc}/." "$out/"
-        chmod -R u+w "$out"
-        rm -rf "$out/.git"
-        ${patchPluginScript}
-      '';
+      pkgs.runCommand "omdrop-plugin-${pluginVersion}"
+        {
+          preferLocalBuild = true;
+          allowSubstitutes = false;
+        }
+        ''
+          mkdir -p "$out"
+          cp -r --no-preserve=mode,ownership "${omdropPluginSrc}/." "$out/"
+          chmod -R u+w "$out"
+          rm -rf "$out/.git"
+          ${patchPluginScript}
+        '';
 
   # 4. User-facing `omdrop` CLI wrapper on `$PATH`. Executes the materialized
   #    plugin entrypoint inside `~/.config/omarchy/plugins/netmojo.omdrop` when
@@ -319,6 +324,8 @@ let
   cli =
     pkgs.runCommand "omdrop-${pluginVersion}"
       {
+        preferLocalBuild = true;
+        allowSubstitutes = false;
         passthru = {
           inherit
             awdl

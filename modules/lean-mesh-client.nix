@@ -56,6 +56,25 @@ let
         description = "Direct LAN WireGuard UDP port on the peer.";
       };
 
+      wanHost = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "home.example.com";
+        description = "Optional direct WAN hostname (DDNS) or IP for bypassing the `:51890` relay when off-LAN (falls back to `relayEndpoint` if unreachable).";
+      };
+
+      wanPort = lib.mkOption {
+        type = lib.types.port;
+        default = 51891;
+        description = "Direct WAN WireGuard UDP port forwarded on the home router.";
+      };
+
+      p2pPunch = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Use the `:51890` relay for in-band `RNDZ` endpoint discovery and zero-open-port UDP hole-punching when off-LAN (falls back automatically to relay on symmetric NAT).";
+      };
+
       relayEndpoint = lib.mkOption {
         type = lib.types.str;
         example = "65.109.98.246:51890";
@@ -290,16 +309,54 @@ let
           done
         fi
 
-        # Roaming endpoint reconciliation (`DirectLan` <-> `ControlPlaneRelay`)
+        # Roaming endpoint reconciliation (`DirectLan` -> `DirectWan` -> `DirectP2P` -> `ControlPlaneRelay`)
         if [ -s ${lib.escapeShellArg roamPeersJson} ] && ip link show dev "$iface" >/dev/null 2>&1; then
-          python3 - "$state_dir/manifest.json" ${lib.escapeShellArg roamPeersJson} "$iface" "${toString inst.nodeId}" <<'PY'
-        import json, socket, subprocess, sys, time
+          python3 - "$state_dir/manifest.json" ${lib.escapeShellArg roamPeersJson} "$iface" "${toString inst.nodeId}" "$state_dir/wg.pub" <<'PY'
+        import base64, hashlib, json, os, socket, struct, subprocess, sys, time
 
-        manifest_path, roam_path, iface, self_id_s = sys.argv[1:5]
+        manifest_path, roam_path, iface, self_id_s, self_pub_path = sys.argv[1:6]
         manifest = json.loads(open(manifest_path, "r", encoding="utf-8").read())
         roam_peers = json.loads(open(roam_path, "r", encoding="utf-8").read())
         if not roam_peers:
             sys.exit(0)
+
+        try:
+            self_pub_b64 = open(self_pub_path, "r", encoding="utf-8").read().strip()
+            self_pub32 = base64.b64decode(self_pub_b64)
+            if len(self_pub32) != 32:
+                self_pub32 = b""
+        except Exception:
+            self_pub32 = b""
+
+        def query_relay_p2p_endpoint(relay_ep, self_p32, peer_p32):
+            """Query `orb-core:51890` with an authenticated 84-byte `RNDZ` packet for the peer's observed NAT ip:port."""
+            if len(self_p32) != 32 or len(peer_p32) != 32 or ":" not in relay_ep:
+                return None
+            host, port_s = relay_ep.rsplit(":", 1)
+            try:
+                port = int(port_s)
+            except ValueError:
+                return None
+            prefix = b"RNDZ" + self_p32 + peer_p32
+            mac_key = hashlib.blake2s(b"mac1----" + peer_p32, digest_size=32).digest()
+            mac1 = hashlib.blake2s(prefix, key=mac_key, digest_size=16).digest()
+            req = prefix + mac1
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(1.0)
+            try:
+                sock.sendto(req, (host, port))
+                resp, _ = sock.recvfrom(64)
+                if len(resp) == 16 and resp[:4] == b"RNDR":
+                    ip_u32, peer_port, flags, age_s = struct.unpack("!IHHI", resp[4:16])
+                    if flags in (1, 2) and ip_u32 != 0 and peer_port != 0 and age_s <= 120:
+                        ip_str = socket.inet_ntoa(struct.pack("!I", ip_u32))
+                        if not ip_str.startswith("127."):
+                            return f"{ip_str}:{peer_port}"
+            except Exception:
+                return None
+            finally:
+                sock.close()
+            return None
 
         status_file = f"/run/lean-mesh-{iface}/roam-status.json"
         prev_summary = {}
@@ -334,10 +391,13 @@ let
             max_stale = int(rp["maxDirectStaleSecs"])
             prev = prev_summary.get(pname, {}) if isinstance(prev_summary.get(pname), dict) else {}
 
+            # 1. DirectLan: prefer fast unicast router DNS (`lanFallbackHost`, e.g. `.home`)
+            #    before multicast mDNS (`lanHost`, `.local`) which drops packets on busy Wi-Fi.
             lan_ip = None
-            candidate_hosts = [rp["lanHost"]]
+            candidate_hosts = []
             if rp.get("lanFallbackHost"):
                 candidate_hosts.append(rp["lanFallbackHost"])
+            candidate_hosts.append(rp["lanHost"])
             for cand_host in candidate_hosts:
                 if lan_ip:
                     break
@@ -366,20 +426,65 @@ let
                     except Exception:
                         pass
 
-            lan_ep = f"{lan_ip}:{rp['lanPort']}" if lan_ip else f"0.0.0.0:{rp['lanPort']}"
+            # Sticky LAN: if a transient DNS/mDNS lookup misses while WireGuard already has
+            # a fresh handshake on the previous LAN IP, stay on LAN instead of flapping to relay.
+            if not lan_ip and prev.get("lan_ip"):
+                prev_lan_ep = f"{prev['lan_ip']}:{rp['lanPort']}"
+                if cur["endpoint"] == prev_lan_ep and cur["handshake"] > 0 and (now - cur["handshake"]) <= max_stale:
+                    lan_ip = prev["lan_ip"]
+
+            direct_mode = "lan" if lan_ip else None
+            direct_ep = f"{lan_ip}:{rp['lanPort']}" if lan_ip else None
+
+            # 2. DirectWan (optional static/DDNS endpoint if configured).
+            wan_ip = None
+            if not direct_ep and rp.get("wanHost"):
+                wan_port = int(rp.get("wanPort") or rp["lanPort"])
+                for fam in (socket.AF_INET, socket.AF_INET6):
+                    try:
+                        infos = socket.getaddrinfo(rp["wanHost"], wan_port, fam, socket.SOCK_DGRAM)
+                        if infos:
+                            cand = infos[0][4][0]
+                            if not cand.startswith("127.") and cand != "::1":
+                                wan_ip = cand
+                                direct_mode = "wan"
+                                direct_ep = f"[{cand}]:{wan_port}" if ":" in cand else f"{cand}:{wan_port}"
+                                break
+                    except Exception:
+                        pass
+
             relay_ep = rp["relayEndpoint"]
+
+            # 3. DirectP2P (zero-open-port UDP hole-punching via `:51890` `RNDZ` rendezvous).
+            p2p_ep = None
+            if not direct_ep and rp.get("p2pPunch", True):
+                try:
+                    peer_pub32 = base64.b64decode(pk)
+                except Exception:
+                    peer_pub32 = b""
+                p2p_ep = query_relay_p2p_endpoint(relay_ep, self_pub32, peer_pub32)
+                if not p2p_ep and prev.get("p2p_ep"):
+                    # Keep active P2P endpoint while handshake is fresh (peer is no longer hitting relay).
+                    if cur["endpoint"] == prev["p2p_ep"] and cur["handshake"] > 0 and (now - cur["handshake"]) <= max_stale:
+                        p2p_ep = prev["p2p_ep"]
+                if p2p_ep:
+                    direct_mode = "p2p"
+                    direct_ep = p2p_ep
+
+            lan_ep = direct_ep or f"0.0.0.0:{rp['lanPort']}"
 
             lan_probe_at = int(prev.get("lan_probe_at") or 0)
             lan_backoff_until = int(prev.get("lan_backoff_until") or 0)
             last_direct_hs = int(prev.get("last_direct_hs") or 0)
-            if lan_ip != prev.get("lan_ip"):
+            prev_direct_ep = prev.get("direct_ep") or (f"{prev.get('lan_ip')}:{rp['lanPort']}" if prev.get("lan_ip") else None)
+            if direct_ep != prev_direct_ep:
                 lan_probe_at = 0
                 lan_backoff_until = 0
                 last_direct_hs = 0
 
             lan_candidate_ok = False
             effective_direct_hs = 0
-            if lan_ip:
+            if direct_ep:
                 if cur["endpoint"] == lan_ep:
                     if lan_probe_at == 0:
                         lan_probe_at = now
@@ -397,13 +502,13 @@ let
                         else:
                             lan_backoff_until = now + 120
                     elif (now - lan_probe_at) <= 30:
-                        # Allow 30s initial probe grace after switching to DirectLan.
+                        # Allow 30s initial probe grace after switching to DirectLan/DirectWan.
                         effective_direct_hs = now
                         lan_candidate_ok = True
                     else:
                         lan_backoff_until = now + 120
                 elif now >= lan_backoff_until:
-                    # Probe DirectLan immediately upon joining LAN (or after backoff).
+                    # Probe DirectLan/DirectWan immediately upon joining or after backoff.
                     lan_probe_at = now
                     last_direct_hs = 0
                     effective_direct_hs = now
@@ -436,6 +541,10 @@ let
             decision = json.loads(sel.stdout)
             target_ep = decision.get("selected_endpoint") or ""
             kind = decision.get("path_kind") or "unknown"
+            if kind == "direct_lan" and direct_mode == "wan":
+                kind = "direct_wan"
+            elif kind == "direct_lan" and direct_mode == "p2p":
+                kind = "direct_p2p"
             if target_ep and not target_ep.startswith("0.0.0.0:"):
                 if target_ep != cur["endpoint"]:
                     # Toggle persistent-keepalive 0 -> 25 so kernel WireGuard immediately
@@ -461,11 +570,17 @@ let
                 "lan_probe_at": lan_probe_at,
                 "lan_backoff_until": lan_backoff_until,
                 "lan_ip": lan_ip,
+                "wan_ip": wan_ip,
+                "p2p_ep": p2p_ep,
+                "direct_ep": direct_ep,
                 "updated_at": now,
             }
 
-        with open(status_file, "w", encoding="utf-8") as fh:
+        tmp_status = f"{status_file}.tmp"
+        with open(tmp_status, "w", encoding="utf-8") as fh:
             json.dump(status_summary, fh)
+        os.chmod(tmp_status, 0o644)
+        os.replace(tmp_status, status_file)
         PY
         fi
       '';

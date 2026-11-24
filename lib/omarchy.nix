@@ -728,6 +728,8 @@ let
     assert _;
     pkgs.runCommand "omarchy-plugin-${manifest.id}-${manifest.version}"
       {
+        preferLocalBuild = true;
+        allowSubstitutes = false;
         nativeBuildInputs = [
           pkgs.jq
           pkgs.findutils

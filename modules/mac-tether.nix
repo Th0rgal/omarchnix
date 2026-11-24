@@ -488,6 +488,10 @@ let
 
   macMeshDaemonScript = pkgs.writeShellApplication {
     name = "mac-meshd";
+    derivationArgs = {
+      preferLocalBuild = true;
+      allowSubstitutes = false;
+    };
     runtimeInputs = [
       pythonEnv
       leanMeshPkg

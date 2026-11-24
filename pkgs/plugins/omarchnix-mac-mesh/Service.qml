@@ -35,6 +35,8 @@ Item {
     if (!personalUp) return "Offline"
     var roam = planes.personal && planes.personal.roam ? planes.personal.roam.umbrel : null
     if (roam && roam.path_kind === "direct_lan") return "Direct LAN"
+    if (roam && roam.path_kind === "direct_wan") return "Direct WAN"
+    if (roam && roam.path_kind === "direct_p2p") return "Direct P2P"
     if (roam && roam.path_kind === "control_plane_relay") return "Relay (:51890)"
     return "Connected"
   }
@@ -43,6 +45,8 @@ Item {
     if (!personalUp) return "Offline"
     var roam = planes.personal && planes.personal.roam ? planes.personal.roam["dgx-spark"] : null
     if (roam && roam.path_kind === "direct_lan") return "Direct LAN"
+    if (roam && roam.path_kind === "direct_wan") return "Direct WAN"
+    if (roam && roam.path_kind === "direct_p2p") return "Direct P2P"
     if (roam && roam.path_kind === "control_plane_relay") return "Relay (:51890)"
     return roam ? "Connected" : "Standby"
   }

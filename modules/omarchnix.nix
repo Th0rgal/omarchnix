@@ -217,19 +217,64 @@ in
             description = "Enable the Touch ID HUD overlay (`null` auto-enables when `omarchnix.hardware.m2air.touchId.enable` is true).";
           };
 
-          wallpapers = {
-            default = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
-              description = "Default fallback wallpaper file path passed into Home Manager.";
-            };
+          wallpapers =
+            let
+              wallpaperBucketType = lib.types.submodule {
+                options = {
+                  default = lib.mkOption {
+                    type = lib.types.nullOr lib.types.str;
+                    default = null;
+                    description = "Default fallback wallpaper file path for this variant.";
+                  };
+                  workspaces = lib.mkOption {
+                    type = lib.types.attrsOf lib.types.str;
+                    default = { };
+                    description = "Per-Space wallpaper file paths for this variant.";
+                  };
+                };
+              };
+            in
+            {
+              default = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Default fallback wallpaper file path passed into Home Manager.";
+              };
 
-            workspaces = lib.mkOption {
-              type = lib.types.attrsOf lib.types.str;
-              default = { };
-              description = "Per-Space wallpaper file paths passed into Home Manager.";
+              workspaces = lib.mkOption {
+                type = lib.types.attrsOf lib.types.str;
+                default = { };
+                description = "Per-Space wallpaper file paths passed into Home Manager.";
+              };
+
+              variants = {
+                dark = lib.mkOption {
+                  type = wallpaperBucketType;
+                  default = { };
+                  description = "Landscape dark-mode wallpaper sequence passed into Home Manager.";
+                };
+
+                light = lib.mkOption {
+                  type = wallpaperBucketType;
+                  default = { };
+                  description = "Landscape light-mode wallpaper sequence passed into Home Manager.";
+                };
+
+                portrait = {
+                  dark = lib.mkOption {
+                    type = wallpaperBucketType;
+                    default = { };
+                    description = "Portrait dark-mode wallpaper sequence passed into Home Manager.";
+                  };
+
+                  light = lib.mkOption {
+                    type = wallpaperBucketType;
+                    default = { };
+                    description = "Portrait light-mode wallpaper sequence passed into Home Manager.";
+                  };
+                };
+              };
             };
-          };
         };
 
         autostartTty = {
@@ -302,6 +347,14 @@ in
                   wallpapers = {
                     default = lib.mkDefault cfg.desktop.macos.wallpapers.default;
                     workspaces = lib.mkDefault cfg.desktop.macos.wallpapers.workspaces;
+                    variants = {
+                      dark = lib.mkDefault cfg.desktop.macos.wallpapers.variants.dark;
+                      light = lib.mkDefault cfg.desktop.macos.wallpapers.variants.light;
+                      portrait = {
+                        dark = lib.mkDefault cfg.desktop.macos.wallpapers.variants.portrait.dark;
+                        light = lib.mkDefault cfg.desktop.macos.wallpapers.variants.portrait.light;
+                      };
+                    };
                   };
                 };
                 sharing = {

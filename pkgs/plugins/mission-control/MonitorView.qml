@@ -13,6 +13,9 @@ PanelWindow {
   readonly property real p: controller.progress
 
   readonly property HyprlandMonitor monitor: Hyprland.monitorFor(screen)
+  readonly property bool isPortrait: (height > 0 && width > 0)
+    ? (height > width)
+    : Boolean(screen && screen.height > screen.width)
   readonly property var activeWorkspace: monitor ? monitor.activeWorkspace : null
   readonly property string monitorName: monitor ? monitor.name : ""
   readonly property int slots: controller.slots
@@ -651,7 +654,8 @@ PanelWindow {
       id: wallpaper
       anchors.fill: parent
       readonly property string bgPath: view.controller.wallpaperForWorkspace(
-        view.activeWorkspace && view.activeWorkspace.id > 0 ? view.activeWorkspace.id : 1
+        view.activeWorkspace && view.activeWorkspace.id > 0 ? view.activeWorkspace.id : 1,
+        view.isPortrait
       )
       source: bgPath ? "file://" + bgPath : ""
       sourceSize.width: 960

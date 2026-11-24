@@ -271,7 +271,10 @@ Item {
 
       Image {
         anchors.fill: parent
-        readonly property string bgPath: thumb.monitorView.controller.wallpaperForWorkspace(thumb.spaceId)
+        readonly property string bgPath: thumb.monitorView.controller.wallpaperForWorkspace(
+          thumb.spaceId,
+          thumb.monitorView.isPortrait
+        )
         source: bgPath ? "file://" + bgPath : ""
         sourceSize.width: 320
         sourceSize.height: 208

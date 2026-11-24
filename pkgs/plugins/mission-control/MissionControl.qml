@@ -2,6 +2,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
 import QtQuick
+import qs.Commons as Commons
 
 // macOS-style Mission Control overlay. One MonitorView per screen spreads out
 // the windows of that monitor's active workspace; a Spaces bar on top shows
@@ -27,9 +28,12 @@ Item {
   readonly property string backgroundLink: Quickshell.env("HOME") + "/.local/state/omarchy/current/background"
   readonly property string wsWallpapersConfigPath: Quickshell.env("HOME") + "/.config/omarchy/workspace-wallpapers.json"
   readonly property string monitorBlocksPath: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy/monitors/workspaces"
+  readonly property bool isLight:
+    (0.2126 * Commons.Color.background.r + 0.7152 * Commons.Color.background.g + 0.0722 * Commons.Color.background.b) > 0.5
   property string backgroundPath: ""
   property string defaultWorkspaceWallpaper: ""
   property var workspaceWallpapers: ({})
+  property var workspaceWallpaperVariants: ({})
   property var monitorBlocks: ({})
   property string pendingFocusKind: ""
   property string pendingFocusTarget: ""
@@ -67,6 +71,24 @@ Item {
     return String(wsId || "")
   }
 
+  function sanitizeWallpaperBucket(obj) {
+    if (!obj || typeof obj !== "object") return null
+    var def = typeof obj.default === "string" ? obj.default.trim() : ""
+    var ws = {}
+    var hasWs = false
+    if (obj.workspaces && typeof obj.workspaces === "object") {
+      for (var k in obj.workspaces) {
+        var v = String(obj.workspaces[k] || "").trim()
+        if (v) {
+          ws[String(k)] = v
+          hasWs = true
+        }
+      }
+    }
+    if (!def && !hasWs) return null
+    return { "default": def, "workspaces": ws }
+  }
+
   function parseWorkspaceWallpapers(raw) {
     var text = String(raw || "").trim()
     if (!text) return
@@ -82,24 +104,56 @@ Item {
           }
         }
         root.workspaceWallpapers = map
+        var nextVariants = {}
+        if (obj.variants && typeof obj.variants === "object") {
+          var vDark = sanitizeWallpaperBucket(obj.variants.dark)
+          var vLight = sanitizeWallpaperBucket(obj.variants.light)
+          if (vDark) nextVariants.dark = vDark
+          if (vLight) nextVariants.light = vLight
+          if (obj.variants.portrait && typeof obj.variants.portrait === "object") {
+            var pObj = obj.variants.portrait
+            var pNext = {}
+            var pDark = sanitizeWallpaperBucket(pObj.dark)
+            var pLight = sanitizeWallpaperBucket(pObj.light)
+            var pFlat = sanitizeWallpaperBucket(pObj)
+            if (pDark) pNext.dark = pDark
+            if (pLight) pNext.light = pLight
+            if (pFlat) {
+              pNext.default = pFlat.default
+              pNext.workspaces = pFlat.workspaces
+            }
+            if (Object.keys(pNext).length > 0) nextVariants.portrait = pNext
+          }
+        }
+        root.workspaceWallpaperVariants = nextVariants
       }
     } catch (e) {
     }
   }
 
-  function wallpaperForWorkspace(wsId) {
+  function wallpaperForWorkspace(wsId, isPortrait) {
     var num = parseInt(String(wsId || ""), 10)
-    var map = root.workspaceWallpapers || {}
-    if (!isNaN(num) && num > 0) {
-      var exact = String(num)
-      if (map[exact]) return String(map[exact])
-      var slot = String(((num - 1) % root.slots) + 1)
-      if (map[slot]) return String(map[slot])
-    } else {
-      var key = String(wsId || "")
-      if (key && map[key]) return String(map[key])
+    var exact = (!isNaN(num) && num > 0) ? String(num) : ""
+    var slot = (!isNaN(num) && num > 0) ? String(((num - 1) % root.slots) + 1) : ""
+    var key = (!exact) ? String(wsId || "") : ""
+    var mode = root.isLight ? "light" : "dark"
+    var v = root.workspaceWallpaperVariants || {}
+    var buckets = []
+    if (isPortrait && v.portrait && typeof v.portrait === "object") {
+      if (v.portrait[mode]) buckets.push(v.portrait[mode])
+      if (v.portrait.default || v.portrait.workspaces) buckets.push(v.portrait)
     }
-    if (root.defaultWorkspaceWallpaper) return root.defaultWorkspaceWallpaper
+    if (v[mode]) buckets.push(v[mode])
+    buckets.push({ "default": root.defaultWorkspaceWallpaper, "workspaces": root.workspaceWallpapers || {} })
+    for (var i = 0; i < buckets.length; i++) {
+      var b = buckets[i]
+      if (!b) continue
+      var map = b.workspaces || {}
+      if (exact && map[exact]) return String(map[exact])
+      if (slot && map[slot]) return String(map[slot])
+      if (key && map[key]) return String(map[key])
+      if (b.default) return String(b.default)
+    }
     return root.backgroundPath
   }
 

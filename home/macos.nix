@@ -499,26 +499,81 @@ in
       };
     };
 
-    wallpapers = {
-      enable = lib.mkOption {
-        type = lib.types.bool;
-        default = mCfg.wallpapers.default != null || mCfg.wallpapers.workspaces != { };
-        defaultText = lib.literalExpression "default != null || workspaces != {}";
-        description = "Enable preloaded zero-latency per-Space wallpapers (`th0rgal.workspace-wallpapers`).";
-      };
+    wallpapers =
+      let
+        wallpaperBucketType = lib.types.submodule {
+          options = {
+            default = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Default fallback wallpaper file path for this variant.";
+            };
+            workspaces = lib.mkOption {
+              type = lib.types.attrsOf lib.types.str;
+              default = { };
+              description = "Per-workspace (`\"1\"`, `\"2\"`, ...) wallpaper file paths for this variant.";
+            };
+          };
+        };
+      in
+      {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default =
+            mCfg.wallpapers.default != null
+            || mCfg.wallpapers.workspaces != { }
+            || mCfg.wallpapers.variants.dark.default != null
+            || mCfg.wallpapers.variants.dark.workspaces != { }
+            || mCfg.wallpapers.variants.light.default != null
+            || mCfg.wallpapers.variants.light.workspaces != { }
+            || mCfg.wallpapers.variants.portrait.dark.default != null
+            || mCfg.wallpapers.variants.portrait.dark.workspaces != { }
+            || mCfg.wallpapers.variants.portrait.light.default != null
+            || mCfg.wallpapers.variants.portrait.light.workspaces != { };
+          defaultText = lib.literalExpression "default != null || workspaces != {} || variants non-empty";
+          description = "Enable preloaded zero-latency per-Space wallpapers (`th0rgal.workspace-wallpapers`).";
+        };
 
-      default = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = "Default fallback wallpaper file path written to `~/.config/omarchy/workspace-wallpapers.json`.";
-      };
+        default = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Default fallback wallpaper file path written to `~/.config/omarchy/workspace-wallpapers.json`.";
+        };
 
-      workspaces = lib.mkOption {
-        type = lib.types.attrsOf lib.types.str;
-        default = { };
-        description = "Per-workspace (`\"1\"`, `\"2\"`, ...) wallpaper file paths written to `~/.config/omarchy/workspace-wallpapers.json`.";
+        workspaces = lib.mkOption {
+          type = lib.types.attrsOf lib.types.str;
+          default = { };
+          description = "Per-workspace (`\"1\"`, `\"2\"`, ...) wallpaper file paths written to `~/.config/omarchy/workspace-wallpapers.json`.";
+        };
+
+        variants = {
+          dark = lib.mkOption {
+            type = wallpaperBucketType;
+            default = { };
+            description = "Landscape dark-mode wallpaper sequence (`default` and `workspaces`).";
+          };
+
+          light = lib.mkOption {
+            type = wallpaperBucketType;
+            default = { };
+            description = "Landscape light-mode wallpaper sequence (`default` and `workspaces`).";
+          };
+
+          portrait = {
+            dark = lib.mkOption {
+              type = wallpaperBucketType;
+              default = { };
+              description = "Portrait dark-mode wallpaper sequence (`default` and `workspaces`).";
+            };
+
+            light = lib.mkOption {
+              type = wallpaperBucketType;
+              default = { };
+              description = "Portrait light-mode wallpaper sequence (`default` and `workspaces`).";
+            };
+          };
+        };
       };
-    };
   };
 
   config = lib.mkIf (cfg.enable && cfg.shell.backend == "omarchy-shell") (
@@ -688,13 +743,42 @@ in
 
         programs.omarchnix.shell.disabledPlugins = [ "omarchy.background" ];
 
+        wayland.windowManager.hyprland.settings.layer_rule = lib.mkAfter [
+          {
+            name = "omarchnix-workspace-wallpaper";
+            match.namespace = "^omarchnix-workspace-wallpaper$";
+            no_anim = true;
+            animation = "none";
+          }
+        ];
+
         xdg.configFile."omarchy/workspace-wallpapers.json".text =
+          let
+            serializeBucket =
+              b:
+              lib.optionalAttrs (b.default != null) { inherit (b) default; }
+              // lib.optionalAttrs (b.workspaces != { }) { inherit (b) workspaces; };
+            portraitDark = serializeBucket mCfg.wallpapers.variants.portrait.dark;
+            portraitLight = serializeBucket mCfg.wallpapers.variants.portrait.light;
+            portraitVariants =
+              lib.optionalAttrs (portraitDark != { }) { dark = portraitDark; }
+              // lib.optionalAttrs (portraitLight != { }) { light = portraitLight; };
+            darkVariant = serializeBucket mCfg.wallpapers.variants.dark;
+            lightVariant = serializeBucket mCfg.wallpapers.variants.light;
+            serializedVariants =
+              lib.optionalAttrs (darkVariant != { }) { dark = darkVariant; }
+              // lib.optionalAttrs (lightVariant != { }) { light = lightVariant; }
+              // lib.optionalAttrs (portraitVariants != { }) { portrait = portraitVariants; };
+          in
           builtins.toJSON (
             lib.optionalAttrs (mCfg.wallpapers.default != null) {
               default = mCfg.wallpapers.default;
             }
             // {
               workspaces = mCfg.wallpapers.workspaces;
+            }
+            // lib.optionalAttrs (serializedVariants != { }) {
+              variants = serializedVariants;
             }
           )
           + "\n";

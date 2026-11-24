@@ -281,7 +281,16 @@ Item {
       Util.execDetached("omarchy-launch-tui " + cmd.map(function(w) { return Util.shellQuote(w) }).join(" "))
       return
     }
-    Quickshell.execDetached(["uwsm-app", "--", String(entry.id) + ".desktop"])
+    var execCmd = (entry.command || []).filter(function(word) { return !/^%[a-zA-Z]$/.test(String(word)) })
+    var fallbackCmd = execCmd.length > 0
+      ? ("exec " + execCmd.map(function(w) { return Util.shellQuote(String(w)) }).join(" "))
+      : ("exec gtk-launch " + Util.shellQuote(String(entry.id)))
+    Quickshell.execDetached([
+      "bash", "-c",
+      "if [ -S \"${XDG_RUNTIME_DIR:-}/systemd/private\" ] && command -v uwsm-app >/dev/null 2>&1; then " +
+      "exec uwsm-app -- " + Util.shellQuote(String(entry.id) + ".desktop") + "; " +
+      "else " + fallbackCmd + "; fi"
+    ])
   }
 
   function launch(item) {

@@ -385,19 +385,32 @@ Item {
     root.recordUsage(desktopId)
     root.dismiss()
 
-    if (runInTerm) {
-      var cleanWords = []
-      for (var i = 0; i < rawWords.length; i++) {
-        var w = String(rawWords[i] || "")
-        if (w && !/^%[a-zA-Z]$/.test(w)) cleanWords.push(root.shellQuote(w))
-      }
-      if (cleanWords.length > 0) {
-        Quickshell.execDetached(["bash", "-c", "if command -v ghostty >/dev/null 2>&1; then exec uwsm-app -- ghostty -e " + cleanWords.join(" ") + "; else exec uwsm-app -- foot -e " + cleanWords.join(" ") + "; fi"])
-        return
-      }
+    var cleanQuoted = []
+    for (var i = 0; i < rawWords.length; i++) {
+      var w = String(rawWords[i] || "")
+      if (w && !/^%[a-zA-Z]$/.test(w)) cleanQuoted.push(root.shellQuote(w))
     }
 
-    Quickshell.execDetached(["uwsm-app", "--", desktopId + ".desktop"])
+    if (runInTerm && cleanQuoted.length > 0) {
+      Quickshell.execDetached([
+        "bash", "-c",
+        "TERM_BIN=$(command -v ghostty || command -v foot); " +
+        "if [ -S \"${XDG_RUNTIME_DIR:-}/systemd/private\" ] && command -v uwsm-app >/dev/null 2>&1; then " +
+        "exec uwsm-app -- \"$TERM_BIN\" -e " + cleanQuoted.join(" ") + "; " +
+        "else exec \"$TERM_BIN\" -e " + cleanQuoted.join(" ") + "; fi"
+      ])
+      return
+    }
+
+    var fallbackCmd = cleanQuoted.length > 0
+      ? ("exec " + cleanQuoted.join(" "))
+      : ("exec gtk-launch " + root.shellQuote(desktopId))
+    Quickshell.execDetached([
+      "bash", "-c",
+      "if [ -S \"${XDG_RUNTIME_DIR:-}/systemd/private\" ] && command -v uwsm-app >/dev/null 2>&1; then " +
+      "exec uwsm-app -- " + root.shellQuote(desktopId + ".desktop") + "; " +
+      "else " + fallbackCmd + "; fi"
+    ])
   }
 
   ListModel {

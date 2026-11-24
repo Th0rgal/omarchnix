@@ -87,9 +87,10 @@ def reconcile_once(iface: str, self_pub_b64: str, peer_pub_b64: str, relay_ep: s
     use_p2p = False
     if p2p_ep:
         if cur["endpoint"] == p2p_ep:
-            if probe_at == 0:
+            fresh_boot = probe_at == 0
+            if fresh_boot:
                 probe_at = now
-            if cur["handshake"] >= probe_at or (last_direct_hs == 0 and cur["handshake"] > 0 and (now - cur["handshake"]) <= max_stale):
+            if cur["handshake"] >= probe_at or (fresh_boot and last_direct_hs == 0 and cur["handshake"] > 0 and (now - cur["handshake"]) <= max_stale):
                 last_direct_hs = max(last_direct_hs, cur["handshake"])
                 backoff_until = 0
             if last_direct_hs > 0 and (now - last_direct_hs) <= max_stale:

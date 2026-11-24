@@ -491,10 +491,12 @@ let
             effective_direct_hs = 0
             if direct_ep:
                 if cur["endpoint"] == lan_ep:
-                    if lan_probe_at == 0:
+                    fresh_boot = lan_probe_at == 0
+                    if fresh_boot:
                         lan_probe_at = now
                     if cur["handshake"] >= lan_probe_at or (
-                        last_direct_hs == 0
+                        fresh_boot
+                        and last_direct_hs == 0
                         and cur["handshake"] > 0
                         and (now - cur["handshake"]) <= max_stale
                     ):

@@ -75,13 +75,16 @@ Item {
     return list
   }
 
+  function primaryBucketFor(isLightMode, isPortrait) {
+    var buckets = root.bucketsFor(isLightMode, isPortrait)
+    return buckets.length > 0 ? buckets[0] : null
+  }
+
   function pathsForOrientation(isPortrait) {
     var seen = {}
     var list = []
-    var darkBuckets = root.bucketsFor(false, isPortrait)
-    var lightBuckets = root.bucketsFor(true, isPortrait)
-    for (var i = 0; i < darkBuckets.length; i++) addBucketPaths(darkBuckets[i], seen, list)
-    for (var j = 0; j < lightBuckets.length; j++) addBucketPaths(lightBuckets[j], seen, list)
+    addBucketPaths(root.primaryBucketFor(false, isPortrait), seen, list)
+    addBucketPaths(root.primaryBucketFor(true, isPortrait), seen, list)
     return list
   }
 
@@ -560,11 +563,17 @@ Item {
       property string previousPath: ""
       property real fadeProgress: 1.0
       property var readyMap: ({})
+      readonly property bool currentReady: Boolean(currentPath !== "" && readyMap[currentPath])
 
       onMonitorWsIdChanged: {
         if (monitorWsId > 0 && fastWsId !== monitorWsId) {
           fastWsId = monitorWsId
         }
+      }
+
+      onIsPortraitChanged: {
+        readyMap = ({})
+        previousPath = ""
       }
 
       Connections {
@@ -621,7 +630,8 @@ Item {
       onTargetPathChanged: {
         if (!targetPath || targetPath === currentPath) return
         fadeAnim.stop()
-        if (currentPath === "" || readyMap[targetPath]) {
+        var hasPreviousInPool = currentPath !== "" && panelPreloadedPaths.indexOf(currentPath) >= 0
+        if (!hasPreviousInPool || readyMap[targetPath]) {
           currentPath = targetPath
           previousPath = ""
           fadeProgress = 1.0
@@ -662,10 +672,11 @@ Item {
             readonly property string wallPath: String(modelData || "")
             readonly property bool isCurrent: wallPath !== "" && wallPath === panel.currentPath
             readonly property bool isPrevious: wallPath !== "" && wallPath === panel.previousPath && panel.fadeProgress < 1.0
+            readonly property bool shouldLoad: isCurrent || isPrevious || panel.currentReady
             property bool gpuWarmDone: false
 
             anchors.fill: parent
-            source: (panel.decodeWidth > 0 && wallPath !== "") ? ("file://" + wallPath) : ""
+            source: (shouldLoad && panel.decodeWidth > 0 && panel.decodeHeight > 0 && wallPath !== "") ? ("file://" + wallPath) : ""
             sourceSize.width: panel.decodeWidth
             sourceSize.height: panel.decodeHeight
             fillMode: Image.PreserveAspectCrop

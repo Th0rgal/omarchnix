@@ -700,11 +700,10 @@ in
 
       (lib.mkIf mCfg.minimalBar.enable {
         programs.omarchnix.plugins.locked = {
-          "omarchnix.appearance".section = "tray";
+          "omarchnix.appearance".section = "centerBegin";
         };
 
         programs.omarchnix.shell.trayWidgetIds = [
-          "omarchnix.appearance"
           "omarchy.agents"
           "omarchy.monitor"
         ];

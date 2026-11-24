@@ -15,6 +15,6 @@
   "barWidget": {
     "displayName": "Appearance",
     "description": "Toggle system Dark / Light theme across all apps (Right-click for Theme Picker).",
-    "defaultSection": "right"
+    "defaultSection": "centerBegin"
   }
 }

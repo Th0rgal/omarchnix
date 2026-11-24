@@ -304,6 +304,11 @@ let
         fi
 
         if ip link show dev "$iface" >/dev/null 2>&1; then
+          # Self-heal overlay IP if NetworkManager or a link bounce ever strips it.
+          if ! ip -4 addr show dev "$iface" | grep -qF "inet ''${overlay_cidr%/*}"; then
+            ip -4 addr replace "$overlay_cidr" dev "$iface"
+            ip link set mtu 1420 up dev "$iface"
+          fi
           for peer_cidr in $(jq -r --arg self "$node_name" '.peers[] | select(.name != $self and (.revoked | not)) | "\(.overlay_ip)/\(.prefix_len)"' "$state_dir/manifest.json"); do
             ip -4 route replace "$peer_cidr" dev "$iface"
           done

@@ -480,18 +480,7 @@ stdenv.mkDerivation {
     [Desktop Entry]
     Name=Orb
     Comment=All your AI providers, machines, and agent harnesses in one place
-    Exec=$out/bin/orb
-    Icon=orb
-    Terminal=false
-    Type=Application
-    Categories=Development;Utility;
-    StartupWMClass=orb-desktop
-    EOF
-    cat > "$out/share/applications/orb-leanui.desktop" <<EOF
-    [Desktop Entry]
-    Name=Orb LeanUI
-    Comment=Native Orb desktop trial
-    Exec=$out/bin/orb --leanui
+    Exec=$out/bin/orb${lib.optionalString hasHybridSidebar " --leanui-hybrid"}
     Icon=orb
     Terminal=false
     Type=Application
@@ -500,17 +489,6 @@ stdenv.mkDerivation {
     EOF
     ${lib.optionalString hasHybridSidebar ''
       install -Dm0755 orb-sidebar-host.so "$out/lib/orb-sidebar-host.so"
-      cat > "$out/share/applications/orb-leanui-hybrid.desktop" <<EOF
-      [Desktop Entry]
-      Name=Orb LeanUI Hybrid
-      Comment=LeanUI sidebar with Orb WebKit pages
-      Exec=$out/bin/orb --leanui-hybrid
-      Icon=orb
-      Terminal=false
-      Type=Application
-      Categories=Development;
-      StartupWMClass=orb-desktop
-      EOF
     ''}
     cat > "$out/bin/.orb-dev" <<'SH'
     #!${bash}/bin/bash
@@ -551,18 +529,6 @@ stdenv.mkDerivation {
     ORB_DEV_URL="$url" "$here/orb" "$@"
     SH
     chmod 0755 "$out/bin/.orb-dev"
-    cat > "$out/share/applications/orb-dev.desktop" <<EOF
-    [Desktop Entry]
-    Name=Orb Dev
-    Comment=Orb from your local checkout (~/work/orb) with instant reload
-    Exec=$out/bin/orb dev
-    Icon=orb
-    Terminal=false
-    Type=Application
-    Categories=Development;
-    Keywords=orb;dev;hmr;vite;
-    StartupWMClass=orb-desktop-dev
-    EOF
     cat > "$out/bin/.orb-signer" <<'PY'
     #!${python3}/bin/python3
     ${linuxSigner}

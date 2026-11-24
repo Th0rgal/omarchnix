@@ -90,6 +90,10 @@ let
     builtins.readFile ./omarchy-shell/patch-agents.py
   );
 
+  patchPortraitBarPy = pkgs.writeText "patch-omarchy-portrait-bar.py" (
+    builtins.readFile ./omarchy-shell/patch-portrait-bar.py
+  );
+
   omarchyShare =
     pkgs.runCommand "omarchy-share"
       {
@@ -446,6 +450,7 @@ let
         # `omarchy-agent*` calls inside Quickshell's wrapped PATH while keeping
         # `_OMARCHY_SKIP_AGENT_OVERRIDE=1` fallback to upstream scripts.
         ${omarchyPython}/bin/python3 "${patchAgentsPy}" "$out"
+        ${omarchyPython}/bin/python3 "${patchPortraitBarPy}" "$out"
 
         find "$out/shell" -type f -name '*.sh' -exec chmod +x {} +
         find "$out/bin" -type f -exec chmod +x {} +

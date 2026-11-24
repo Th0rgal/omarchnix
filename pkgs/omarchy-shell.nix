@@ -94,6 +94,10 @@ let
     builtins.readFile ./omarchy-shell/patch-portrait-bar.py
   );
 
+  patchMonitorSettingsPy = pkgs.writeText "patch-omarchy-monitor-settings.py" (
+    builtins.readFile ./omarchy-shell/patch-monitor-settings.py
+  );
+
   omarchyShare =
     pkgs.runCommand "omarchy-share"
       {
@@ -451,6 +455,7 @@ let
         # `_OMARCHY_SKIP_AGENT_OVERRIDE=1` fallback to upstream scripts.
         ${omarchyPython}/bin/python3 "${patchAgentsPy}" "$out"
         ${omarchyPython}/bin/python3 "${patchPortraitBarPy}" "$out"
+        ${omarchyPython}/bin/python3 "${patchMonitorSettingsPy}" "$out"
 
         find "$out/shell" -type f -name '*.sh' -exec chmod +x {} +
         find "$out/bin" -type f -exec chmod +x {} +

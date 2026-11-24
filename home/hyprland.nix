@@ -954,6 +954,12 @@ let
 
           -- Shift active monitors together so the top-leftmost sits at (0, 0)
           -- without modifying ~/.local/state/omarchy/monitors/settings.
+          -- Move monitors along the shift direction first so they never transiently overlap.
+          table.sort(mons, function(a, b)
+            local da = (a.x * (min_x >= 0 and 1 or -1)) + (a.y * (min_y >= 0 and 1 or -1))
+            local db = (b.x * (min_x >= 0 and 1 or -1)) + (b.y * (min_y >= 0 and 1 or -1))
+            return da < db
+          end)
           for _, m in ipairs(mons) do
             local nx = math.floor((m.x - min_x) + 0.5)
             local ny = math.floor((m.y - min_y) + 0.5)

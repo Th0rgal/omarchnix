@@ -180,6 +180,12 @@ in
 assert m2airConfig.omarchnix.hardware.m2air.touchId.enable == false;
 assert m2airAuroraConfig.omarchnix.hardware.m2air.touchId.enable == true;
 assert m2airAuroraConfig.omarchnix.hardware.m2air.touchId.fido.enable == true;
+assert m2airAuroraConfig.omarchnix.hardware.m2air.ane.enable == true;
+assert m2airAuroraConfig.users.groups ? accel;
+assert m2airAuroraConfig.systemd.services ? aurora-ane-firmware;
+assert m2airAuroraConfig.zramSwap.memoryPercent == 100;
+assert builtins.elem "cpuidle.governor=teo" m2airAuroraConfig.boot.kernelParams;
+assert m2airAuroraConfig.boot.initrd.luks.devices.cryptroot.bypassWorkqueues == true;
 assert m2airAuroraConfig.boot.kernelPackages.kernel.version == "7.3.0";
 assert (m2airAuroraConfig.boot.kernelPackages.kernel.auroraCtxrExecmem or false) == true;
 assert builtins.elem "https://aurorasilicon.org/nixos-aurora/cache"

@@ -170,10 +170,13 @@
             ./hosts/common.nix
             ./hosts/m2air.nix
             {
-              omarchnix.hardware.m2air.touchId = {
-                enable = true;
-                requirePasswordAfterBoot = true;
-                fido.enable = true;
+              omarchnix.hardware.m2air = {
+                ane.enable = true;
+                touchId = {
+                  enable = true;
+                  requirePasswordAfterBoot = true;
+                  fido.enable = true;
+                };
               };
             }
           ];

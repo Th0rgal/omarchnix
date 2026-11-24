@@ -1857,6 +1857,140 @@ if batt_service_qml.is_file():
     assert old_bs_cmd in bs_txt, "services/battery/Service.qml busctl command not found"
     bs_txt = bs_txt.replace(old_bs_cmd, new_bs_cmd, 1)
 
+    old_bs_head = "\n".join([
+        "  readonly property int batteryThreshold: 10",
+        '  property string pendingPowerSource: ""',
+    ])
+    new_bs_head = "\n".join([
+        "  readonly property int batteryThreshold: 10",
+        "  readonly property int autoLowPowerThreshold: 25",
+        '  property string pendingPowerSource: ""',
+        "  property var pendingPowerArgs: []",
+    ])
+    assert old_bs_head in bs_txt, "services/battery/Service.qml batteryThreshold block not found"
+    bs_txt = bs_txt.replace(old_bs_head, new_bs_head, 1)
+
+    old_bs_persisted = "\n".join([
+        "  PersistentProperties {",
+        "    id: persisted",
+        '    reloadableId: "omarchy-battery"',
+        "    property bool notifiedLowBattery: false",
+        "  }",
+    ])
+    new_bs_persisted = "\n".join([
+        "  PersistentProperties {",
+        "    id: persisted",
+        '    reloadableId: "omarchy-battery"',
+        "    property bool notifiedLowBattery: false",
+        "    property bool autoLowPowerActive: false",
+        "  }",
+    ])
+    assert old_bs_persisted in bs_txt, "services/battery/Service.qml PersistentProperties not found"
+    bs_txt = bs_txt.replace(old_bs_persisted, new_bs_persisted, 1)
+
+    old_bs_logic = "\n".join([
+        "  function checkBattery() {",
+        "    var state = BatteryModel.shouldWarnLowBattery(UPower.displayDevice, UPower.onBattery, UPowerDeviceState.Discharging, batteryThreshold, persisted.notifiedLowBattery)",
+        "    persisted.notifiedLowBattery = state.notifiedLowBattery",
+        "    if (state.notify) sendLowBatteryWarning(state.level)",
+        "  }",
+        "",
+        "  function sendLowBatteryWarning(level) {",
+        "    if (warningProcess.running) return",
+        "    warningProcess.command = [",
+        '      "omarchy-battery-low",',
+        "      String(level)",
+        "    ]",
+        "    warningProcess.running = true",
+        "  }",
+        "",
+        "  function applyPowerProfile() {",
+        '    pendingPowerSource = UPower.onBattery ? "battery" : "ac"',
+        "    if (!powerProfileProcess.running) runPendingPowerProfile()",
+        "  }",
+        "",
+        "  function runPendingPowerProfile() {",
+        '    powerProfileProcess.command = ["omarchy-powerprofiles-set", pendingPowerSource]',
+        '    pendingPowerSource = ""',
+        "    powerProfileProcess.running = true",
+        "  }",
+    ])
+    new_bs_logic = "\n".join([
+        "  function queuePowerProfileCommand(args) {",
+        "    pendingPowerArgs = args",
+        "    if (!powerProfileProcess.running) runPendingPowerProfile()",
+        "  }",
+        "",
+        "  function checkBattery() {",
+        "    var state = BatteryModel.shouldWarnLowBattery(UPower.displayDevice, UPower.onBattery, UPowerDeviceState.Discharging, batteryThreshold, persisted.notifiedLowBattery)",
+        "    persisted.notifiedLowBattery = state.notifiedLowBattery",
+        "    if (state.notify) sendLowBatteryWarning(state.level)",
+        "",
+        "    var lvl = state.level",
+        "    var onBat = !!(UPower.displayDevice && UPower.displayDevice.isPresent && UPower.onBattery)",
+        "    if (onBat && lvl >= 0 && lvl < autoLowPowerThreshold) {",
+        "      if (!persisted.autoLowPowerActive) {",
+        "        persisted.autoLowPowerActive = true",
+        '        queuePowerProfileCommand(["omarchy-powerprofiles-set", "--ephemeral", "battery", "power-saver"])',
+        "      }",
+        "    } else if (persisted.autoLowPowerActive && (!onBat || lvl >= autoLowPowerThreshold)) {",
+        "      persisted.autoLowPowerActive = false",
+        "      if (onBat) applyPowerProfile()",
+        "    }",
+        "  }",
+        "",
+        "  function sendLowBatteryWarning(level) {",
+        "    if (warningProcess.running) return",
+        "    warningProcess.command = [",
+        '      "omarchy-battery-low",',
+        "      String(level)",
+        "    ]",
+        "    warningProcess.running = true",
+        "  }",
+        "",
+        "  function applyPowerProfile() {",
+        "    var lvl = batteryPercentage()",
+        "    if (UPower.onBattery && lvl >= 0 && lvl < autoLowPowerThreshold) {",
+        "      if (!persisted.autoLowPowerActive) {",
+        "        persisted.autoLowPowerActive = true",
+        '        queuePowerProfileCommand(["omarchy-powerprofiles-set", "--ephemeral", "battery", "power-saver"])',
+        "        return",
+        "      }",
+        "    }",
+        '    queuePowerProfileCommand(["omarchy-powerprofiles-set", UPower.onBattery ? "battery" : "ac"])',
+        "  }",
+        "",
+        "  function runPendingPowerProfile() {",
+        "    if (pendingPowerArgs.length === 0) return",
+        "    powerProfileProcess.command = pendingPowerArgs",
+        "    pendingPowerArgs = []",
+        "    powerProfileProcess.running = true",
+        "  }",
+    ])
+    assert old_bs_logic in bs_txt, "services/battery/Service.qml checkBattery/applyPowerProfile block not found"
+    bs_txt = bs_txt.replace(old_bs_logic, new_bs_logic, 1)
+
+    old_bs_proc = "\n".join([
+        "  Process {",
+        "    id: powerProfileProcess",
+        "    onExited: {",
+        '      if (root.pendingPowerSource !== "") root.runPendingPowerProfile()',
+        "      root.refreshPowerProfile()",
+        "    }",
+        "  }",
+    ])
+    new_bs_proc = "\n".join([
+        "  Process {",
+        "    id: powerProfileProcess",
+        "    onExited: {",
+        "      if (root.pendingPowerArgs.length > 0) root.runPendingPowerProfile()",
+        "      root.refreshPowerProfile()",
+        "    }",
+        "  }",
+    ])
+    assert old_bs_proc in bs_txt, "services/battery/Service.qml powerProfileProcess not found"
+    bs_txt = bs_txt.replace(old_bs_proc, new_bs_proc, 1)
+
     old_bs_sig = "\n".join([
         "  Connections {",
         "    target: PowerProfiles",
@@ -1875,7 +2009,46 @@ if batt_service_qml.is_file():
         "  }",
     ])
     assert old_bs_sig in bs_txt, "services/battery/Service.qml PowerProfiles Connections not found"
-    batt_service_qml.write_text(bs_txt.replace(old_bs_sig, new_bs_sig, 1), encoding="utf-8")
+    bs_txt = bs_txt.replace(old_bs_sig, new_bs_sig, 1)
+
+    old_bs_tail = "\n".join([
+        "  Connections {",
+        "    target: UPower",
+        "    function onOnBatteryChanged() {",
+        "      root.checkBattery()",
+        "      root.applyPowerProfile()",
+        "      root.refreshPowerProfile()",
+        "    }",
+        "  }",
+        "",
+        "  Component.onCompleted: root.refreshPowerProfile()",
+    ])
+    new_bs_tail = "\n".join([
+        "  Connections {",
+        "    target: UPower",
+        "    function onOnBatteryChanged() {",
+        "      if (!UPower.onBattery) persisted.autoLowPowerActive = false",
+        "      root.applyPowerProfile()",
+        "      root.checkBattery()",
+        "      root.refreshPowerProfile()",
+        "    }",
+        "  }",
+        "",
+        "  Connections {",
+        "    target: UPower.displayDevice",
+        "    function onPercentageChanged() {",
+        "      root.checkBattery()",
+        "    }",
+        "  }",
+        "",
+        "  Component.onCompleted: {",
+        "    root.applyPowerProfile()",
+        "    root.checkBattery()",
+        "    root.refreshPowerProfile()",
+        "  }",
+    ])
+    assert old_bs_tail in bs_txt, "services/battery/Service.qml UPower Connections tail not found"
+    batt_service_qml.write_text(bs_txt.replace(old_bs_tail, new_bs_tail, 1), encoding="utf-8")
 
 menu_qml_p = out / "shell" / "plugins" / "menu" / "Menu.qml"
 if menu_qml_p.is_file():
@@ -2173,10 +2346,27 @@ if power_panel_qml.is_file():
         "  Connections {",
         "    target: UPower.displayDevice",
         "    function onStateChanged() { root.refreshBatteryStatus() }",
+        "    function onPercentageChanged() { if (!root.opened) root.refreshBatteryStatus() }",
         "  }",
     ])
     assert old_present in pp_txt, "power/Panel.qml onBatteryPresentChanged line not found"
     pp_txt = pp_txt.replace(old_present, new_present, 1)
+
+    old_fill_color = "\n".join([
+        "  readonly property color batteryFillColor: {",
+        "    return root.bar ? root.bar.foreground : Commons.Color.foreground",
+        "  }",
+    ])
+    new_fill_color = "\n".join([
+        "  readonly property bool lowBattery: root.batteryPresent && Math.round(root.batteryFraction * 100) < 25",
+        "  readonly property color lowBatteryColor: Commons.Color.urgent",
+        "  readonly property color batteryFillColor: {",
+        "    if (root.lowBattery) return root.lowBatteryColor",
+        "    return root.bar ? root.bar.foreground : Commons.Color.foreground",
+        "  }",
+    ])
+    assert old_fill_color in pp_txt, "power/Panel.qml batteryFillColor block not found"
+    pp_txt = pp_txt.replace(old_fill_color, new_fill_color, 1)
 
     old_sys_proc = "\n".join([
         "  Process {",
@@ -2233,9 +2423,43 @@ if power_panel_qml.is_file():
     pp_txt = pp_txt.replace(old_action_proc, new_action_proc, 1)
 
     old_slot = "    slotSize: Style.bar.iconSlot * (root.showPercentage && !vertical ? 2 : 1)"
-    new_slot = "    slotSize: Style.bar.iconSlot * (root.showPercentage && !vertical ? (Math.round(root.batteryFraction * 100) >= 100 ? 2.2 : 2) : 1)"
+    new_slot = "\n".join([
+        "    active: root.lowBattery",
+        "    activeColor: root.lowBatteryColor",
+        "    slotSize: Style.bar.iconSlot * (root.showPercentage && !vertical ? (Math.round(root.batteryFraction * 100) >= 100 ? 2.2 : 2) : 1)",
+    ])
     assert old_slot in pp_txt, "power/Panel.qml slotSize line not found"
     pp_txt = pp_txt.replace(old_slot, new_slot, 1)
+
+    old_hero_icon_color = "\n".join([
+        "            id: heroIcon",
+        "            textFormat: Text.PlainText",
+        "            text: root.batteryIcon()",
+        "            color: root.bar.foreground",
+    ])
+    new_hero_icon_color = "\n".join([
+        "            id: heroIcon",
+        "            textFormat: Text.PlainText",
+        "            text: root.batteryIcon()",
+        "            color: root.lowBattery ? root.lowBatteryColor : root.bar.foreground",
+    ])
+    assert old_hero_icon_color in pp_txt, "power/Panel.qml heroIcon color block not found"
+    pp_txt = pp_txt.replace(old_hero_icon_color, new_hero_icon_color, 1)
+
+    old_hero_pct_color = "\n".join([
+        "            id: heroPercent",
+        "            textFormat: Text.PlainText",
+        '            text: root.reading(root.batteryInfo.percentage) || "—"',
+        "            color: root.bar.foreground",
+    ])
+    new_hero_pct_color = "\n".join([
+        "            id: heroPercent",
+        "            textFormat: Text.PlainText",
+        '            text: root.reading(root.batteryInfo.percentage) || "—"',
+        "            color: root.lowBattery ? root.lowBatteryColor : root.bar.foreground",
+    ])
+    assert old_hero_pct_color in pp_txt, "power/Panel.qml heroPercent color block not found"
+    pp_txt = pp_txt.replace(old_hero_pct_color, new_hero_pct_color, 1)
 
     old_stats = "\n".join([
         "          Column {",

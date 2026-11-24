@@ -388,10 +388,19 @@ in
         SuspendState = "freeze";
       };
 
+      # Use the Timer Events Oriented (`teo`) cpuidle governor on Apple Silicon's
+      # tickless asymmetric clusters so Blizzard E-cores reliably enter `CPU PD`
+      # (10 ms residency) between PipeWire/timer wakeups instead of `menu` falling
+      # back to shallow `WFI`.
+      boot.kernelParams = [ "cpuidle.governor=teo" ];
+
+      # Size zstd ZRAM to 100% of logical RAM (~15 GiB uncompressed -> ~3.8 GiB
+      # physical LPDDR5 at ~3.9x compression) so large V8/Electron/agent heaps stay
+      # in sub-2us compressed LPDDR5 RAM instead of spilling onto encrypted NVMe swap.
       zramSwap = {
         enable = true;
         algorithm = "zstd";
-        memoryPercent = 50;
+        memoryPercent = lib.mkDefault 100;
         priority = 100;
       };
 
@@ -451,10 +460,23 @@ in
       // lib.optionalAttrs cfg.efficiencyCoreSteering {
         # Clamp nix-daemon utilization hint (`50% < 571/1024` Blizzard capacity)
         # so Linux EAS packs routine background evaluations/builds onto E-cores
-        # (`cpu0..3`) first while still allowing spillover if all E-cores are full.
+        # (`cpu0..3`) first while still allowing spillover if all E-cores are full,
+        # and grant `wheel` write access so `performance` mode can unclamp it live.
         ExecStartPost = [
-          "+${pkgs.runtimeShell} -c 'echo 50.00 > /sys/fs/cgroup/system.slice/nix-daemon.service/cpu.uclamp.max 2>/dev/null || true'"
+          "+${pkgs.runtimeShell} -c 'u=/sys/fs/cgroup/system.slice/nix-daemon.service/cpu.uclamp.max; if [ -e \"$u\" ]; then echo 50.00 > \"$u\" 2>/dev/null || true; ${pkgs.coreutils}/bin/chgrp wheel \"$u\" 2>/dev/null || true; ${pkgs.coreutils}/bin/chmod 0664 \"$u\" 2>/dev/null || true; fi'"
         ];
+      };
+
+      # Pause uncorked PulseAudio/Electron playback streams after 5 seconds of
+      # underrun (`pulse.idle.timeout = 5`) so silent background Electron apps
+      # (Antigravity, Codex, Claude) cannot hold the 4-channel FIR voicing
+      # convolver and 4x `tas2764` speaker amplifiers active indefinitely.
+      services.pipewire.extraConfig.pipewire-pulse = lib.mkIf config.services.pipewire.enable {
+        "10-idle-timeout.conf" = {
+          "pulse.properties" = {
+            "pulse.idle.timeout" = 5;
+          };
+        };
       };
 
       # Tune VM & zstd ZRAM reclaim for Apple Silicon 16 KiB pages and unified memory:
@@ -509,6 +531,7 @@ in
         "z /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq 0664 root wheel - -"
         "z /sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq 0664 root wheel - -"
         "z /sys/devices/system/cpu/cpufreq/boost 0664 root wheel - -"
+        "z /sys/fs/cgroup/system.slice/nix-daemon.service/cpu.uclamp.max 0664 root wheel - -"
       ]
       ++ lib.optional (
         cfg.isoLayout != null
@@ -518,6 +541,8 @@ in
         SUBSYSTEM=="power_supply", KERNEL=="macsmc-battery", RUN+="${pkgs.coreutils}/bin/chgrp wheel /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold", RUN+="${pkgs.coreutils}/bin/chmod 0664 /sys%p/charge_control_end_threshold /sys%p/charge_control_start_threshold"
         SUBSYSTEM=="leds", KERNEL=="*kbd_backlight*", RUN+="${pkgs.coreutils}/bin/chgrp wheel /sys%p/brightness", RUN+="${pkgs.coreutils}/bin/chmod 0664 /sys%p/brightness"
         SUBSYSTEM=="cpu", KERNEL=="cpu0|cpu4", RUN+="${pkgs.runtimeShell} -c '${pkgs.coreutils}/bin/chgrp wheel /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true; ${pkgs.coreutils}/bin/chmod 0664 /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true'"
+        # Bypass mq-deadline software spinlocks on Apple ANS2 NVMe hardware queues.
+        ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="nvme[0-9]*n[0-9]*", ATTR{queue/scheduler}="none"
         # Hide internal Apple Silicon iBoot, RecoveryOS, and SEP-encrypted APFS container partitions from desktop volume managers.
         SUBSYSTEM=="block", KERNEL=="nvme0n*", ENV{ID_PART_ENTRY_TYPE}=="69646961-6700-11aa-aa11-00306543ecac|52637672-7900-11aa-aa11-00306543ecac|7c3457ef-0000-11aa-aa11-00306543ecac", ENV{UDISKS_IGNORE}="1"
       '';
@@ -626,6 +651,9 @@ in
       boot.initrd.luks.devices.cryptroot = {
         device = "/dev/disk/by-uuid/${cfg.fileSystems.luksUuid}";
         allowDiscards = true;
+        # Inline hardware AES-XTS (~18.3 GB/s per P-core, 95.9 GB/s 8-core on M2)
+        # avoids bouncing every 4 KiB read/write across unbound kcryptd workqueues.
+        bypassWorkqueues = true;
       };
 
       fileSystems."/" = {

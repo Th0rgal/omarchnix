@@ -520,6 +520,30 @@ in
     };
   };
 
+  options.omarchnix.hardware.m2air.ane = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Enable Apple Neural Engine (ANE) userspace tools (`omarchy-ane-tools`,
+        `mil-hwxc`), `/dev/accel/accel*` `accel` group + udev permissions, and
+        runtime `/var/lib/aurora/ane-firmware` handoff for `linux-aurora`.
+      '';
+    };
+
+    firmwarePackage = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = null;
+      description = ''
+        Optional owner-supplied uncompressed ANE firmware package installing
+        `lib/firmware/apple/ane/*.macho`. When left `null`, staging firmware
+        locally with `sudo omarchy-ane-firmware-fetch` into
+        `/var/lib/aurora/ane-firmware` is picked up automatically at runtime via
+        `aurora-ane-firmware.service` without requiring `--impure` flake builds.
+      '';
+    };
+  };
+
   config = lib.mkMerge [
     # Ensure Aurora's binary cache + udev/Stage-2 helpers are active whenever Touch ID is enabled.
     (lib.mkIf cfg.enable {
@@ -752,6 +776,13 @@ in
       ++ lib.optional (pkgs ? aurora-alsa-utils) pkgs.aurora-alsa-utils;
 
       hardware.firmware = lib.optional (pkgs ? aurora-avd-firmware) pkgs.aurora-avd-firmware;
+
+      # Expose `aurora_drv_video.so` (`libvaV4l2RequestAvd`) so sandboxed VA-API
+      # clients (Firefox RDD, systemd units) discover AVD hardware decode without
+      # `LIBVA_DRIVER_NAME`, plus `aurora-rusticl` for OpenCL 3.0 on the M2 GPU.
+      hardware.graphics.extraPackages =
+        lib.optional (pkgs ? libvaV4l2RequestAvd) pkgs.libvaV4l2RequestAvd
+        ++ lib.optional (pkgs ? aurora-rusticl) pkgs.aurora-rusticl;
 
       services.pipewire.package = lib.mkIf (pkgs ? aurora-pipewire) (lib.mkDefault pkgs.aurora-pipewire);
 
@@ -1378,5 +1409,57 @@ in
         }
       )
     )
+
+    # Apple Neural Engine (`26a000000.ane`) userspace compiler/runner + runtime firmware handoff.
+    (lib.mkIf (m2Cfg.ane.enable && (pkgs ? omarchy-ane-tools)) {
+      environment.systemPackages = [
+        pkgs.omarchy-ane-tools
+      ]
+      ++ lib.optional (pkgs ? mil-hwx-compiler) pkgs.mil-hwx-compiler;
+
+      users.groups.accel = { };
+
+      users.users = lib.optionalAttrs ((config.omarchnix.desktop.user or null) != null) {
+        ${config.omarchnix.desktop.user}.extraGroups = [ "accel" ];
+      };
+
+      services.udev.packages = [ pkgs.omarchy-ane-tools ];
+
+      hardware.firmware = lib.optional (m2Cfg.ane.firmwarePackage != null) (
+        m2Cfg.ane.firmwarePackage // { compressFirmware = false; }
+      );
+
+      systemd.services.aurora-ane-firmware = {
+        description = "Expose locally staged Apple Neural Engine firmware and bind ane_t6021";
+        wantedBy = [ "multi-user.target" ];
+        after = [
+          "local-fs.target"
+        ]
+        ++ lib.optional cfg.firmwareHandoff "aurora-vendor-firmware.service";
+        unitConfig = {
+          RequiresMountsFor = "/var/lib";
+          ConditionPathExistsGlob = "/var/lib/aurora/ane-firmware/apple/ane/*.macho";
+        };
+        path = [
+          pkgs.coreutils
+          pkgs.kmod
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          mkdir -p /run/aurora-firmware/vendorfw/apple
+          ln -sfn /var/lib/aurora/ane-firmware/apple/ane /run/aurora-firmware/vendorfw/apple/ane
+          modprobe ane_t6021 2>/dev/null || true
+          for dev in /sys/bus/platform/devices/*.ane; do
+            [ -e "$dev" ] || continue
+            if [ ! -e "$dev/driver" ] && [ -w /sys/bus/platform/drivers/ane_t6021/bind ]; then
+              printf '%s' "$(basename "$dev")" > /sys/bus/platform/drivers/ane_t6021/bind 2>/dev/null || true
+            fi
+          done
+        '';
+      };
+    })
   ];
 }

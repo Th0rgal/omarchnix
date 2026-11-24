@@ -6,12 +6,16 @@ _: {
   boot.initrd.luks.devices.cryptroot = {
     device = "/dev/disk/by-uuid/aa0403dd-9917-49e1-85b1-46b21b39f2d9";
     allowDiscards = true;
+    bypassWorkqueues = true;
   };
 
   fileSystems."/" = {
     device = "/dev/mapper/cryptroot";
     fsType = "ext4";
-    options = [ "defaults" ];
+    options = [
+      "defaults"
+      "noatime"
+    ];
   };
 
   fileSystems."/boot" = {

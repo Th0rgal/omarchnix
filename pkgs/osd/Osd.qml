@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
@@ -97,11 +98,91 @@ Item {
     return iconBoxWidth + messageGap + messageColumnWidth
   }
 
-  onDisplayRatioChanged: if (usesVectorIcon) vectorCanvas.requestPaint()
-  onIconKindChanged: if (usesVectorIcon) vectorCanvas.requestPaint()
-  onIsMutedChanged: if (usesVectorIcon) vectorCanvas.requestPaint()
+  onDisplayRatioChanged: {
+    if (usesVectorIcon) {
+      vectorCanvas.requestPaint()
+      notchVectorCanvas.requestPaint()
+    }
+  }
+  onIconKindChanged: {
+    if (usesVectorIcon) {
+      vectorCanvas.requestPaint()
+      notchVectorCanvas.requestPaint()
+    }
+  }
+  onIsMutedChanged: {
+    if (usesVectorIcon) {
+      vectorCanvas.requestPaint()
+      notchVectorCanvas.requestPaint()
+    }
+  }
   onIsLightChanged: if (usesVectorIcon) vectorCanvas.requestPaint()
   onTextPrimaryChanged: if (usesVectorIcon) vectorCanvas.requestPaint()
+
+  property var displayCutouts: parseCutouts(cutoutsFile.text())
+
+  function parseCutouts(text) {
+    var parsed
+    try {
+      parsed = JSON.parse(String(text || ""))
+    } catch (e) {
+      return []
+    }
+    var panels = parsed && Array.isArray(parsed.panels) ? parsed.panels : []
+    var out = []
+    for (var i = 0; i < panels.length; i++) {
+      var p = panels[i] || {}
+      var w = Number(p.width)
+      var h = Number(p.height)
+      var top = Number(p.top)
+      var cw = Number(p.cutoutWidth)
+      if (typeof p.connector !== "string" || p.connector === "") continue
+      if (!(w > 0) || !(h > 0) || !(top > 0) || top >= h) continue
+      out.push({ connector: p.connector, width: w, height: h, top: top, cutoutWidth: cw > 0 && cw < w ? cw : 304 })
+    }
+    return out
+  }
+
+  function notchForScreen(scr) {
+    if (!scr || !(scr.width > 0) || !(scr.height > 0)) return ({ active: false, width: 0, height: 0 })
+    var mon = Hyprland.monitorFor(scr)
+    var pw = mon ? Number(mon.width) : 0
+    var ph = mon ? Number(mon.height) : 0
+    var tf = (mon && mon.lastIpcObject) ? (Number(mon.lastIpcObject.transform) || 0) : 0
+    if (pw > 0 && ph > 0) {
+      if (tf !== 0 && tf !== 4) return ({ active: false, width: 0, height: 0 })
+      if ((pw > ph) !== (scr.width > scr.height)) return ({ active: false, width: 0, height: 0 })
+    } else {
+      var dpr = Number(scr.devicePixelRatio) > 0 ? Number(scr.devicePixelRatio) : 1
+      pw = Math.round(scr.width * dpr)
+      ph = Math.round(scr.height * dpr)
+    }
+    var name = String(scr.name || "")
+    var list = root.displayCutouts || []
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i]
+      if (name.indexOf(c.connector) !== 0) continue
+      if (Math.abs(pw - c.width) <= 4 && Math.abs(ph - c.height) <= 4) {
+        return {
+          active: true,
+          height: Math.ceil(c.top * scr.width / c.width),
+          width: Math.ceil(c.cutoutWidth * scr.width / c.width)
+        }
+      }
+    }
+    return ({ active: false, width: 0, height: 0 })
+  }
+
+  FileView {
+    id: cutoutsFile
+    path: "/usr/share/omarchy-platform/display-cutouts.json"
+    blockLoading: true
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.displayCutouts = root.parseCutouts(text())
+    onLoadFailed: root.displayCutouts = []
+    onFileChanged: reload()
+  }
 
   Behavior on displayRatio {
     enabled: root.barAnimEnabled
@@ -182,6 +263,7 @@ Item {
     root.surfaceMapped = true
     root.opened = true
     vectorCanvas.requestPaint()
+    notchVectorCanvas.requestPaint()
 
     if (next.duration > 0) hideTimer.restart()
     else hideTimer.stop()
@@ -285,8 +367,196 @@ Item {
     // Visual-only surface: never intercept pointer clicks on the desktop below.
     mask: Region {}
 
+    readonly property var notchInfo: root.notchForScreen(panel.screen)
+    readonly property bool notchActive: notchInfo.active === true
+    readonly property int notchHeight: notchActive ? notchInfo.height : 0
+    readonly property int notchWidth: notchActive ? notchInfo.width : 0
+
+    // ---- Pure-Black Dynamic Island OSD Ears (notched MacBook displays) ----
+    Item {
+      id: notchOsd
+      visible: panel.notchActive
+      readonly property bool visibleState: panel.notchActive && panel.contentRevealed && root.opened
+      readonly property int earSpan: root.hasProgress
+        ? 98
+        : Math.max(46, Math.min(148, root.messageColumnWidth + 24))
+      readonly property int targetWidth: visibleState
+        ? (panel.notchWidth + earSpan * 2)
+        : panel.notchWidth
+
+      y: 0
+      height: panel.notchHeight
+      width: targetWidth
+      x: Math.round((parent.width - width) / 2 + root.nudgeOffset)
+      opacity: visibleState ? 1.0 : 0.0
+
+      Behavior on width {
+        NumberAnimation { duration: 190; easing.type: Easing.OutCubic }
+      }
+      Behavior on opacity {
+        NumberAnimation { duration: 130; easing.type: Easing.OutCubic }
+      }
+
+      // Left concave top-outer fillet
+      Canvas {
+        width: 10
+        height: 10
+        anchors.right: notchOsdBody.left
+        anchors.top: parent.top
+        antialiasing: true
+        onPaint: {
+          var ctx = getContext("2d")
+          ctx.reset()
+          ctx.fillStyle = "#000000"
+          ctx.beginPath()
+          ctx.moveTo(width, 0)
+          ctx.lineTo(0, 0)
+          ctx.arcTo(width, 0, width, height, width)
+          ctx.closePath()
+          ctx.fill()
+        }
+      }
+
+      // Right concave top-outer fillet
+      Canvas {
+        width: 10
+        height: 10
+        anchors.left: notchOsdBody.right
+        anchors.top: parent.top
+        antialiasing: true
+        onPaint: {
+          var ctx = getContext("2d")
+          ctx.reset()
+          ctx.fillStyle = "#000000"
+          ctx.beginPath()
+          ctx.moveTo(0, 0)
+          ctx.lineTo(width, 0)
+          ctx.arcTo(0, 0, 0, height, width)
+          ctx.closePath()
+          ctx.fill()
+        }
+      }
+
+      Item {
+        id: notchOsdBody
+        anchors.fill: parent
+        clip: true
+
+        Rectangle {
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.topMargin: -11
+          anchors.bottom: parent.bottom
+          radius: 11
+          color: "#000000"
+        }
+
+        // Left ear: crisp white vector icon + tabular readout
+        Row {
+          anchors.left: parent.left
+          anchors.leftMargin: 12
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: 7
+          opacity: notchOsd.visibleState ? 1.0 : 0.0
+          Behavior on opacity { NumberAnimation { duration: 120 } }
+
+          Item {
+            width: 22
+            height: 22
+            anchors.verticalCenter: parent.verticalCenter
+
+            Canvas {
+              id: notchVectorCanvas
+              visible: root.usesVectorIcon
+              width: 22
+              height: 22
+              anchors.centerIn: parent
+              antialiasing: true
+
+              onPaint: {
+                var ctx = getContext("2d")
+                ctx.reset()
+                ctx.scale(22.0 / 26.0, 22.0 / 26.0)
+                vectorCanvas.drawIcon(ctx, Qt.rgba(1, 1, 1, 1))
+              }
+            }
+
+            Text {
+              visible: !root.usesVectorIcon
+              anchors.centerIn: parent
+              textFormat: Text.PlainText
+              text: root.icon
+              font.family: Style.font.family
+              font.pixelSize: 16
+              color: "#ffffff"
+            }
+          }
+
+          Text {
+            visible: root.hasProgress && root.message !== ""
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: root.message
+            font.family: root.uiFontFamily
+            font.pixelSize: 12
+            font.weight: Font.DemiBold
+            font.features: ({ "tnum": 1 })
+            color: root.isMuted ? "#8e8e93" : "#ffffff"
+          }
+        }
+
+        // Right ear: sleek white pill progress track OR compact message
+        Item {
+          anchors.right: parent.right
+          anchors.rightMargin: 12
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: Math.max(0, notchOsd.earSpan - 18)
+          opacity: notchOsd.visibleState ? 1.0 : 0.0
+          Behavior on opacity { NumberAnimation { duration: 120 } }
+
+          Rectangle {
+            visible: root.hasProgress
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(76, parent.width)
+            height: 5
+            radius: 2.5
+            color: "#33ffffff"
+            clip: true
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              height: parent.height
+              radius: parent.radius
+              width: Math.round(parent.width * root.displayRatio)
+              color: root.isMuted ? "#66ffffff" : "#ffffff"
+            }
+          }
+
+          Text {
+            visible: !root.hasProgress && root.message !== ""
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(implicitWidth, parent.width)
+            horizontalAlignment: Text.AlignRight
+            textFormat: Text.PlainText
+            text: root.message
+            font.family: root.uiFontFamily
+            font.pixelSize: 12
+            font.weight: Font.Medium
+            color: "#ffffff"
+            elide: Text.ElideRight
+          }
+        }
+      }
+    }
+
     BorderSurface {
       id: card
+      visible: !panel.notchActive
 
       readonly property bool visibleState: panel.contentRevealed && root.opened
 
@@ -389,7 +659,10 @@ Item {
             onPaint: {
               var ctx = getContext("2d")
               ctx.reset()
-              var fg = root.textPrimary
+              drawIcon(ctx, root.textPrimary)
+            }
+
+            function drawIcon(ctx, fg) {
               var kind = root.iconKind
               var muted = root.isMuted
               var lvl = root.hasProgress ? root.displayRatio : 1.0

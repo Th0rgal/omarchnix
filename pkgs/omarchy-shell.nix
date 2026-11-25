@@ -94,6 +94,10 @@ let
     builtins.readFile ./omarchy-shell/patch-portrait-bar.py
   );
 
+  patchNotchBarPy = pkgs.writeText "patch-omarchy-notch-bar.py" (
+    builtins.readFile ./omarchy-shell/patch-notch-bar.py
+  );
+
   patchMonitorSettingsPy = pkgs.writeText "patch-omarchy-monitor-settings.py" (
     builtins.readFile ./omarchy-shell/patch-monitor-settings.py
   );
@@ -455,6 +459,7 @@ let
         # `_OMARCHY_SKIP_AGENT_OVERRIDE=1` fallback to upstream scripts.
         ${omarchyPython}/bin/python3 "${patchAgentsPy}" "$out"
         ${omarchyPython}/bin/python3 "${patchPortraitBarPy}" "$out"
+        ${omarchyPython}/bin/python3 "${patchNotchBarPy}" "$out"
         ${omarchyPython}/bin/python3 "${patchMonitorSettingsPy}" "$out"
 
         find "$out/shell" -type f -name '*.sh' -exec chmod +x {} +

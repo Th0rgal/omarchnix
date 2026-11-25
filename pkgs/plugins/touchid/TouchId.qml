@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
@@ -29,24 +30,93 @@ Item {
 
   readonly property string monitorBinPath: "@TOUCHID_MONITOR_BIN@"
   readonly property bool isLight: (Commons.Color.background.r + Commons.Color.background.g + Commons.Color.background.b) > 1.5
+  readonly property bool islandMode: panel.notchActive
+  readonly property bool darkPalette: islandMode || !isLight
   readonly property string uiFontFamily: Commons.Style.font.menuFamily || "IBM Plex Sans"
 
-  readonly property color cardSurface: Qt.rgba(
-    Commons.Color.background.r,
-    Commons.Color.background.g,
-    Commons.Color.background.b,
-    isLight ? 0.48 : 0.45
-  )
-  readonly property color cardBorder: isLight ? "#24000000" : "#24ffffff"
-  readonly property color innerHighlight: isLight ? "#55ffffff" : "#18ffffff"
-  readonly property color textPrimary: Commons.Color.foreground
-  readonly property color textMuted: Commons.Color.muted
+  readonly property color cardSurface: islandMode
+    ? "#000000"
+    : Qt.rgba(
+        Commons.Color.background.r,
+        Commons.Color.background.g,
+        Commons.Color.background.b,
+        isLight ? 0.48 : 0.45
+      )
+  readonly property color cardBorder: islandMode ? "#1cffffff" : (isLight ? "#24000000" : "#24ffffff")
+  readonly property color innerHighlight: islandMode ? "transparent" : (isLight ? "#55ffffff" : "#18ffffff")
+  readonly property color textPrimary: islandMode ? "#ffffff" : Commons.Color.foreground
+  readonly property color textMuted: islandMode ? "#9a9aa2" : Commons.Color.muted
 
-  readonly property color colorAccent: Commons.Color.accent
-  readonly property color colorScanning: isLight ? "#007aff" : "#64d2ff"
-  readonly property color colorSuccess: isLight ? "#248a3d" : "#30d158"
-  readonly property color colorError: isLight ? "#d70015" : "#ff453a"
-  readonly property color colorWarn: isLight ? "#c93400" : "#ff9f0a"
+  readonly property color colorAccent: islandMode ? "#e5e5ea" : Commons.Color.accent
+  readonly property color colorScanning: darkPalette ? "#64d2ff" : "#007aff"
+  readonly property color colorSuccess: darkPalette ? "#30d158" : "#248a3d"
+  readonly property color colorError: darkPalette ? "#ff453a" : "#d70015"
+  readonly property color colorWarn: darkPalette ? "#ff9f0a" : "#c93400"
+
+  property var displayCutouts: parseCutouts(cutoutsFile.text())
+
+  function parseCutouts(text) {
+    var parsed
+    try {
+      parsed = JSON.parse(String(text || ""))
+    } catch (e) {
+      return []
+    }
+    var panels = parsed && Array.isArray(parsed.panels) ? parsed.panels : []
+    var out = []
+    for (var i = 0; i < panels.length; i++) {
+      var p = panels[i] || {}
+      var w = Number(p.width)
+      var h = Number(p.height)
+      var top = Number(p.top)
+      var cw = Number(p.cutoutWidth)
+      if (typeof p.connector !== "string" || p.connector === "") continue
+      if (!(w > 0) || !(h > 0) || !(top > 0) || top >= h) continue
+      out.push({ connector: p.connector, width: w, height: h, top: top, cutoutWidth: cw > 0 && cw < w ? cw : 304 })
+    }
+    return out
+  }
+
+  function notchForScreen(scr) {
+    if (!scr || !(scr.width > 0) || !(scr.height > 0)) return ({ active: false, width: 0, height: 0 })
+    var mon = Hyprland.monitorFor(scr)
+    var pw = mon ? Number(mon.width) : 0
+    var ph = mon ? Number(mon.height) : 0
+    var tf = (mon && mon.lastIpcObject) ? (Number(mon.lastIpcObject.transform) || 0) : 0
+    if (pw > 0 && ph > 0) {
+      if (tf !== 0 && tf !== 4) return ({ active: false, width: 0, height: 0 })
+      if ((pw > ph) !== (scr.width > scr.height)) return ({ active: false, width: 0, height: 0 })
+    } else {
+      var dpr = Number(scr.devicePixelRatio) > 0 ? Number(scr.devicePixelRatio) : 1
+      pw = Math.round(scr.width * dpr)
+      ph = Math.round(scr.height * dpr)
+    }
+    var name = String(scr.name || "")
+    var list = root.displayCutouts || []
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i]
+      if (name.indexOf(c.connector) !== 0) continue
+      if (Math.abs(pw - c.width) <= 4 && Math.abs(ph - c.height) <= 4) {
+        return {
+          active: true,
+          height: Math.ceil(c.top * scr.width / c.width),
+          width: Math.ceil(c.cutoutWidth * scr.width / c.width)
+        }
+      }
+    }
+    return ({ active: false, width: 0, height: 0 })
+  }
+
+  FileView {
+    id: cutoutsFile
+    path: "/usr/share/omarchy-platform/display-cutouts.json"
+    blockLoading: true
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.displayCutouts = root.parseCutouts(text())
+    onLoadFailed: root.displayCutouts = []
+    onFileChanged: reload()
+  }
 
   readonly property color activeStateColor: {
     if (authState === "matched") return colorSuccess
@@ -88,6 +158,7 @@ Item {
   onEffectiveScanChanged: fpCanvas.requestPaint()
   onAuthStateChanged: fpCanvas.requestPaint()
   onIsLightChanged: fpCanvas.requestPaint()
+  onIslandModeChanged: fpCanvas.requestPaint()
 
   Behavior on scanProgress {
     NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
@@ -259,7 +330,7 @@ Item {
 
   Timer {
     id: unmapTimer
-    interval: 170
+    interval: 240
     onTriggered: {
       if (!root.cardVisible) {
         root.surfaceMapped = false
@@ -455,6 +526,11 @@ Item {
     shownKeyboardFocus: WlrKeyboardFocus.None
     WlrLayershell.namespace: "omarchnix-touchid"
 
+    readonly property var notchInfo: root.notchForScreen(panel.screen)
+    readonly property bool notchActive: notchInfo.active === true
+    readonly property int notchHeight: notchActive ? notchInfo.height : 0
+    readonly property int notchWidth: notchActive ? notchInfo.width : 0
+
     // Click-through everywhere except the optional Cancel pill when active.
     mask: Region {
       item: cancelPill.visible ? cancelPill : emptyMask
@@ -466,20 +542,76 @@ Item {
       height: 0
     }
 
-    Rectangle {
+    // Concave top-outer fillets for the pure-black Dynamic Island drop-down.
+    Canvas {
+      visible: root.islandMode && card.opacity > 0.01
+      width: 12
+      height: 12
+      x: card.x - width
+      y: 0
+      opacity: card.opacity
+      antialiasing: true
+      onPaint: {
+        var ctx = getContext("2d")
+        ctx.reset()
+        ctx.fillStyle = "#000000"
+        ctx.beginPath()
+        ctx.moveTo(width, 0)
+        ctx.lineTo(0, 0)
+        ctx.arcTo(width, 0, width, height, width)
+        ctx.closePath()
+        ctx.fill()
+      }
+    }
+
+    Canvas {
+      visible: root.islandMode && card.opacity > 0.01
+      width: 12
+      height: 12
+      x: card.x + card.width
+      y: 0
+      opacity: card.opacity
+      antialiasing: true
+      onPaint: {
+        var ctx = getContext("2d")
+        ctx.reset()
+        ctx.fillStyle = "#000000"
+        ctx.beginPath()
+        ctx.moveTo(0, 0)
+        ctx.lineTo(width, 0)
+        ctx.arcTo(0, 0, 0, height, width)
+        ctx.closePath()
+        ctx.fill()
+      }
+    }
+
+    Item {
       id: card
-      width: 276
-      height: contentColumn.implicitHeight + 36
+      readonly property bool expanded: panel.contentRevealed && root.cardVisible
+      readonly property int targetWidth: root.islandMode
+        ? (expanded ? 292 : Math.max(190, panel.notchWidth))
+        : 276
+      readonly property int targetHeight: root.islandMode
+        ? (expanded ? (panel.notchHeight + contentColumn.implicitHeight + 26) : Math.max(35, panel.notchHeight))
+        : (contentColumn.implicitHeight + 36)
+
+      width: targetWidth
+      height: targetHeight
       x: Math.round((parent.width - width) / 2 + root.shakeOffset)
-      y: Math.round(parent.height * 0.30)
-      radius: 22
-      color: root.cardSurface
-      border.width: 1
-      border.color: root.cardBorder
+      y: root.islandMode ? 0 : Math.round(parent.height * 0.30)
+      clip: root.islandMode
 
-      opacity: (panel.contentRevealed && root.cardVisible) ? 1.0 : 0.0
-      scale: (panel.contentRevealed && root.cardVisible) ? 1.0 : 0.96
+      opacity: expanded ? 1.0 : 0.0
+      scale: root.islandMode ? 1.0 : (expanded ? 1.0 : 0.96)
 
+      Behavior on width {
+        enabled: root.islandMode
+        NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+      }
+      Behavior on height {
+        enabled: root.islandMode
+        NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+      }
       Behavior on opacity {
         NumberAnimation { duration: 145; easing.type: Easing.OutCubic }
       }
@@ -487,8 +619,21 @@ Item {
         NumberAnimation { duration: 165; easing.type: Easing.OutCubic }
       }
 
-      // Subtle inner top specular hairline for frosted glass depth
       Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: root.islandMode ? -28 : 0
+        anchors.bottom: parent.bottom
+        radius: root.islandMode ? 28 : 22
+        color: root.cardSurface
+        border.width: root.islandMode ? 0 : 1
+        border.color: root.cardBorder
+      }
+
+      // Subtle inner top specular hairline for frosted glass depth (non-notched displays)
+      Rectangle {
+        visible: !root.islandMode
         anchors.top: parent.top
         anchors.topMargin: 1
         anchors.horizontalCenter: parent.horizontalCenter
@@ -502,8 +647,12 @@ Item {
         width: parent.width - 36
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
-        anchors.topMargin: 18
+        anchors.topMargin: root.islandMode ? (panel.notchHeight + 8) : 18
         spacing: 10
+        opacity: card.expanded ? 1.0 : 0.0
+        Behavior on opacity {
+          NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+        }
 
         // Circular Touch ID sensor well + vector biometric ridges
         Item {
@@ -535,12 +684,12 @@ Item {
             id: sensorWell
             anchors.fill: parent
             radius: 34
-            color: root.isLight ? "#0d000000" : "#26000000"
+            color: root.darkPalette ? "#18ffffff" : "#0d000000"
             border.width: 1
             border.color: {
               if (root.authState === "waiting") {
                 var a = 0.22 + 0.18 * root.pulseLevel
-                return root.isLight ? Qt.rgba(0, 0, 0, a * 0.7) : Qt.rgba(1, 1, 1, a)
+                return root.darkPalette ? Qt.rgba(1, 1, 1, a) : Qt.rgba(0, 0, 0, a * 0.7)
               }
               return Qt.rgba(
                 root.activeStateColor.r,
@@ -633,10 +782,10 @@ Item {
                 ctx.lineWidth = 2.05
 
                 // Pass 1: subtle resting ridge silhouette
-                var baseAlpha = root.isLight ? 0.24 : 0.28
-                ctx.strokeStyle = root.isLight
-                  ? ("rgba(0, 0, 0, " + baseAlpha + ")")
-                  : ("rgba(255, 255, 255, " + baseAlpha + ")")
+                var baseAlpha = root.darkPalette ? 0.30 : 0.24
+                ctx.strokeStyle = root.darkPalette
+                  ? ("rgba(255, 255, 255, " + baseAlpha + ")")
+                  : ("rgba(0, 0, 0, " + baseAlpha + ")")
                 for (var i = 0; i < 6; i++) {
                   drawRank(ctx, cx, cy, u, i)
                 }
@@ -720,10 +869,10 @@ Item {
           radius: 13
           anchors.horizontalCenter: parent.horizontalCenter
           color: cancelArea.containsMouse
-            ? (root.isLight ? "#18000000" : "#26ffffff")
-            : (root.isLight ? "#0e000000" : "#14ffffff")
+            ? (root.darkPalette ? "#26ffffff" : "#18000000")
+            : (root.darkPalette ? "#14ffffff" : "#0e000000")
           border.width: 1
-          border.color: root.isLight ? "#14000000" : "#1cffffff"
+          border.color: root.darkPalette ? "#1cffffff" : "#14000000"
 
           Text {
             anchors.centerIn: parent

@@ -8,6 +8,16 @@ See [`docs/VISION.md`](docs/VISION.md) for the full architecture, [`docs/decisio
 
 ## Desktop Showcase
 
+### MacBook Air M2 · Dynamic Island (`2560×1664`, `appledrm.show_notch=1`)
+
+Native hardware-notch integration in `omarchy-shell` (`quickshell` / Qt6 QML): volume, brightness & keyboard backlight OSD ears, Secure Enclave Touch ID drop-down (`sudo` & SSH), local Murmure voice dictation with live waveform, and MPRIS now-playing equalizer.
+
+| **Dynamic Island Demo · 60 fps (`1920×1080`)** — [Watch video (`04-dynamic-island-m2air.mp4`)](docs/assets/showcase/04-dynamic-island-m2air.mp4) |
+| :---: |
+| [![MacBook Air M2 Dynamic Island on NixOS — click to watch the 60 fps demo](docs/assets/showcase/04-dynamic-island-m2air.png)](docs/assets/showcase/04-dynamic-island-m2air.mp4) |
+
+### Glass Desktop Captures
+
 Native `2560×1600` (`1.6x` HiDPI) Wayland captures of the `starship-subtle` glass desktop across three contiguous Spaces — step-by-step VM reproduction in [`docs/showcase.md`](docs/showcase.md):
 
 | **Space 1 · Frosted Ghostty Terminal** (`singapore.webp`) |

@@ -10,17 +10,22 @@ let
   displayCutoutsJson = pkgs.writeText "m2air-display-cutouts.json" (
     builtins.toJSON {
       panels = [
-        {
-          connector = "eDP-1";
-          width = 300;
-          height = 64;
-          top = 0;
-        }
+        # MacBook Air 13.6" M2/M3/M4 (J413 / J613 / J713): 2560x1664 native;
+        # physical camera housing is 56px tall (35px logical at 1.6x).
         {
           connector = "eDP";
-          width = 300;
-          height = 64;
-          top = 0;
+          width = 2560;
+          height = 1664;
+          top = 56;
+          cutoutWidth = 304;
+        }
+        # MacBook Air 15.3" M2/M3/M4 (J415 / J615 / J715): 2880x1864 native
+        {
+          connector = "eDP";
+          width = 2880;
+          height = 1864;
+          top = 56;
+          cutoutWidth = 304;
         }
       ];
     }
@@ -38,6 +43,17 @@ in
       type = lib.types.str;
       default = "1.6";
       description = "Fractional Wayland scale for the 2560x1664 Liquid Retina eDP-1 panel (1.6 -> 1600x1040 logical).";
+    };
+
+    showNotch = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Pass `appledrm.show_notch=1` so the internal Liquid Retina panel exposes
+        its full native resolution including the 64px top camera-notch strip
+        (2560x1664 on 13.6", 2880x1864 on 15.3"), letting the top status bar sit
+        flush with the notch instead of blacking out the top rows.
+      '';
     };
 
     chargeControlEndThreshold = lib.mkOption {
@@ -392,7 +408,10 @@ in
       # tickless asymmetric clusters so Blizzard E-cores reliably enter `CPU PD`
       # (10 ms residency) between PipeWire/timer wakeups instead of `menu` falling
       # back to shallow `WFI`.
-      boot.kernelParams = [ "cpuidle.governor=teo" ];
+      boot.kernelParams = [
+        "cpuidle.governor=teo"
+      ]
+      ++ lib.optional cfg.showNotch "appledrm.show_notch=1";
 
       # Size zstd ZRAM to 100% of logical RAM (~15 GiB uncompressed -> ~3.8 GiB
       # physical LPDDR5 at ~3.9x compression) so large V8/Electron/agent heaps stay

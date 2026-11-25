@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
@@ -56,6 +57,60 @@ Item {
 
   property real waveTime: 0.0
   property real spinnerAngle: 0.0
+
+  // When the focused display has a top camera notch, the Dynamic Island notch
+  // ears in the status bar show Murmure's waveform & status, so suppress the
+  // duplicate bottom floating pill during recording/transcribing.
+  property var displayCutouts: parseCutouts(cutoutsFile.text())
+
+  function parseCutouts(text) {
+    var parsed
+    try {
+      parsed = JSON.parse(String(text || ""))
+    } catch (e) {
+      return []
+    }
+    var panels = parsed && Array.isArray(parsed.panels) ? parsed.panels : []
+    var out = []
+    for (var i = 0; i < panels.length; i++) {
+      var p = panels[i] || {}
+      var w = Number(p.width)
+      var h = Number(p.height)
+      var top = Number(p.top)
+      if (typeof p.connector !== "string" || p.connector === "") continue
+      if (!(w > 0) || !(h > 0) || !(top > 0) || top >= h) continue
+      out.push({ connector: p.connector, width: w, height: h, top: top })
+    }
+    return out
+  }
+
+  readonly property bool focusedMonitorHasNotch: {
+    var mon = Hyprland.focusedMonitor
+    if (!mon) return false
+    var name = String(mon.name || "")
+    var pw = Number(mon.width)
+    var ph = Number(mon.height)
+    var tf = mon.lastIpcObject ? (Number(mon.lastIpcObject.transform) || 0) : 0
+    if (tf !== 0 && tf !== 4) return false
+    var list = root.displayCutouts || []
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i]
+      if (name.indexOf(c.connector) !== 0) continue
+      if (Math.abs(pw - c.width) <= 4 && Math.abs(ph - c.height) <= 4) return true
+    }
+    return false
+  }
+
+  FileView {
+    id: cutoutsFile
+    path: "/usr/share/omarchy-platform/display-cutouts.json"
+    blockLoading: true
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.displayCutouts = root.parseCutouts(text())
+    onLoadFailed: root.displayCutouts = []
+    onFileChanged: reload()
+  }
 
   Timer {
     id: animTick
@@ -192,7 +247,7 @@ Item {
 
   OverlayWindow {
     id: panel
-    shown: root.surfaceMapped
+    shown: root.surfaceMapped && (!root.focusedMonitorHasNotch || root.langMenuOpen || root.phase === "message")
     shownKeyboardFocus: WlrKeyboardFocus.None
     WlrLayershell.namespace: "omarchnix-murmure"
 

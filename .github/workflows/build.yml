@@ -206,8 +206,7 @@ jobs:
           [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${NIX_CACHE_SIGNING_KEY:-}" ] || exit 0
           KEY_FILE="$(mktemp)"
           chmod 600 "$KEY_FILE"
-          printf '%s
-' "$NIX_CACHE_SIGNING_KEY" > "$KEY_FILE"
+          printf '%s\n' "$NIX_CACHE_SIGNING_KEY" > "$KEY_FILE"
           trap 'rm -f "$KEY_FILE"' EXIT
           nix copy --to "s3://omarchnix-nix-cache-gra?endpoint=s3.gra.io.cloud.ovh.net&region=gra&acl=public-read&secret-key=$KEY_FILE"             .#checks.x86_64-linux.modules-eval             .#checks.x86_64-linux.security             .#checks.x86_64-linux.desktop             .#checks.x86_64-linux.omarchy-compat             .#checks.x86_64-linux.aurora-sep || true
       - uses: actions/upload-artifact@v4
@@ -441,8 +440,7 @@ jobs:
           [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${NIX_CACHE_SIGNING_KEY:-}" ] || exit 0
           KEY_FILE="$(mktemp)"
           chmod 600 "$KEY_FILE"
-          printf '%s
-' "$NIX_CACHE_SIGNING_KEY" > "$KEY_FILE"
+          printf '%s\n' "$NIX_CACHE_SIGNING_KEY" > "$KEY_FILE"
           trap 'rm -f "$KEY_FILE"' EXIT
           nix copy --to "s3://omarchnix-nix-cache-gra?endpoint=s3.gra.io.cloud.ovh.net&region=gra&acl=public-read&secret-key=$KEY_FILE"             .#orb-desktop             .#nixosConfigurations.m2air.config.system.build.toplevel             .#nixosConfigurations.m2air-aurora.config.system.build.toplevel || true
       - uses: actions/upload-artifact@v4

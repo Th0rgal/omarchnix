@@ -1109,6 +1109,14 @@ in
           pf:close()
           hl.dispatch(hl.dsp.submap("passthrough"))
         end
+
+        -- Launch scratchpad terminal when `special:scratchpad` is created empty
+        -- (replaces deprecated `on_created_empty` workspace rule).
+        hl.on("workspace.created", function(ws)
+          if ws and (ws.name == "special:scratchpad" or ws.addressable_name == "special:scratchpad") and ws.is_empty then
+            hl.dispatch(hl.dsp.exec_cmd(${builtins.toJSON "${foot} --app-id=foot-scratchpad"}))
+          end
+        end)
       '')
     ];
 
@@ -1408,13 +1416,6 @@ in
               end
             end
           '';
-        }
-      ];
-
-      workspace_rule = [
-        {
-          workspace = "special:scratchpad";
-          on_created_empty = "${foot} --app-id=foot-scratchpad";
         }
       ];
 

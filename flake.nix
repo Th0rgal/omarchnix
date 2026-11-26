@@ -57,8 +57,8 @@
       flake = false;
     };
 
-    folio = {
-      url = "github:Th0rgal/folio";
+    scribe = {
+      url = "github:Th0rgal/scribe";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -237,7 +237,7 @@
           inherit (pkgs) flea;
           inherit (pkgs) turbo-lean;
           inherit (pkgs) orb-desktop;
-          inherit (pkgs) folio-desktop;
+          inherit (pkgs) scribe-desktop;
           inherit (pkgs) notion-calendar;
           inherit (pkgs) claude-desktop;
           inherit (pkgs) helium;

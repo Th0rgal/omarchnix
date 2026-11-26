@@ -311,11 +311,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1795661954,
-        "narHash": "sha256-gknL+RmmSQA5pia37ka3S2DDrN0e7lwcvSmcTTcjNjg=",
+        "lastModified": 1795667888,
+        "narHash": "sha256-Jm5maKL4u+zQ+tUb3EEzE5YqOm27byGXBX9iCVcbZDc=",
         "owner": "Th0rgal",
         "repo": "orb",
-        "rev": "d01f4bd8dd941607387b5a5f66fa07ecb02c893b",
+        "rev": "539b3a70ac4dd6c4f218883a2823be1b964bd761",
         "type": "github"
       },
       "original": {

@@ -703,7 +703,7 @@ in
           "omarchnix.appearance".section = "centerBegin";
         };
 
-        programs.omarchnix.shell.trayWidgetIds = [
+        programs.omarchnix.shell.trayWidgetIds = lib.mkDefault [
           "omarchy.agents"
           "omarchy.monitor"
         ];

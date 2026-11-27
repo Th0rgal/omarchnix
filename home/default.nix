@@ -195,6 +195,12 @@ in
         description = "Widget IDs placed inside the collapsible `bar.layout.tray` drawer and deduplicated out of `bar.layout.right`.";
       };
 
+      hiddenTrayIds = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = "StatusNotifierItem IDs hidden in `omarchy.tray` (`bar.layout.right` `omarchy.tray` entry's `hidden` array) and unpinned if present.";
+      };
+
       elsewhenCities = lib.mkOption {
         type = lib.types.listOf (lib.types.attrsOf lib.types.anything);
         default = [ ];
@@ -450,6 +456,7 @@ in
     ./murmure.nix
     ./sharing.nix
     ./mac-tether.nix
+    ./oura.nix
     ./flea.nix
     ./cloud-mounts.nix
     ./remarkable.nix

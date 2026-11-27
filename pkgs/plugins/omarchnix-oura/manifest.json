@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchnix.oura",
+  "name": "Oura Ring",
+  "version": "1.0.0",
+  "author": "Omarchnix",
+  "license": "MIT",
+  "description": "Cloud-free Oura Ring status bar widget with battery, heart rate, daily trends, and Ring Runner tilt gesture navigation for Spaces & Mission Control.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Oura Ring",
+    "description": "Monitor Oura Ring battery, heart rate, and daily trends, and toggle ring tilt gestures for Space switching.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

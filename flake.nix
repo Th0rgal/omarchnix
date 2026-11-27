@@ -86,6 +86,11 @@
       url = "github:jfg96/omarchy-nearby/b26b5dc22a5c5f1d1c26edb80a7676c932f6afaa";
       flake = false;
     };
+
+    open-oura = {
+      url = "github:Th0rgal/open_oura/e57c43ce5fe0cf9a646afa790bda3731be767507";
+      flake = false;
+    };
   };
 
   outputs =

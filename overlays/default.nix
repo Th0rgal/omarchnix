@@ -58,6 +58,7 @@ in
     inherit (final) omdrop;
     inherit (final) omarchy-quickshare;
     inherit (final) omarchy-nearby;
+    inherit (final) oura-daemon;
     inherit (final) orb-agent-sync;
     inherit (final) flea;
     lean-mesh-standalone = final.callPackage ../pkgs/lean-mesh.nix {
@@ -112,7 +113,18 @@ in
       workspaces = final.omarchnix.buildPlugin {
         src = ../pkgs/plugins/workspaces;
       };
+      oura = final.omarchnix.buildPlugin {
+        src = ../pkgs/plugins/omarchnix-oura;
+        postInstall = ''
+          substituteInPlace "$out/Service.qml" \
+            --replace-fail '@OURACTL_BIN@' "${final.oura-daemon}/bin/ouractl"
+        '';
+      };
     };
+  };
+
+  oura-daemon = final.callPackage ../pkgs/oura-daemon.nix {
+    openOuraSrc = inputs.open-oura;
   };
 
   michelangelus-font = final.callPackage ../pkgs/michelangelus-font.nix { };

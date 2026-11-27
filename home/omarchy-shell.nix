@@ -150,8 +150,16 @@ let
     baseList ++ filteredExtra;
 
   effectiveTrayIds = lib.unique cfg.shell.trayWidgetIds;
+  effectiveHiddenTrayIds = lib.unique cfg.shell.hiddenTrayIds;
   effectiveDisabledPlugins = lib.unique cfg.shell.disabledPlugins;
   effectivePurgedIds = lib.unique cfg.shell.purgedPluginIds;
+
+  traySeedEntry = {
+    id = "omarchy.tray";
+  }
+  // lib.optionalAttrs (effectiveHiddenTrayIds != [ ]) {
+    hidden = effectiveHiddenTrayIds;
+  };
 
   elsewhenSeedEntry = {
     id = "omarchy.elsewhen";
@@ -192,9 +200,11 @@ let
       // lib.optionalAttrs (id == "omarchy.agents" && cfg.agents.enable && cfg.agents.orbSync.enable) {
         minimalHud = cfg.agents.orbSync.minimalHud;
       }
-    ) effectiveTrayIds;
+    ) (lib.filter (id: !(builtins.elem id effectivePurgedIds)) effectiveTrayIds);
     right = [
-      { id = "omarchy.tray"; }
+      traySeedEntry
+    ]
+    ++ lib.filter (item: !(builtins.elem item.id effectiveTrayIds)) [
       { id = "omarchy.keyboard-layout"; }
       { id = "omarchy.bluetooth"; }
       { id = "omarchy.network"; }
@@ -208,7 +218,7 @@ let
       pluginRight = lib.filter (item: !(builtins.elem item.id effectiveTrayIds)) (
         enabledBarWidgetsBySection "right"
       );
-      coreRight = [
+      coreRight = lib.filter (item: !(builtins.elem item.id effectiveTrayIds)) [
         { id = "omarchy.keyboard-layout"; }
         { id = "omarchy.bluetooth"; }
         { id = "omarchy.network"; }
@@ -216,7 +226,7 @@ let
         powerSeedEntry
       ];
     in
-    appendUniqueById ([ { id = "omarchy.tray"; } ] ++ pluginRight) coreRight;
+    appendUniqueById ([ traySeedEntry ] ++ pluginRight) coreRight;
 
   mergedShellConfig = {
     version = 1;
@@ -258,6 +268,7 @@ let
     builtins.toJSON {
       workspaceWidgetId = cfg.shell.workspaceWidgetId;
       trayWidgetIds = effectiveTrayIds;
+      hiddenTrayIds = effectiveHiddenTrayIds;
       disabledPlugins = effectiveDisabledPlugins;
       purgedIds = effectivePurgedIds;
       dock = cfg.shell.dock;
@@ -372,12 +383,13 @@ let
             cur = layout.setdefault(target_sec, [])
             if not any(item_id(it) == pid for it in cur):
                 if target_sec == "right":
-                    bt_idx = next(
-                        (i for i, it in enumerate(cur) if item_id(it) == "omarchy.bluetooth"),
+                    anchor_ids = ("omarchy.bluetooth", "omarchy.network", "omarchy.audio", "omarchy.power")
+                    anchor_idx = next(
+                        (i for i, it in enumerate(cur) if item_id(it) in anchor_ids),
                         None,
                     )
-                    if bt_idx is not None:
-                        cur.insert(bt_idx, {"id": pid})
+                    if anchor_idx is not None:
+                        cur.insert(anchor_idx, {"id": pid})
                     else:
                         cur.append({"id": pid})
                 else:
@@ -398,6 +410,20 @@ let
         for tid in tray_ids:
             if tid not in purged and not any(item_id(it) == tid for it in cur_tray):
                 cur_tray.append({"id": tid})
+
+    hidden_tray_ids = spec.get("hiddenTrayIds") or []
+    if hidden_tray_ids:
+        hidden_set = set(hidden_tray_ids)
+        for sec_items in layout.values():
+            for it in sec_items:
+                if item_id(it) == "omarchy.tray":
+                    cur_hidden = list(it.get("hidden") or [])
+                    for hid in hidden_tray_ids:
+                        if hid not in cur_hidden:
+                            cur_hidden.append(hid)
+                    it["hidden"] = cur_hidden
+                    if isinstance(it.get("pinned"), list):
+                        it["pinned"] = [p for p in it["pinned"] if p not in hidden_set]
 
     seed_cities = spec.get("elsewhenCities") or []
     if seed_cities:

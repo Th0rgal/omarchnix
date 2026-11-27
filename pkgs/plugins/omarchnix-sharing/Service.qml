@@ -86,7 +86,13 @@ Item {
   }
 
   function setAirdrop(enable) {
-    if (!airdropAvailable || airdropBusy || airdropToggleProc.running) return
+    if (!airdropAvailable) return
+    if (airdropBusy || airdropToggleProc.running) {
+      if (!enable && airdropPendingEnable) {
+        cancelAirdropWake()
+      }
+      return
+    }
     if (Boolean(enable) === airdropReceiving) return
     airdropPendingEnable = Boolean(enable)
     airdropBusy = true
@@ -97,7 +103,25 @@ Item {
     airdropToggleProc.running = true
   }
 
+  function cancelAirdropWake() {
+    if (!airdropAvailable) return
+    if (airdropToggleProc.running) {
+      airdropToggleProc.signal(15)
+    }
+    airdropBusy = false
+    airdropPendingEnable = false
+    airdropError = ""
+    airdropSendStatus = "Cancelled AirDrop wake"
+    statusClearTimer.restart()
+    Quickshell.execDetached([omdropBin, "off"])
+    refreshAirdropStatus()
+  }
+
   function toggleAirdrop() {
+    if (airdropBusy && airdropPendingEnable) {
+      cancelAirdropWake()
+      return
+    }
     setAirdrop(!airdropReceiving)
   }
 
@@ -120,11 +144,17 @@ Item {
     id: airdropToggleProc
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: if (text.trim() !== "") root.airdropError = text.trim()
+      onStreamFinished: {
+        if (text.trim() !== "") {
+          root.airdropError = text.trim()
+          statusClearTimer.restart()
+        }
+      }
     }
     onExited: function(code) {
       root.airdropBusy = false
       if (code === 0) root.airdropError = ""
+      else if (root.airdropError !== "") statusClearTimer.restart()
       root.refreshAirdropStatus()
     }
   }
@@ -279,6 +309,7 @@ Item {
         if (kind === "qr-send") root.qrPending = false
         if (code !== 0 && qsErr.text.trim() !== "") {
           root.quickshareError = qsErr.text.trim()
+          statusClearTimer.restart()
         }
         Qt.callLater(function() { qsTask.destroy() })
       }
@@ -789,7 +820,7 @@ Item {
       out.push({
         key: "nearby:" + nd.fingerprint,
         protocol: "nearby",
-        badge: "Nearby",
+        badge: "LocalSend",
         icon: nd.deviceType === "mobile" ? "󰄜" : "󰍹",
         name: nd.alias,
         rawDevice: nd
@@ -802,8 +833,47 @@ Item {
   property var stagedFiles: []
   property var pendingTargetPeer: null
   property bool pendingQrMode: false
+  property bool pendingStageMode: false
   property string airdropSendStatus: ""
   property bool airdropSending: false
+
+  readonly property bool hasActiveTransfer: (
+    airdropSending
+    || nearbyTransferActive
+    || (quicksharePromptTransfer !== null && String(quicksharePromptTransfer.state || "") !== "waiting_acceptance")
+  )
+
+  readonly property real activeTransferProgress: {
+    if (nearbyTransferActive) {
+      return nearbyProgress > 0 ? Math.min(1, Math.max(0, nearbyProgress)) : -1
+    }
+    if (quicksharePromptTransfer !== null && String(quicksharePromptTransfer.state || "") !== "waiting_acceptance") {
+      var total = Number(quicksharePromptTransfer.total_bytes || 0)
+      var done = Number(quicksharePromptTransfer.bytes_transferred || 0)
+      if (total > 0 && done >= 0) return Math.min(1, done / total)
+      return -1
+    }
+    if (airdropSending) return -1
+    return -1
+  }
+
+  readonly property string activeTransferLabel: {
+    if (nearbyTransferActive) return nearbyStatus !== "" ? nearbyStatus : "LocalSend transfer…"
+    if (airdropSending) return airdropSendStatus !== "" ? airdropSendStatus : "Sending via AirDrop…"
+    if (quicksharePromptTransfer !== null && String(quicksharePromptTransfer.state || "") !== "waiting_acceptance") {
+      var dir = quicksharePromptTransfer.direction === "inbound" ? "Receiving from " : "Sending to "
+      return dir + String(quicksharePromptTransfer.device_name || "Quick Share") + "…"
+    }
+    return ""
+  }
+
+  function cancelActiveTransfer() {
+    if (airdropSending) cancelAirdropSend()
+    if (nearbyOutgoingId !== "") cancelNearbySend()
+    if (quicksharePromptTransfer !== null && String(quicksharePromptTransfer.state || "") !== "waiting_acceptance") {
+      cancelQuickshare(quicksharePromptTransfer.id)
+    }
+  }
 
   readonly property string stagedFilesSummary: {
     if (!stagedFiles || stagedFiles.length === 0) return ""
@@ -873,13 +943,26 @@ Item {
 
   Timer {
     id: statusClearTimer
-    interval: 3500
+    interval: 5000
     onTriggered: {
-      if (!root.airdropSending) root.airdropSendStatus = ""
+      if (!root.airdropSending) {
+        root.airdropSendStatus = ""
+        root.airdropError = ""
+      }
       if (!root.nearbyTransferActive) root.nearbyStatus = ""
+      if (!root.quickshareHasActiveTransfer) root.quickshareError = ""
       root.kdeconnectStatus = ""
       root.kdeconnectError = ""
     }
+  }
+
+  function pickAndStageFiles() {
+    if (filePicker.running || fileSelectBin === "" || fileSelectBin.charAt(0) === "@") return
+    pendingTargetPeer = null
+    pendingQrMode = false
+    pendingStageMode = true
+    requestCloseForPicker()
+    filePicker.running = true
   }
 
   function pickAndSend(peer) {
@@ -893,6 +976,7 @@ Item {
     if (filePicker.running || fileSelectBin === "" || fileSelectBin.charAt(0) === "@") return
     pendingTargetPeer = peer
     pendingQrMode = false
+    pendingStageMode = false
     requestCloseForPicker()
     filePicker.running = true
   }
@@ -910,6 +994,7 @@ Item {
     if (filePicker.running || fileSelectBin === "" || fileSelectBin.charAt(0) === "@") return
     pendingTargetPeer = null
     pendingQrMode = true
+    pendingStageMode = false
     quickshareWantActive = true
     requestCloseForPicker()
     filePicker.running = true
@@ -922,13 +1007,19 @@ Item {
     onExited: function(code) {
       var target = root.pendingTargetPeer
       var wantQr = root.pendingQrMode
+      var wantStage = root.pendingStageMode
       root.pendingTargetPeer = null
       root.pendingQrMode = false
+      root.pendingStageMode = false
       root.requestReopenAfterPicker()
       if (code !== 0) return
       var files = String(pickerOut.text || "").split("\n").map(function(s) { return s.trim() }).filter(function(s) { return s !== "" })
       if (files.length === 0) return
 
+      if (wantStage) {
+        root.stagedFiles = files
+        return
+      }
       if (wantQr) {
         root.qrPending = true
         root.runQuickshareCmd(["qr-send"], files, "qr-send")

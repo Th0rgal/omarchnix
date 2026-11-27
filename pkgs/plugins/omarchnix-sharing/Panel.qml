@@ -41,6 +41,9 @@ Panel {
 
   readonly property bool anyReceiving: engine ? engine.anyReceiving : false
   readonly property bool urgentPrompt: engine ? engine.hasUrgentPrompt : false
+  readonly property bool hasActiveTransfer: engine ? engine.hasActiveTransfer : false
+  readonly property real transferProgress: engine ? engine.activeTransferProgress : -1
+  readonly property string transferLabel: engine ? engine.activeTransferLabel : ""
   readonly property var devices: engine ? engine.unifiedDevices : []
   readonly property var qsTransfer: engine ? engine.quicksharePromptTransfer : null
   readonly property var nearbyReq: engine ? engine.nearbyIncoming : null
@@ -62,19 +65,30 @@ Panel {
   property string expandedPhone: ""
   property bool showPairSetup: false
 
+  property real pulseAlpha: 1.0
+  SequentialAnimation {
+    running: root.urgentPrompt
+    loops: Animation.Infinite
+    NumberAnimation { target: root; property: "pulseAlpha"; from: 1.0; to: 0.42; duration: 750; easing.type: Easing.InOutSine }
+    NumberAnimation { target: root; property: "pulseAlpha"; from: 0.42; to: 1.0; duration: 750; easing.type: Easing.InOutSine }
+  }
+
+  readonly property string barGlyph: (anyReceiving || urgentPrompt || hasActiveTransfer) ? "󰀃" : "󰈇"
+
   readonly property color barIconTint: {
     if (urgentPrompt) return urgentColor
-    if (anyReceiving) return Commons.Color.accent
+    if (anyReceiving || hasActiveTransfer) return Commons.Color.accent
     return barForeground
   }
 
   readonly property string barTooltip: {
     if (urgentPrompt) return "Share: Action needed — click to review"
+    if (hasActiveTransfer && transferLabel !== "") return "Share · " + transferLabel
     if (anyReceiving) {
       var activeList = []
       if (engine.airdropReceiving) activeList.push("AirDrop")
       if (engine.quickshareDiscoverable) activeList.push("Quick Share")
-      if (engine.nearbyReceiving) activeList.push("Nearby")
+      if (engine.nearbyReceiving) activeList.push("LocalSend")
       var rem = engine.minRemainingSeconds > 0 ? (" · " + engine.formatCountdown(engine.minRemainingSeconds)) : ""
       return "Receiving (" + activeList.join(", ") + ")" + rem
     }
@@ -84,12 +98,13 @@ Panel {
       })
       return "Share · Phone: " + names.join(", ") + " — Right-click: Receive 10m"
     }
-    return "Share (AirDrop · Phone · Quick Share · Nearby) — Right-click: Receive 10m"
+    return "Share (AirDrop · Phone · Quick Share · LocalSend) — Right-click: Receive 10m"
   }
 
   readonly property string heroMeta: {
     if (!engine) return "STARTING"
     if (urgentPrompt) return "ACTION NEEDED"
+    if (hasActiveTransfer) return "TRANSFERRING"
     if (engine.airdropBusy || (engine.airdropReceiving && !engine.airdropVisible)) return "WAKING AIRDROP RADIO…"
     if (anyReceiving) {
       var countdown = engine.minRemainingSeconds > 0 ? (" · " + engine.formatCountdown(engine.minRemainingSeconds)) : ""
@@ -100,7 +115,7 @@ Panel {
         ? ("CONNECTED · " + String(kcConnected[0].name || "PHONE").toUpperCase())
         : ("CONNECTED · " + kcConnected.length + " PHONES")
     }
-    return "AIRDROP · PHONE · ANDROID · NEARBY"
+    return "AIRDROP · PHONE · QUICK SHARE · LOCALSEND"
   }
 
   property bool viewRegistered: false
@@ -156,16 +171,11 @@ Panel {
     bar: root.bar
     slotSize: Style.bar.statusSlot
     tooltipText: root.barTooltip
-    iconComponent: Component {
-      Item {
-        ShareIcon {
-          anchors.centerIn: parent
-          iconSize: Style.space(14)
-          color: root.barIconTint
-          active: root.anyReceiving || root.urgentPrompt
-        }
-      }
-    }
+    text: root.barGlyph
+    foreground: root.barIconTint
+    active: root.anyReceiving || root.urgentPrompt || root.hasActiveTransfer
+    activeColor: root.barIconTint
+    opacity: root.urgentPrompt ? root.pulseAlpha : 1.0
     onPressed: function(mouseBtn) {
       if (mouseBtn === Qt.RightButton) {
         if (root.engine) root.engine.toggleReceiveAll()
@@ -211,10 +221,11 @@ Panel {
             title: "Share"
             meta: root.heroMeta
             foreground: root.foreground
-            iconComponent: ShareIcon {
-              iconSize: Style.space(28)
-              color: root.anyReceiving ? Commons.Color.accent : root.foreground
-              active: root.anyReceiving
+            iconComponent: Text {
+              text: root.barGlyph
+              color: root.urgentPrompt ? root.urgentColor : ((root.anyReceiving || root.hasActiveTransfer) ? Commons.Color.accent : root.foreground)
+              font.family: root.fontFamily
+              font.pixelSize: Style.space(26)
             }
             trailingControl: Ui.Button {
               bordered: true
@@ -224,7 +235,7 @@ Panel {
               text: root.anyReceiving ? "Turn Off" : "Receive 10m"
               tooltipText: root.anyReceiving
                 ? "Stop receiving across ephemeral nearby protocols"
-                : "Make this Mac visible on AirDrop, Quick Share & LocalSend for 10 minutes"
+                : "Make this device visible on AirDrop, Quick Share & LocalSend for 10 minutes"
               onClicked: if (root.engine) root.engine.toggleReceiveAll()
             }
           }
@@ -252,7 +263,9 @@ Panel {
                   ? root.engine.formatCountdown(root.engine.airdropRemaining)
                   : "AirDrop"
               }
-              tooltipText: "Apple AirDrop (iPhone, iPad, Mac)"
+              tooltipText: (root.engine && root.engine.airdropBusy && root.engine.airdropPendingEnable)
+                ? "Waking AWDL radio — click to cancel"
+                : "Apple AirDrop (iPhone, iPad, Mac)"
               onClicked: if (root.engine) root.engine.toggleAirdrop()
             }
 
@@ -265,10 +278,10 @@ Panel {
               fontSize: Style.font.caption
               iconText: "󰄜"
               text: {
-                if (!root.engine || !root.engine.quickshareDiscoverable) return "Android"
+                if (!root.engine || !root.engine.quickshareDiscoverable) return "Quick Share"
                 return root.engine.quickshareRemaining > 0
                   ? root.engine.formatCountdown(root.engine.quickshareRemaining)
-                  : "Android"
+                  : "Quick Share"
               }
               tooltipText: "Android & Chromebook Quick Share"
               onClicked: if (root.engine) root.engine.toggleQuickshare()
@@ -283,10 +296,10 @@ Panel {
               fontSize: Style.font.caption
               iconText: "󰍹"
               text: {
-                if (!root.engine || !root.engine.nearbyReceiving) return "Nearby"
+                if (!root.engine || !root.engine.nearbyReceiving) return "LocalSend"
                 return root.engine.nearbyRemaining > 0
                   ? root.engine.formatCountdown(root.engine.nearbyRemaining)
-                  : "Nearby"
+                  : "LocalSend"
               }
               tooltipText: "LocalSend cross-platform LAN sharing"
               onClicked: if (root.engine) root.engine.toggleNearby()
@@ -621,9 +634,83 @@ Panel {
             }
           }
 
+          // Active transfer progress card
+          BorderSurface {
+            visible: root.hasActiveTransfer
+            Layout.fillWidth: true
+            implicitHeight: transferCol.implicitHeight + Style.space(16)
+            color: Style.selectedFillFor(root.foreground, Commons.Color.accent)
+            borderSpec: Border.controlSpec("selected", root.foreground, Commons.Color.accent)
+            radius: Style.cornerRadius
+
+            ColumnLayout {
+              id: transferCol
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              anchors.margins: Style.space(8)
+              spacing: Style.space(6)
+
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: Style.space(8)
+
+                Text {
+                  Layout.fillWidth: true
+                  textFormat: Text.PlainText
+                  text: root.transferLabel !== ""
+                    ? (root.transferProgress >= 0
+                      ? (root.transferLabel + " (" + Math.round(root.transferProgress * 100) + "%)")
+                      : root.transferLabel)
+                    : "Transferring…"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                  elide: Text.ElideRight
+                }
+
+                Ui.Button {
+                  bordered: true
+                  foreground: root.foreground
+                  fontSize: Style.font.caption
+                  text: "Cancel"
+                  onClicked: if (root.engine) root.engine.cancelActiveTransfer()
+                }
+              }
+
+              Rectangle {
+                id: progressTrack
+                Layout.fillWidth: true
+                Layout.preferredHeight: Style.space(4)
+                radius: Style.space(2)
+                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+                clip: true
+
+                Rectangle {
+                  id: progressFill
+                  height: parent.height
+                  radius: parent.radius
+                  color: Commons.Color.accent
+                  width: root.transferProgress >= 0
+                    ? Math.max(Style.space(4), parent.width * root.transferProgress)
+                    : parent.width * 0.35
+                  x: root.transferProgress >= 0 ? 0 : indeterminatePos
+
+                  property real indeterminatePos: 0
+                  SequentialAnimation on indeterminatePos {
+                    running: root.hasActiveTransfer && root.transferProgress < 0
+                    loops: Animation.Infinite
+                    NumberAnimation { from: -progressTrack.width * 0.35; to: progressTrack.width; duration: 1100; easing.type: Easing.InOutQuad }
+                  }
+                }
+              }
+            }
+          }
+
           // Transient status / progress notice
           RowLayout {
-            visible: root.notice !== ""
+            visible: root.notice !== "" && !root.hasActiveTransfer
             Layout.fillWidth: true
             spacing: Style.space(8)
 
@@ -637,19 +724,6 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               wrapMode: Text.Wrap
-            }
-
-            Ui.Button {
-              visible: !!(root.engine && (root.engine.airdropSending || root.engine.nearbyOutgoingId !== ""))
-              bordered: true
-              foreground: root.foreground
-              fontSize: Style.font.caption
-              text: "Cancel"
-              onClicked: {
-                if (!root.engine) return
-                if (root.engine.airdropSending) root.engine.cancelAirdropSend()
-                if (root.engine.nearbyOutgoingId !== "") root.engine.cancelNearbySend()
-              }
             }
           }
 
@@ -974,7 +1048,7 @@ Panel {
                     foreground: root.foreground
                     fontSize: Style.font.caption
                     text: "Mesh: " + root.kcMeshIp
-                    tooltipText: "Click to copy this laptop's " + (root.kcMeshIface || "lean-mesh") + " IP for KDE Connect on your phone"
+                    tooltipText: "Click to copy this device's " + (root.kcMeshIface || "lean-mesh") + " IP for KDE Connect on your phone"
                     onClicked: if (root.engine) root.engine.copyTextValue(root.kcMeshIp, root.kcMeshIp)
                   }
 
@@ -985,7 +1059,7 @@ Panel {
                     foreground: root.foreground
                     fontSize: Style.font.caption
                     text: "LAN: " + root.kcLanIp
-                    tooltipText: "Click to copy this laptop's LAN IP"
+                    tooltipText: "Click to copy this device's LAN IP"
                     onClicked: if (root.engine) root.engine.copyTextValue(root.kcLanIp, root.kcLanIp)
                   }
                 }
@@ -1173,13 +1247,36 @@ Panel {
             spacing: Style.space(6)
 
             Ui.Button {
+              Layout.fillWidth: true
+              bordered: true
+              foreground: root.foreground
+              fontSize: Style.font.caption
+              iconText: "󰈔"
+              text: "Files"
+              tooltipText: "Choose files to stage, then pick a device above to send"
+              onClicked: if (root.engine) root.engine.pickAndStageFiles()
+            }
+
+            Ui.Button {
+              visible: root.kcConnected.length > 0
+              Layout.fillWidth: true
+              bordered: true
+              foreground: root.foreground
+              fontSize: Style.font.caption
+              iconText: "󰅌"
+              text: "Clipboard"
+              tooltipText: "Send current clipboard to connected phone"
+              onClicked: if (root.engine) root.engine.sendClipboardToPhone("--all", "")
+            }
+
+            Ui.Button {
               visible: root.engine ? root.engine.quickshareAvailable : false
               Layout.fillWidth: true
               bordered: true
               foreground: root.foreground
               fontSize: Style.font.caption
               iconText: "󰐲"
-              text: "Send via QR"
+              text: "QR"
               tooltipText: "Pick files and display a QR code for Android Quick Share"
               onClicked: if (root.engine) root.engine.pickAndQr()
             }

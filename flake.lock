@@ -91,26 +91,6 @@
         "type": "github"
       }
     },
-    "folio": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1794334419,
-        "narHash": "sha256-uL0JJOhLjORwXlpmylqjp4jtXNloSe6UZ1aZcJcoAMg=",
-        "owner": "Th0rgal",
-        "repo": "folio",
-        "rev": "d06218ef45a2db7e00354b0b9f04818b96af5ba5",
-        "type": "github"
-      },
-      "original": {
-        "owner": "Th0rgal",
-        "repo": "folio",
-        "type": "github"
-      }
-    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -304,6 +284,23 @@
         "type": "github"
       }
     },
+    "open-oura": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791392873,
+        "narHash": "sha256-XRldkS1d+5dyl03xoICVtzx8THmbMvVZH38XTbVZGHA=",
+        "owner": "Th0rgal",
+        "repo": "open_oura",
+        "rev": "e57c43ce5fe0cf9a646afa790bda3731be767507",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "open_oura",
+        "rev": "e57c43ce5fe0cf9a646afa790bda3731be767507",
+        "type": "github"
+      }
+    },
     "orb": {
       "inputs": {
         "nixpkgs": [
@@ -345,7 +342,6 @@
       "inputs": {
         "apple-silicon-support": "apple-silicon-support",
         "bootvine": "bootvine",
-        "folio": "folio",
         "home-manager": "home-manager",
         "nixos-aurora": "nixos-aurora",
         "nixpkgs": "nixpkgs",
@@ -357,10 +353,32 @@
         "omarchy-quickshare": "omarchy-quickshare",
         "omdrop-awdl": "omdrop-awdl",
         "omdrop-plugin": "omdrop-plugin",
+        "open-oura": "open-oura",
         "orb": "orb",
         "orb-mesh": "orb-mesh",
+        "scribe": "scribe",
         "sops-nix": "sops-nix",
         "turbo-lean": "turbo-lean"
+      }
+    },
+    "scribe": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1795737929,
+        "narHash": "sha256-r3bj8px2EfnHWKVOGMf5ktH5ZNptRQ+2SulmmHyxu2s=",
+        "owner": "Th0rgal",
+        "repo": "scribe",
+        "rev": "f10a2ad081c1d002fb095a838ea9f4f5c4a7a896",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Th0rgal",
+        "repo": "scribe",
+        "type": "github"
       }
     },
     "sops-nix": {

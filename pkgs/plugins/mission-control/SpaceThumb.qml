@@ -300,7 +300,7 @@ Item {
           width: Math.max(1, (o && o.size ? o.size[0] : 100) * thumb.k)
           height: Math.max(1, (o && o.size ? o.size[1] : 100) * thumb.k)
           captureSource: thumb.monitorView.controller.mapped && modelData ? modelData.wayland : null
-          live: true
+          live: !hasContent || thumb.monitorView.p > 0.95
         }
       }
     }

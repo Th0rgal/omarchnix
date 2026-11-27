@@ -63,15 +63,17 @@ Item {
   readonly property real liveDragX: (pointerX - baseWidth * 0.5 - (grabRx - 0.5) * baseWidth * scale) - baseX
   readonly property real liveDragY: (pointerY - baseHeight * 0.5 - (grabRy - 0.5) * baseHeight * scale) - baseY
 
-  readonly property real radius: monitorView.radius * p
+  readonly property bool activating: monitorView.controller.activatingAddress !== ""
+    && toplevel && String(toplevel.address || "") === monitorView.controller.activatingAddress
+  readonly property real radius: monitorView.radius
 
   visible: !dropped
   x: baseX + (dragging ? liveDragX : settleX)
   y: baseY + (dragging ? liveDragY : settleY)
   width: baseWidth
   height: baseHeight
-  z: dragging ? 100 : (selected ? 2 : 1)
-  opacity: dropped ? 0 : (dimmed ? 0.25 : 1)
+  z: dragging ? 100 : (activating ? 50 : (selected ? 2 : 1))
+  opacity: dropped ? 0 : (!preview.hasContent ? 0 : (dimmed ? 0.25 : 1))
   scale: dragging ? dragScale : (highlighted ? 1.03 : 1.0)
 
   Behavior on opacity { enabled: !tile.dropped; NumberAnimation { duration: 150 } }

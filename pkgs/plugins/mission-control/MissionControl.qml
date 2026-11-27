@@ -38,6 +38,9 @@ Item {
   property string pendingFocusKind: ""
   property string pendingFocusTarget: ""
   property string pendingFocusMonitor: ""
+  property string activatingAddress: ""
+
+  Component.onCompleted: backgroundProc.running = true
 
   function parseMonitorBlocks(text) {
     var next = {}
@@ -162,12 +165,12 @@ Item {
     pendingFocusTimer.stop()
     root.pendingFocusKind = ""
     root.pendingFocusTarget = ""
+    root.activatingAddress = ""
     root.opened = true
     Hyprland.refreshToplevels()
     Hyprland.refreshWorkspaces()
     Hyprland.refreshMonitors()
-    backgroundProc.running = true
-    // Give the refresh a moment so previews start from accurate geometry.
+    // Brief 1-frame yield for geometry refresh before starting spread.
     openDelay.restart()
   }
 
@@ -202,6 +205,7 @@ Item {
   // runs before we focus the chosen window or workspace, instead of yanking
   // focus back to the pre-overlay window afterward.
   function activateWindowAndDismiss(address) {
+    root.activatingAddress = String(address || "")
     root.pendingFocusKind = "window"
     root.pendingFocusTarget = String(address || "")
     root.pendingFocusMonitor = ""
@@ -210,17 +214,25 @@ Item {
   }
 
   function switchWorkspaceAndDismiss(workspace, sameWorkspace, monitorName) {
-    root.pendingFocusKind = "workspace"
-    root.pendingFocusTarget = String(workspace)
-    root.pendingFocusMonitor = String(monitorName || "")
+    root.activatingAddress = ""
     if (!sameWorkspace) {
-      if (root.shell && typeof root.shell.hide === "function")
-        root.shell.hide(root.pluginId)
-      root.closeImmediate()
+      // Snap the Space underneath without a horizontal slide so Mission Control
+      // zooms straight into the chosen Space, then re-enable slide animation.
+      Hyprland.dispatch('function() hl.animation({ leaf = "workspaces", enabled = false }) end')
+      root.focusWorkspace(String(workspace), String(monitorName || ""))
+      root.dismiss()
+      restoreWsAnimTimer.restart()
     } else {
       root.dismiss()
     }
-    pendingFocusTimer.restart()
+  }
+
+  Timer {
+    id: restoreWsAnimTimer
+    interval: 120
+    onTriggered: {
+      Hyprland.dispatch('function() hl.animation({ leaf = "workspaces", enabled = true, speed = 3, bezier = "easeOutQuint", style = "slide" }) end')
+    }
   }
 
   function toggle() {
@@ -352,7 +364,7 @@ Item {
 
   Timer {
     id: openDelay
-    interval: 45
+    interval: 16
     onTriggered: {
       if (!root.opened) return
       closeAnim.stop()
@@ -367,7 +379,7 @@ Item {
     target: root
     property: "progress"
     to: 1
-    duration: 420
+    duration: 260
     easing.type: Easing.OutQuint
   }
 
@@ -377,11 +389,14 @@ Item {
       target: root
       property: "progress"
       to: 0
-      duration: 300
+      duration: 190
       easing.type: Easing.OutCubic
     }
     ScriptAction {
-      script: root.mapped = false
+      script: {
+        root.mapped = false
+        root.activatingAddress = ""
+      }
     }
   }
 

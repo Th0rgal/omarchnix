@@ -640,7 +640,8 @@ PanelWindow {
   WlrLayershell.keyboardFocus: controller.opened && monitor && monitor.focused
     ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
-  // Blurred wallpaper backdrop
+  // Lightweight preloaded blurred wallpaper backdrop (hides real desktop windows
+  // cleanly behind the spread tiles without 960px/64px MultiEffect stalls or Space-switch flashes).
   Item {
     anchors.fill: parent
     opacity: view.p
@@ -658,27 +659,29 @@ PanelWindow {
         view.isPortrait
       )
       source: bgPath ? "file://" + bgPath : ""
-      sourceSize.width: 960
+      sourceSize.width: 320
       fillMode: Image.PreserveAspectCrop
       verticalAlignment: bgPath.indexOf("bologna-dome") >= 0 ? Image.AlignTop : Image.AlignVCenter
       asynchronous: true
+      cache: true
+      smooth: true
       visible: false
     }
 
     MultiEffect {
       anchors.fill: parent
       source: wallpaper
-      visible: view.controller.mapped && wallpaper.status === Image.Ready
+      visible: wallpaper.status === Image.Ready
       autoPaddingEnabled: false
       blurEnabled: true
       blur: 1.0
-      blurMax: 64
+      blurMax: 32
       saturation: 0.15
     }
 
     Rectangle {
       anchors.fill: parent
-      color: Qt.rgba(0, 0, 0, 0.32)
+      color: Qt.rgba(0, 0, 0, 0.34)
     }
   }
 
@@ -747,21 +750,63 @@ PanelWindow {
     }
   }
 
-  Repeater {
-    model: ScriptModel {
-      objectProp: "address"
-      values: view.windows
+  // Smooth horizontal slide when switching Spaces while Mission Control is open
+  // (e.g., via Oura Ring slap-swipes or keyboard shortcuts).
+  property int lastObservedSpaceId: -1
+  readonly property int activeSpaceIdNow: activeWorkspace ? activeWorkspace.id : -1
+  onActiveSpaceIdNowChanged: {
+    var prev = lastObservedSpaceId
+    lastObservedSpaceId = activeSpaceIdNow
+    if (controller.mapped && prev > 0 && activeSpaceIdNow > 0 && prev !== activeSpaceIdNow && !spaceReordering) {
+      var dir = activeSpaceIdNow > prev ? 1 : -1
+      spaceSlideAnim.stop()
+      windowsContainer.x = dir * 76
+      windowsContainer.opacity = 0.25
+      spaceSlideAnim.restart()
     }
+  }
 
-    WindowTile {
-      required property var modelData
-      required property int index
-      toplevel: modelData
-      monitorView: view
-      rect: view.layout[index] || null
-      selected: view.selectedIndex === index
-      dimmed: !view.matches(modelData)
-      onHoveredChanged: if (hovered) view.selectedIndex = index
+  ParallelAnimation {
+    id: spaceSlideAnim
+    NumberAnimation {
+      target: windowsContainer
+      property: "x"
+      to: 0
+      duration: 185
+      easing.type: Easing.OutCubic
+    }
+    NumberAnimation {
+      target: windowsContainer
+      property: "opacity"
+      to: 1.0
+      duration: 165
+      easing.type: Easing.OutCubic
+    }
+  }
+
+  Item {
+    id: windowsContainer
+    width: parent.width
+    height: parent.height
+    x: 0
+    y: 0
+
+    Repeater {
+      model: ScriptModel {
+        objectProp: "address"
+        values: view.windows
+      }
+
+      WindowTile {
+        required property var modelData
+        required property int index
+        toplevel: modelData
+        monitorView: view
+        rect: view.layout[index] || null
+        selected: view.selectedIndex === index
+        dimmed: !view.matches(modelData)
+        onHoveredChanged: if (hovered) view.selectedIndex = index
+      }
     }
   }
 

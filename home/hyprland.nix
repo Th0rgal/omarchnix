@@ -1282,7 +1282,7 @@ in
           workspace_swipe_direction_lock = true;
           workspace_swipe_direction_lock_threshold = 10;
           workspace_swipe_forever = true;
-          workspace_swipe_invert = true;
+          workspace_swipe_invert = false;
           workspace_swipe_create_new = true;
         };
 

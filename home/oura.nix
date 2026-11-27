@@ -52,22 +52,21 @@ let
     ]
   );
 
-  daemonArgs =
-    [
-      "${daemonPkg}/bin/ourad"
-      "--name"
-      oCfg.nameFilter
-      "--sync-interval-minutes"
-      (toString oCfg.syncIntervalMinutes)
-    ]
-    ++ lib.optionals (oCfg.address != null) [
-      "--address"
-      oCfg.address
-    ]
-    ++ lib.optionals (oCfg.keyFile != null) [
-      "--key-file"
-      oCfg.keyFile
-    ];
+  daemonArgs = [
+    "${daemonPkg}/bin/ourad"
+    "--name"
+    oCfg.nameFilter
+    "--sync-interval-minutes"
+    (toString oCfg.syncIntervalMinutes)
+  ]
+  ++ lib.optionals (oCfg.address != null) [
+    "--address"
+    oCfg.address
+  ]
+  ++ lib.optionals (oCfg.keyFile != null) [
+    "--key-file"
+    oCfg.keyFile
+  ];
 in
 {
   options.programs.omarchnix.oura = {

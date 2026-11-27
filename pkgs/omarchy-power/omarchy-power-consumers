@@ -31,7 +31,7 @@ APP_RULES = (
     (("telegram",), "Telegram"),
     (("signal-desktop",), "Signal"),
     (("vesktop", "discord"), "Discord"),
-    (("folio-desktop", "folio"), "Folio"),
+    (("scribe-desktop", "scribe"), "Scribe"),
     (("notion-calendar",), "Notion Calendar"),
     (("bitwarden",), "Bitwarden"),
     (("ghostty",), "Ghostty"),

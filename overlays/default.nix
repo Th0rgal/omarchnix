@@ -163,9 +163,9 @@ in
     };
   };
   sandboxed-sh = final.orb-desktop.passthru.sandboxed-sh;
-  folio-desktop = inputs.folio.packages.${final.stdenv.hostPlatform.system}.folio-desktop;
-  folio = final.folio-desktop;
-  folio-locald = final.folio-desktop.passthru.folio-locald;
+  scribe-desktop = inputs.scribe.packages.${final.stdenv.hostPlatform.system}.scribe-desktop;
+  scribe = final.scribe-desktop;
+  scribe-locald = final.scribe-desktop.passthru.scribe-locald;
   notion-calendar = final.callPackage ../pkgs/notion-calendar.nix { };
   claude-desktop = final.callPackage ../pkgs/claude-desktop.nix { };
   helium = final.callPackage ../pkgs/helium.nix {

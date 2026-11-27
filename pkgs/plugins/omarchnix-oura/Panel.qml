@@ -28,14 +28,16 @@ Panel {
   }
 
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
-  readonly property color dim: Qt.darker(foreground, 1.45)
+  readonly property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, isLight ? 0.56 : 0.54)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property bool isLight: (Commons.Color.background.r + Commons.Color.background.g + Commons.Color.background.b) > 1.5
-  readonly property color okColor: isLight ? "#248a3d" : "#30d158"
-  readonly property color accentCyan: isLight ? "#0a7ea4" : "#3fe0ff"
-  readonly property color warnColor: isLight ? "#c93400" : "#ff9f0a"
-  readonly property color cardBg: isLight ? Qt.rgba(0, 0, 0, 0.05) : Qt.rgba(1, 1, 1, 0.06)
-  readonly property color cardBorder: isLight ? Qt.rgba(0, 0, 0, 0.10) : Qt.rgba(1, 1, 1, 0.11)
+  readonly property color okColor: isLight ? "#10855B" : "#199E70"
+  readonly property color accentCyan: isLight ? "#2D6FD1" : "#86AEE4"
+  readonly property color warnColor: isLight ? "#B37400" : "#C98500"
+  readonly property color cardBg: isLight ? Qt.rgba(0, 0, 0, 0.04) : Qt.rgba(1, 1, 1, 0.045)
+  readonly property color cardHoverBg: isLight ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(1, 1, 1, 0.09)
+  readonly property color cardBorder: isLight ? Qt.rgba(0, 0, 0, 0.09) : Qt.rgba(1, 1, 1, 0.09)
+  readonly property color dividerColor: isLight ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.07)
 
   readonly property bool online: engine ? engine.daemonOnline : false
   readonly property bool gesturesOn: engine ? engine.gesturesEnabled : false
@@ -126,7 +128,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: popup.fittedContentWidth(Style.space(364))
+    contentWidth: popup.fittedContentWidth(Style.space(380))
     contentHeight: popup.fittedContentHeight(column.implicitHeight, Style.space(680))
 
     PanelKeyCatcher {
@@ -448,17 +450,22 @@ Panel {
                 return padT + plotH - ((bpm - yMin) / span) * plotH
               }
 
-              // Draw p5..p95 vertical capsules per hour
-              var barW = Math.max(3, (plotW / 24.0) * 0.48)
-              ctx.fillStyle = root.isLight ? "rgba(10,126,164,0.28)" : "rgba(63,224,255,0.28)"
+              // Draw p5..p95 rounded vertical capsules per hour
+              var barW = Math.max(3, (plotW / 24.0) * 0.44)
+              ctx.strokeStyle = root.isLight ? "rgba(45,111,209,0.24)" : "rgba(134,174,228,0.24)"
+              ctx.lineWidth = barW
+              ctx.lineCap = "round"
               for (var j = 0; j < bars.length; j++) {
                 var b = bars[j]
-                var bx = padL + (b.hour / 23.0) * plotW - barW * 0.5
+                var bx = padL + (b.hour / 23.0) * plotW
                 var yTop = yFor(b.p95)
-                var yBot = yFor(b.p5)
-                var bh = Math.max(3, yBot - yTop)
-                ctx.fillRect(bx, yTop, barW, bh)
+                var yBot = Math.max(yTop + 1, yFor(b.p5))
+                ctx.beginPath()
+                ctx.moveTo(bx, yTop)
+                ctx.lineTo(bx, yBot)
+                ctx.stroke()
               }
+              ctx.lineCap = "butt"
 
               // Draw mean curve
               ctx.strokeStyle = root.accentCyan
@@ -489,49 +496,92 @@ Panel {
       // ---- Gesture Navigation Card ----
       Rectangle {
         Layout.fillWidth: true
-        radius: Style.space(8)
+        radius: Style.space(10)
+        clip: true
         color: root.cardBg
         border.width: 1
-        border.color: root.gesturesOn ? Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.45) : root.cardBorder
-        implicitHeight: gestureCol.implicitHeight + Style.space(16)
+        border.color: root.gesturesActive
+          ? Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.35)
+          : (root.gesturesConnecting
+            ? Qt.rgba(root.warnColor.r, root.warnColor.g, root.warnColor.b, 0.38)
+            : root.cardBorder)
+        implicitHeight: gestureCol.implicitHeight + Style.space(20)
 
         ColumnLayout {
           id: gestureCol
           anchors.fill: parent
-          anchors.margins: Style.space(8)
-          spacing: Style.space(8)
+          anchors.margins: Style.space(10)
+          spacing: Style.space(10)
 
           // Header + Toggle Switch
           RowLayout {
             Layout.fillWidth: true
+            spacing: Style.space(10)
 
             ColumnLayout {
               Layout.fillWidth: true
-              spacing: Style.space(1)
-              Text {
-                text: root.gesturesConnecting
-                  ? "SPACE GESTURES · CONNECTING…"
-                  : (root.gesturesActive ? "SPACE GESTURES · ACTIVE" : "SPACE GESTURES")
-                color: root.gesturesConnecting
-                  ? root.warnColor
-                  : (root.gesturesActive ? root.accentCyan : root.foreground)
-                font.family: root.fontFamily
-                font.pixelSize: Style.space(10)
-                font.weight: Font.DemiBold
-                font.letterSpacing: 0.7
+              Layout.minimumWidth: 0
+              spacing: Style.space(3)
+
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: Style.space(6)
+
+                Text {
+                  text: "SPACE GESTURES"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.space(10)
+                  font.weight: Font.DemiBold
+                  font.letterSpacing: 0.8
+                }
+
+                Rectangle {
+                  visible: root.gesturesConnecting || root.gesturesActive
+                  radius: Style.space(4)
+                  color: root.gesturesConnecting
+                    ? Qt.rgba(root.warnColor.r, root.warnColor.g, root.warnColor.b, 0.16)
+                    : ((root.attitude && root.attitude.nav_armed)
+                      ? Qt.rgba(root.okColor.r, root.okColor.g, root.okColor.b, 0.16)
+                      : Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.16))
+                  implicitWidth: statusPillLbl.implicitWidth + Style.space(10)
+                  implicitHeight: Style.space(16)
+
+                  Text {
+                    id: statusPillLbl
+                    anchors.centerIn: parent
+                    text: root.gesturesConnecting
+                      ? "CONNECTING"
+                      : ((root.attitude && root.attitude.nav_armed)
+                        ? "ARMED"
+                        : ((root.attitude && root.attitude.acm_hz) ? (root.attitude.acm_hz + " HZ") : "ACTIVE"))
+                    color: root.gesturesConnecting
+                      ? root.warnColor
+                      : ((root.attitude && root.attitude.nav_armed) ? root.okColor : root.accentCyan)
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.space(8.5)
+                    font.weight: Font.DemiBold
+                    font.letterSpacing: 0.6
+                  }
+                }
+
+                Item { Layout.fillWidth: true }
               }
+
               Text {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                elide: Text.ElideRight
                 text: {
-                  if (root.gesturesConnecting) return "Waking BLE link (click switch to cancel)…"
+                  if (root.gesturesConnecting) return "Waking BLE link · click to cancel"
                   if (root.gesturesActive && root.engine) {
                     if (root.attitude && root.attitude.nav_armed) {
                       var remS = (Number(root.attitude.nav_armed_ms || 0) / 1000.0).toFixed(1)
-                      return "ARMED (" + remS + "s) · Brisk slap ↔ to switch Spaces"
+                      return "Slap ↔ to switch Spaces (" + remS + "s)"
                     }
-                    var hz = root.attitude && root.attitude.acm_hz ? (root.attitude.acm_hz + " Hz · ") : ""
-                    return hz + "Palm-up + lift ↑ to open Mission Control"
+                    return "Palm-up + lift ↑ for Mission Control"
                   }
-                  return "Click to connect ring & enable air gestures"
+                  return "Connect ring to enable air gestures"
                 }
                 color: root.gesturesConnecting
                   ? root.warnColor
@@ -542,15 +592,17 @@ Panel {
             }
 
             Rectangle {
+              Layout.alignment: Qt.AlignVCenter
               radius: Style.space(11)
-              implicitWidth: Style.space(42)
+              implicitWidth: Style.space(40)
               implicitHeight: Style.space(22)
               opacity: root.gesturesConnecting ? root.pulseAlpha : 1.0
               color: root.gesturesActive
                 ? root.accentCyan
                 : (root.gesturesConnecting
                   ? root.warnColor
-                  : (root.isLight ? Qt.rgba(0, 0, 0, 0.16) : Qt.rgba(1, 1, 1, 0.18)))
+                  : (root.isLight ? Qt.rgba(0, 0, 0, 0.14) : Qt.rgba(1, 1, 1, 0.16)))
+              Behavior on color { ColorAnimation { duration: 140 } }
 
               Rectangle {
                 width: Style.space(16)
@@ -575,16 +627,25 @@ Panel {
             }
           }
 
+          // Subtle divider before live reticle
+          Rectangle {
+            visible: root.gesturesActive
+            Layout.fillWidth: true
+            implicitHeight: 1
+            color: root.dividerColor
+          }
+
           // Ring Runner-style Attitude Reticle + Live Readout (visible when Gesture Mode is active)
           RowLayout {
             visible: root.gesturesActive
             Layout.fillWidth: true
-            spacing: Style.space(10)
+            spacing: Style.space(12)
 
             Canvas {
               id: reticleCanvas
-              implicitWidth: Style.space(88)
-              implicitHeight: Style.space(88)
+              Layout.alignment: Qt.AlignVCenter
+              implicitWidth: Style.space(76)
+              implicitHeight: Style.space(76)
               antialiasing: true
 
               property real axG: root.attitude ? Number(root.attitude.accel_h_g || 0) : 0
@@ -609,25 +670,31 @@ Panel {
                 var maxR = Math.min(w, h) * 0.45
                 var maxG = 1.4
 
-                // Outer ring (green when Armed, amber when Palm-Up ready to lift, cyan in Standby)
+                // Subtle fill
+                ctx.fillStyle = root.isLight ? "rgba(0,0,0,0.025)" : "rgba(255,255,255,0.025)"
+                ctx.beginPath()
+                ctx.arc(cx, cy, maxR, 0, Math.PI * 2)
+                ctx.fill()
+
+                // Outer ring (green when Armed, amber when Palm-Up ready to lift, subtle accent in Standby)
                 ctx.strokeStyle = armed
                   ? root.okColor
-                  : (inverted ? root.warnColor : (root.isLight ? "rgba(10,126,164,0.38)" : "rgba(63,224,255,0.38)"))
-                ctx.lineWidth = armed ? 1.8 : 1.2
+                  : (inverted ? root.warnColor : (root.isLight ? "rgba(45,111,209,0.34)" : "rgba(134,174,228,0.32)"))
+                ctx.lineWidth = armed ? 1.6 : 1.1
                 ctx.beginPath()
                 ctx.arc(cx, cy, maxR, 0, Math.PI * 2)
                 ctx.stroke()
 
                 // Swipe acceleration threshold ring
                 var rSw = Math.min(maxR, (swipeG / maxG) * maxR)
-                ctx.strokeStyle = root.isLight ? "rgba(10,126,164,0.25)" : "rgba(63,224,255,0.25)"
+                ctx.strokeStyle = root.isLight ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.12)"
                 ctx.lineWidth = 1
                 ctx.beginPath()
                 ctx.arc(cx, cy, rSw, 0, Math.PI * 2)
                 ctx.stroke()
 
                 // Crosshairs
-                ctx.strokeStyle = root.isLight ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.12)"
+                ctx.strokeStyle = root.isLight ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)"
                 ctx.beginPath()
                 ctx.moveTo(cx - maxR, cy)
                 ctx.lineTo(cx + maxR, cy)
@@ -640,22 +707,26 @@ Panel {
                 var dy = -Math.max(-1, Math.min(1, ayG / maxG)) * maxR
                 ctx.fillStyle = armed ? root.okColor : (inverted ? root.warnColor : root.accentCyan)
                 ctx.beginPath()
-                ctx.arc(cx + dx, cy + dy, 4.5, 0, Math.PI * 2)
+                ctx.arc(cx + dx, cy + dy, 4.0, 0, Math.PI * 2)
                 ctx.fill()
               }
             }
 
             ColumnLayout {
               Layout.fillWidth: true
-              spacing: Style.space(4)
+              Layout.minimumWidth: 0
+              spacing: Style.space(5)
 
               Text {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                elide: Text.ElideRight
                 text: {
                   var st = root.attitude ? root.attitude.calibration_stage : null
                   if (st === "hold_neutral") return "HOLD PALM-DOWN (1.5s)…"
                   if (st === "tilt_right") return "TILT / FLICK RIGHT ONCE…"
-                  if (root.attitude && root.attitude.nav_armed) return "ARMED · Slap ↔ to switch"
-                  if (root.attitude && root.attitude.palm_inverted) return "PALM UP · Lift ↑ for MC"
+                  if (root.attitude && root.attitude.nav_armed) return "Armed · Slap ↔ to switch"
+                  if (root.attitude && root.attitude.palm_inverted) return "Palm up · Lift ↑ for MC"
                   if (root.engine && root.engine.lastGesture) {
                     return "Last: " + root.engine.lastGesture.replace(/_/g, " ")
                   }
@@ -670,9 +741,11 @@ Panel {
               }
 
               Text {
-                text: "↔ " + Number(root.attitude ? (root.attitude.accel_h_g || 0) : 0).toFixed(2) + "g · ↑ "
-                  + Number(root.attitude ? (root.attitude.accel_up_g || 0) : 0).toFixed(2) + "g · "
-                  + (root.attitude && root.attitude.acm_hz ? (root.attitude.acm_hz + " Hz") : "0 Hz")
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                elide: Text.ElideRight
+                text: "↔ " + Number(root.attitude ? (root.attitude.accel_h_g || 0) : 0).toFixed(2) + "g   ↑ "
+                  + Number(root.attitude ? (root.attitude.accel_up_g || 0) : 0).toFixed(2) + "g"
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.space(9.5)
@@ -682,19 +755,20 @@ Panel {
                 spacing: Style.space(6)
 
                 Rectangle {
-                  radius: Style.space(5)
-                  color: zeroMouse.containsMouse ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14) : root.cardBg
+                  radius: Style.space(6)
+                  color: zeroMouse.containsMouse ? root.cardHoverBg : root.cardBg
                   border.width: 1
                   border.color: root.cardBorder
-                  implicitWidth: zeroLbl.implicitWidth + Style.space(12)
-                  implicitHeight: Style.space(22)
+                  implicitWidth: zeroLbl.implicitWidth + Style.space(14)
+                  implicitHeight: Style.space(23)
                   Text {
                     id: zeroLbl
                     anchors.centerIn: parent
                     text: "Zero"
                     color: root.foreground
                     font.family: root.fontFamily
-                    font.pixelSize: Style.space(10)
+                    font.pixelSize: Style.space(9.5)
+                    font.weight: Font.Medium
                   }
                   MouseArea {
                     id: zeroMouse
@@ -706,19 +780,22 @@ Panel {
                 }
 
                 Rectangle {
-                  radius: Style.space(5)
-                  color: calMouse.containsMouse ? Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.22) : root.cardBg
+                  radius: Style.space(6)
+                  color: calMouse.containsMouse
+                    ? Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.18)
+                    : Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.08)
                   border.width: 1
-                  border.color: Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.4)
-                  implicitWidth: calLbl.implicitWidth + Style.space(12)
-                  implicitHeight: Style.space(22)
+                  border.color: Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.34)
+                  implicitWidth: calLbl.implicitWidth + Style.space(14)
+                  implicitHeight: Style.space(23)
                   Text {
                     id: calLbl
                     anchors.centerIn: parent
                     text: "Calibrate"
                     color: root.accentCyan
                     font.family: root.fontFamily
-                    font.pixelSize: Style.space(10)
+                    font.pixelSize: Style.space(9.5)
+                    font.weight: Font.Medium
                   }
                   MouseArea {
                     id: calMouse
@@ -732,21 +809,30 @@ Panel {
             }
           }
 
-          // Quick Settings Row (Invert H, Big Tilt MC, Threshold H)
+          // Subtle divider before bottom controls
+          Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: 1
+            color: root.dividerColor
+          }
+
+          // Quick Settings Row (Invert H, Lift-to-Arm MC, Force Stepper)
           RowLayout {
             Layout.fillWidth: true
             spacing: Style.space(6)
 
             // Invert horizontal toggle pill
             Rectangle {
-              radius: Style.space(5)
+              radius: Style.space(6)
               color: (root.gcfg && root.gcfg.invert_h)
-                ? Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.18)
-                : root.cardBg
+                ? Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.15)
+                : (invMouse.containsMouse ? root.cardHoverBg : root.cardBg)
               border.width: 1
-              border.color: (root.gcfg && root.gcfg.invert_h) ? root.accentCyan : root.cardBorder
+              border.color: (root.gcfg && root.gcfg.invert_h)
+                ? Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.45)
+                : root.cardBorder
               implicitWidth: invLbl.implicitWidth + Style.space(12)
-              implicitHeight: Style.space(22)
+              implicitHeight: Style.space(24)
 
               Text {
                 id: invLbl
@@ -755,9 +841,12 @@ Panel {
                 color: (root.gcfg && root.gcfg.invert_h) ? root.accentCyan : root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.space(9.5)
+                font.weight: Font.Medium
               }
               MouseArea {
+                id: invMouse
                 anchors.fill: parent
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: if (root.engine) root.engine.updateConfig({ invert_h: !(root.gcfg && root.gcfg.invert_h) })
               }
@@ -765,14 +854,16 @@ Panel {
 
             // Lift-to-Arm Mission Control gate toggle pill
             Rectangle {
-              radius: Style.space(5)
+              radius: Style.space(6)
               color: (root.gcfg && root.gcfg.require_lift_to_arm)
-                ? Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.18)
-                : root.cardBg
+                ? Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.15)
+                : (mcMouse.containsMouse ? root.cardHoverBg : root.cardBg)
               border.width: 1
-              border.color: (root.gcfg && root.gcfg.require_lift_to_arm) ? root.accentCyan : root.cardBorder
+              border.color: (root.gcfg && root.gcfg.require_lift_to_arm)
+                ? Qt.rgba(root.accentCyan.r, root.accentCyan.g, root.accentCyan.b, 0.45)
+                : root.cardBorder
               implicitWidth: mcLbl.implicitWidth + Style.space(12)
-              implicitHeight: Style.space(22)
+              implicitHeight: Style.space(24)
 
               Text {
                 id: mcLbl
@@ -781,9 +872,12 @@ Panel {
                 color: (root.gcfg && root.gcfg.require_lift_to_arm) ? root.accentCyan : root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.space(9.5)
+                font.weight: Font.Medium
               }
               MouseArea {
+                id: mcMouse
                 anchors.fill: parent
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: if (root.engine) {
                   root.engine.updateConfig({ require_lift_to_arm: !(root.gcfg && root.gcfg.require_lift_to_arm) })
@@ -793,54 +887,89 @@ Panel {
 
             Item { Layout.fillWidth: true }
 
-            // Swipe acceleration threshold stepper (in g)
-            Text {
-              text: "Force " + Number(root.gcfg ? (root.gcfg.swipe_accel_g || 0.75) : 0.75).toFixed(2) + "g"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.space(9.5)
-            }
+            // Unified segmented Force stepper pill
             Rectangle {
-              radius: Style.space(4)
+              radius: Style.space(6)
               color: root.cardBg
               border.width: 1
               border.color: root.cardBorder
-              implicitWidth: Style.space(20)
-              implicitHeight: Style.space(20)
-              Text {
-                anchors.centerIn: parent
-                text: "−"
-                color: root.foreground
-                font.pixelSize: Style.space(11)
-              }
-              MouseArea {
+              implicitWidth: stepperRow.implicitWidth
+              implicitHeight: Style.space(24)
+              clip: true
+
+              RowLayout {
+                id: stepperRow
                 anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: if (root.engine) {
-                  var cur = Number(root.gcfg ? (root.gcfg.swipe_accel_g || 0.75) : 0.75)
-                  root.engine.updateConfig({ swipe_accel_g: Math.max(0.45, Math.round((cur - 0.1) * 100) / 100) })
+                spacing: 0
+
+                Rectangle {
+                  implicitWidth: Style.space(22)
+                  Layout.fillHeight: true
+                  color: minusMouse.containsMouse ? root.cardHoverBg : "transparent"
+                  Text {
+                    anchors.centerIn: parent
+                    text: "−"
+                    color: root.foreground
+                    font.pixelSize: Style.space(11)
+                  }
+                  MouseArea {
+                    id: minusMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: if (root.engine) {
+                      var cur = Number(root.gcfg ? (root.gcfg.swipe_accel_g || 0.75) : 0.75)
+                      root.engine.updateConfig({ swipe_accel_g: Math.max(0.45, Math.round((cur - 0.1) * 100) / 100) })
+                    }
+                  }
                 }
-              }
-            }
-            Rectangle {
-              radius: Style.space(4)
-              color: root.cardBg
-              border.width: 1
-              border.color: root.cardBorder
-              implicitWidth: Style.space(20)
-              implicitHeight: Style.space(20)
-              Text {
-                anchors.centerIn: parent
-                text: "+"
-                color: root.foreground
-                font.pixelSize: Style.space(11)
-              }
-              MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: if (root.engine) {
-                  var cur = Number(root.gcfg ? (root.gcfg.swipe_accel_g || 0.75) : 0.75)
-                  root.engine.updateConfig({ swipe_accel_g: Math.min(1.6, Math.round((cur + 0.1) * 100) / 100) })
+
+                Rectangle {
+                  implicitWidth: 1
+                  Layout.fillHeight: true
+                  color: root.dividerColor
+                }
+
+                Item {
+                  implicitWidth: forceLbl.implicitWidth + Style.space(12)
+                  Layout.fillHeight: true
+                  Text {
+                    id: forceLbl
+                    anchors.centerIn: parent
+                    text: Number(root.gcfg ? (root.gcfg.swipe_accel_g || 0.75) : 0.75).toFixed(2) + "g"
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.space(9.5)
+                    font.weight: Font.Medium
+                  }
+                }
+
+                Rectangle {
+                  implicitWidth: 1
+                  Layout.fillHeight: true
+                  color: root.dividerColor
+                }
+
+                Rectangle {
+                  implicitWidth: Style.space(22)
+                  Layout.fillHeight: true
+                  color: plusMouse.containsMouse ? root.cardHoverBg : "transparent"
+                  Text {
+                    anchors.centerIn: parent
+                    text: "+"
+                    color: root.foreground
+                    font.pixelSize: Style.space(11)
+                  }
+                  MouseArea {
+                    id: plusMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: if (root.engine) {
+                      var cur = Number(root.gcfg ? (root.gcfg.swipe_accel_g || 0.75) : 0.75)
+                      root.engine.updateConfig({ swipe_accel_g: Math.min(1.6, Math.round((cur + 0.1) * 100) / 100) })
+                    }
+                  }
                 }
               }
             }

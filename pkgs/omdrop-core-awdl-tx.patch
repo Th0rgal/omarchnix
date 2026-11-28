@@ -1,0 +1,695 @@
+diff --git a/crates/omdrop-send/src/http.rs b/crates/omdrop-send/src/http.rs
+index 0648d26..36f83e7 100644
+--- a/crates/omdrop-send/src/http.rs
++++ b/crates/omdrop-send/src/http.rs
+@@ -12,6 +12,7 @@
+ 
+ use std::io::{self, Read, Write};
+ use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6, TcpStream};
++use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+ use std::sync::Arc;
+ use std::time::{Duration, Instant};
+ 
+@@ -27,6 +28,252 @@ const MAX_HEAD_BYTES: usize = 64 << 10;
+ /// Chunk size for a streamed (chunked) request body.
+ const CHUNK_BYTES: usize = 64 << 10;
+ 
++/// Stagger between non-blocking AWDL SYN attempts: strictly smaller than one
++/// 64-TU (65.536 ms) AWDL channel slot so a sweep across a 16-slot (1.0486 s)
++/// cycle is guaranteed to hit any single shared slot within one cycle.
++const AWDL_SYN_STAGGER: Duration = Duration::from_millis(50);
++/// How long each pending non-blocking SYN socket waits for SYN-ACK before
++/// closing so the kernel stops its 1s/2s/4s/8s/16s phase-locked retransmits.
++const AWDL_SYN_LIFETIME: Duration = Duration::from_millis(250);
++/// Maximum concurrent pending SYN sockets during an AWDL connect sweep.
++const AWDL_SYN_MAX_PENDING: usize = 5;
++/// Cap TCP retransmission timeout on AWDL sockets (Linux 6.15+ minimum is
++/// 1000 ms; 1000 ms mod 1048.576 ms = -48.6 ms/retry, breaking phase-lock with
++/// AWDL's 1.0486 s cycle during TLS / Ask / Upload).
++const AWDL_RTO_MAX_MS: libc::c_int = 1000;
++const AWDL_USER_TIMEOUT_MS: libc::c_int = 120_000;
++/// From linux/tcp.h (Linux 6.15); libc does not expose it on all versions.
++const TCP_RTO_MAX_MS: libc::c_int = 44;
++
++fn is_awdl_link_local(addr: &SocketAddr) -> Option<SocketAddrV6> {
++    match *addr {
++        SocketAddr::V6(v6)
++            if (v6.ip().segments()[0] & 0xffc0) == 0xfe80 && v6.scope_id() != 0 =>
++        {
++            Some(v6)
++        }
++        _ => None,
++    }
++}
++
++fn set_blocking(fd: &OwnedFd) -> io::Result<()> {
++    // SAFETY: valid open socket fd owned by `fd`.
++    let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFL) };
++    if flags < 0 {
++        return Err(io::Error::last_os_error());
++    }
++    // SAFETY: clearing O_NONBLOCK on our own socket fd.
++    if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK) } < 0 {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(())
++}
++
++/// Best-effort TCP retransmission cap for AWDL link-local sockets so data
++/// segments do not back off into multi-minute blackouts or phase-lock to the
++/// 1.0486 s AWDL slot cycle.
++fn tune_awdl_tcp(sock: &TcpStream) {
++    let set = |opt: libc::c_int, val: libc::c_int| -> bool {
++        // SAFETY: valid live socket fd and stack-local c_int.
++        unsafe {
++            libc::setsockopt(
++                sock.as_raw_fd(),
++                libc::IPPROTO_TCP,
++                opt,
++                (&raw const val).cast(),
++                size_of::<libc::c_int>() as libc::socklen_t,
++            ) == 0
++        }
++    };
++    if set(libc::TCP_USER_TIMEOUT, AWDL_USER_TIMEOUT_MS) && !set(TCP_RTO_MAX_MS, AWDL_RTO_MAX_MS) {
++        let _ = set(libc::TCP_USER_TIMEOUT, 0);
++    }
++}
++
++fn start_nonblocking_v6(v6: SocketAddrV6) -> io::Result<(OwnedFd, bool)> {
++    // SAFETY: standard POSIX socket creation.
++    let raw = unsafe {
++        libc::socket(
++            libc::AF_INET6,
++            libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
++            0,
++        )
++    };
++    if raw < 0 {
++        return Err(io::Error::last_os_error());
++    }
++    // SAFETY: `raw` is a fresh open fd owned exclusively by us.
++    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
++    // SAFETY: sockaddr_in6 is POD.
++    let mut sa: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
++    sa.sin6_family = libc::AF_INET6 as libc::sa_family_t;
++    sa.sin6_port = v6.port().to_be();
++    sa.sin6_flowinfo = v6.flowinfo();
++    sa.sin6_addr = libc::in6_addr {
++        s6_addr: v6.ip().octets(),
++    };
++    sa.sin6_scope_id = v6.scope_id();
++    // SAFETY: `fd` and `sa` are valid for the duration of connect().
++    let rc = unsafe {
++        libc::connect(
++            fd.as_raw_fd(),
++            (&raw const sa).cast::<libc::sockaddr>(),
++            size_of::<libc::sockaddr_in6>() as libc::socklen_t,
++        )
++    };
++    if rc == 0 {
++        return Ok((fd, true));
++    }
++    let err = io::Error::last_os_error();
++    if err.raw_os_error() == Some(libc::EINPROGRESS) {
++        Ok((fd, false))
++    } else {
++        Err(err)
++    }
++}
++
++fn so_error(fd: &OwnedFd) -> io::Result<i32> {
++    let mut err: libc::c_int = 0;
++    let mut len = size_of::<libc::c_int>() as libc::socklen_t;
++    // SAFETY: valid fd and writable stack buffers.
++    let rc = unsafe {
++        libc::getsockopt(
++            fd.as_raw_fd(),
++            libc::SOL_SOCKET,
++            libc::SO_ERROR,
++            (&raw mut err).cast(),
++            &raw mut len,
++        )
++    };
++    if rc < 0 {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(err)
++}
++
++/// Connect to an AirDrop endpoint. For IPv6 link-local AWDL targets, sweeps
++/// staggered non-blocking SYNs across the 1.0486 s AWDL channel-sequence cycle
++/// instead of relying on Linux's 1s/2s/4s/8s/16s SYN backoff (which
++/// phase-locks onto non-overlapping slots on Broadcom firmware and causes
++/// 100% connect timeouts when the peer only overlaps on social channel 6).
++pub fn connect_awdl(addr: &SocketAddr, timeout: Option<Duration>) -> io::Result<TcpStream> {
++    let Some(v6) = is_awdl_link_local(addr) else {
++        return match timeout {
++            Some(t) => TcpStream::connect_timeout(addr, t),
++            None => TcpStream::connect(addr),
++        };
++    };
++    let deadline = timeout.map(|t| Instant::now() + t);
++    let mut pending: Vec<(OwnedFd, Instant)> = Vec::with_capacity(AWDL_SYN_MAX_PENDING);
++    let mut last_launch: Option<Instant> = None;
++    let mut last_err: Option<i32> = None;
++
++    loop {
++        let now = Instant::now();
++        if let Some(d) = deadline
++            && now >= d
++        {
++            return Err(match last_err {
++                Some(e) if e != libc::ETIMEDOUT => io::Error::from_raw_os_error(e),
++                _ => io::Error::new(io::ErrorKind::TimedOut, "connection timed out"),
++            });
++        }
++
++        // Expire old pending attempts so the kernel stops phase-locked SYN
++        // retransmits, while keeping at least one socket alive near deadline.
++        let can_launch_more = deadline.is_none_or(|d| d.saturating_duration_since(now) > AWDL_SYN_STAGGER);
++        if can_launch_more || pending.len() > 1 {
++            pending.retain(|(_, started)| now.saturating_duration_since(*started) < AWDL_SYN_LIFETIME);
++        }
++
++        let due_for_launch = pending.is_empty()
++            || (pending.len() < AWDL_SYN_MAX_PENDING
++                && last_launch.is_none_or(|t| now.saturating_duration_since(t) >= AWDL_SYN_STAGGER));
++        if due_for_launch {
++            match start_nonblocking_v6(v6) {
++                Ok((fd, true)) => {
++                    set_blocking(&fd)?;
++                    let sock = TcpStream::from(fd);
++                    tune_awdl_tcp(&sock);
++                    return Ok(sock);
++                }
++                Ok((fd, false)) => {
++                    pending.push((fd, now));
++                    last_launch = Some(now);
++                }
++                Err(e) => {
++                    // Immediate local/stack refusal or routing error.
++                    if pending.is_empty()
++                        || matches!(
++                            e.raw_os_error(),
++                            Some(libc::ECONNREFUSED | libc::ENETUNREACH | libc::EINVAL)
++                        )
++                    {
++                        return Err(e);
++                    }
++                    last_err = e.raw_os_error();
++                    last_launch = Some(now);
++                }
++            }
++        }
++
++        let mut wait = AWDL_SYN_STAGGER;
++        if let Some(t) = last_launch
++            && pending.len() < AWDL_SYN_MAX_PENDING
++        {
++            wait = wait.min(AWDL_SYN_STAGGER.saturating_sub(now.saturating_duration_since(t)));
++        }
++        if let Some(d) = deadline {
++            wait = wait.min(d.saturating_duration_since(now));
++        }
++        let poll_ms = libc::c_int::try_from(wait.as_millis().max(1)).unwrap_or(50);
++
++        let mut pfds: Vec<libc::pollfd> = pending
++            .iter()
++            .map(|(fd, _)| libc::pollfd {
++                fd: fd.as_raw_fd(),
++                events: libc::POLLOUT,
++                revents: 0,
++            })
++            .collect();
++        // SAFETY: `pfds` is a valid contiguous slice of pollfd structs.
++        let ready = unsafe { libc::poll(pfds.as_mut_ptr(), pfds.len() as libc::nfds_t, poll_ms) };
++        if ready < 0 {
++            let e = io::Error::last_os_error();
++            if e.kind() == io::ErrorKind::Interrupted {
++                continue;
++            }
++            return Err(e);
++        }
++        if ready == 0 {
++            continue;
++        }
++
++        let mut idx = 0;
++        while idx < pfds.len() {
++            if pfds[idx].revents == 0 {
++                idx += 1;
++                continue;
++            }
++            let err = so_error(&pending[idx].0)?;
++            if err == 0 {
++                let (fd, _) = pending.swap_remove(idx);
++                drop(pending);
++                set_blocking(&fd)?;
++                let sock = TcpStream::from(fd);
++                tune_awdl_tcp(&sock);
++                return Ok(sock);
++            }
++            if err == libc::ECONNREFUSED {
++                return Err(io::Error::from_raw_os_error(libc::ECONNREFUSED));
++            }
++            last_err = Some(err);
++            pending.swap_remove(idx);
++            pfds.swap_remove(idx);
++        }
++    }
++}
++
+ /// A receiver's address, and the host text Python used for it.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct Endpoint {
+@@ -207,10 +454,7 @@ impl Conn {
+             }
+             (op, None) => op,
+         };
+-        let sock = match budget {
+-            Some(t) => TcpStream::connect_timeout(&endpoint.addr, t)?,
+-            None => TcpStream::connect(endpoint.addr)?,
+-        };
++        let sock = connect_awdl(&endpoint.addr, budget)?;
+         // Each request is written whole and then answered; Nagle would hold a
+         // trailing TLS record for the peer's delayed ACK (measured on
+         // loopback: /Discover 0.09 s with Nagle, 0.04 s without).
+@@ -571,4 +815,32 @@ mod tests {
+         c.finish().unwrap();
+         assert_eq!(out, b"5\r\nhello\r\n0\r\n\r\n");
+     }
++
++    #[test]
++    fn link_local_detection_and_loopback_connect() {
++        let ll = SocketAddr::V6(SocketAddrV6::new(
++            "fe80::17:f2ff:fe60:2".parse().unwrap(),
++            8771,
++            0,
++            7,
++        ));
++        assert!(is_awdl_link_local(&ll).is_some());
++        let ll_no_scope = SocketAddr::V6(SocketAddrV6::new(
++            "fe80::17:f2ff:fe60:2".parse().unwrap(),
++            8771,
++            0,
++            0,
++        ));
++        assert!(is_awdl_link_local(&ll_no_scope).is_none());
++        let lo = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8771, 0, 0));
++        assert!(is_awdl_link_local(&lo).is_none());
++
++        let listener = std::net::TcpListener::bind("[::1]:0").unwrap();
++        let addr = listener.local_addr().unwrap();
++        let sock = connect_awdl(&addr, Some(Duration::from_secs(2))).unwrap();
++        drop(sock);
++        drop(listener);
++        let err = connect_awdl(&addr, Some(Duration::from_secs(2))).unwrap_err();
++        assert_eq!(err.kind(), io::ErrorKind::ConnectionRefused);
++    }
+ }
+diff --git a/crates/omdrop-send/src/peer_env.rs b/crates/omdrop-send/src/peer_env.rs
+index faa81f3..4e529d2 100644
+--- a/crates/omdrop-send/src/peer_env.rs
++++ b/crates/omdrop-send/src/peer_env.rs
+@@ -9,9 +9,10 @@
+ //! a radio backend's hooks are installed. `OMDROP_IMPLEMENTATION=python`
+ //! prefers the legacy programs; `rust`, or unset, prefers these.
+ 
++use std::collections::HashMap;
+ use std::fs::File;
+ use std::io::{self, Read};
+-use std::net::{Ipv6Addr, SocketAddr, TcpStream};
++use std::net::{Ipv6Addr, SocketAddr};
+ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+ use std::path::{Path, PathBuf};
+ use std::process::{Child, Command, Stdio};
+@@ -22,11 +23,11 @@ use std::time::{Duration, Instant};
+ use crate::airdrop_send::resolve_identity;
+ use crate::client::{Client, Sender};
+ use crate::error::PyErr;
+-use crate::http::Endpoint;
++use crate::http::{Endpoint, connect_awdl};
+ use crate::log::{Logger, Sink};
+ use crate::send_to_peer::{
+-    Env, IFACE, WAKE_READY, knock, link_local, lookup_budget, merge_peers, parse_neigh,
+-    parse_peer_table,
++    AIRDROP_PORT, ALT_AIRDROP_PORT, Env, IFACE, WAKE_READY, knock, link_local, lookup_budget,
++    merge_peers, parse_neigh, parse_peer_table,
+ };
+ 
+ const LEGACY_DIR: &str = "/usr/lib/omdrop";
+@@ -372,6 +373,8 @@ pub struct RealEnv {
+     t0: Instant,
+     /// The lookup identity, resolved once on first use.
+     lookup: OnceLock<Result<Arc<Sender>, String>>,
++    /// Per-peer discovered AirDrop port (e.g. 8771 for `owly`/`omdrop-receiver`).
++    ports: Mutex<HashMap<String, u16>>,
+ }
+ 
+ impl Default for RealEnv {
+@@ -379,11 +382,31 @@ impl Default for RealEnv {
+         RealEnv {
+             t0: Instant::now(),
+             lookup: OnceLock::new(),
++            ports: Mutex::new(HashMap::new()),
+         }
+     }
+ }
+ 
+ impl RealEnv {
++    fn remember_port(&self, mac: &str, port: u16) {
++        self.ports
++            .lock()
++            .unwrap_or_else(PoisonError::into_inner)
++            .insert(mac.to_owned(), port);
++    }
++
++    fn connect_ok(&self, host: Ipv6Addr, port: u16, timeout: f64) -> bool {
++        let Ok(addr) = omdrop_proto::net::scoped(host, port, IFACE) else {
++            return false;
++        };
++        let Ok(t) = Duration::try_from_secs_f64(timeout) else {
++            return false;
++        };
++        if t.is_zero() {
++            return false;
++        }
++        connect_awdl(&SocketAddr::V6(addr), Some(t)).is_ok()
++    }
+     fn lookup_sender(&self, sender_name: &str) -> Result<Arc<Sender>, String> {
+         self.lookup
+             .get_or_init(|| {
+@@ -586,16 +609,26 @@ impl Env for RealEnv {
+     /// A refusal is an answer, not a failure: the peer's stack replied, so
+     /// the radio path is fine and only the service is absent.
+     fn listening(&self, host: Ipv6Addr, port: u16, timeout: f64) -> bool {
+-        let Ok(addr) = omdrop_proto::net::scoped(host, port, IFACE) else {
+-            return false;
+-        };
+-        let Ok(t) = Duration::try_from_secs_f64(timeout) else {
+-            return false;
+-        };
+-        if t.is_zero() {
+-            return false;
++        self.connect_ok(host, port, timeout)
++    }
++
++    fn resolved_port(&self, mac: &str, default_port: u16) -> u16 {
++        self.ports
++            .lock()
++            .unwrap_or_else(PoisonError::into_inner)
++            .get(mac)
++            .copied()
++            .unwrap_or(default_port)
++    }
++
++    fn probe_ports(&self, host: Ipv6Addr, default_port: u16, timeout: f64) -> Option<u16> {
++        if self.connect_ok(host, default_port, timeout) {
++            return Some(default_port);
++        }
++        if default_port == AIRDROP_PORT && self.connect_ok(host, ALT_AIRDROP_PORT, timeout) {
++            return Some(ALT_AIRDROP_PORT);
+         }
+-        TcpStream::connect_timeout(&SocketAddr::V6(addr), t).is_ok()
++        None
+     }
+ 
+     fn wake_start(&self, seconds: f64) -> (bool, Option<String>) {
+@@ -622,22 +655,73 @@ impl Env for RealEnv {
+         ready_by: Option<f64>,
+     ) -> Option<String> {
+         let ll = link_local(mac)?;
+-        let knocked = knock(self, ll, port, ready_by);
++        let (knocked, active_port) = if port == AIRDROP_PORT {
++            match ready_by {
++                None => {
++                    let mut hit = None;
++                    for _ in 0..2 {
++                        if let Some(p) = self.probe_ports(ll, AIRDROP_PORT, 1.5) {
++                            hit = Some(p);
++                            break;
++                        }
++                    }
++                    match hit {
++                        Some(p) => (true, p),
++                        None => (false, port),
++                    }
++                }
++                Some(deadline) => {
++                    let mut hit = None;
++                    loop {
++                        let left = deadline - self.monotonic();
++                        if left <= 0.0 {
++                            break;
++                        }
++                        let t0 = self.monotonic();
++                        if let Some(p) = self.probe_ports(ll, AIRDROP_PORT, left.min(1.5)) {
++                            hit = Some(p);
++                            break;
++                        }
++                        let spent = self.monotonic() - t0;
++                        if spent < 1.0 {
++                            self.sleep((1.0 - spent).min((deadline - self.monotonic()).max(0.0)));
++                        }
++                    }
++                    match hit {
++                        Some(p) => (true, p),
++                        None => (false, port),
++                    }
++                }
++            }
++        } else {
++            (knock(self, ll, port, ready_by), port)
++        };
++        if knocked {
++            self.remember_port(mac, active_port);
++        }
+         let (attempts, timeout) = lookup_budget(knocked);
+         let sender = self.lookup_sender(sender_name);
+-        for attempt in 1..=attempts {
+-            let t0 = std::time::SystemTime::now();
+-            match &sender {
+-                Err(e) => {
+-                    trace(mac, attempt, knocked, t0, Some(1), Some(e));
+-                }
+-                Ok(sender) => match discover_once(sender, ll, port, timeout) {
+-                    Ok(name) => {
+-                        trace(mac, attempt, knocked, t0, Some(0), None);
+-                        return Some(name.unwrap_or_default());
++        let ports_to_try: Vec<u16> = if knocked || port != AIRDROP_PORT {
++            vec![active_port]
++        } else {
++            vec![AIRDROP_PORT, ALT_AIRDROP_PORT]
++        };
++        for try_port in ports_to_try {
++            for attempt in 1..=attempts {
++                let t0 = std::time::SystemTime::now();
++                match &sender {
++                    Err(e) => {
++                        trace(mac, attempt, knocked, t0, Some(1), Some(e));
+                     }
+-                    Err((rc, err)) => trace(mac, attempt, knocked, t0, rc, Some(&err)),
+-                },
++                    Ok(sender) => match discover_once(sender, ll, try_port, timeout) {
++                        Ok(name) => {
++                            trace(mac, attempt, knocked, t0, Some(0), None);
++                            self.remember_port(mac, try_port);
++                            return Some(name.unwrap_or_default());
++                        }
++                        Err((rc, err)) => trace(mac, attempt, knocked, t0, rc, Some(&err)),
++                    },
++                }
+             }
+         }
+         None
+diff --git a/crates/omdrop-send/src/send_to_peer.rs b/crates/omdrop-send/src/send_to_peer.rs
+index 321fb6c..64b6351 100644
+--- a/crates/omdrop-send/src/send_to_peer.rs
++++ b/crates/omdrop-send/src/send_to_peer.rs
+@@ -35,6 +35,8 @@ use crate::client::clean_peer_name;
+ use crate::pyfmt::float_str;
+ 
+ pub const AIRDROP_PORT: u16 = 8770;
++/// Port used by Linux/Android AirDrop receivers (`omdrop-receiver`, `owly receive`).
++pub const ALT_AIRDROP_PORT: u16 = 8771;
+ pub const IFACE: &str = "awdl0";
+ /// The advert's ceiling for a name lookup, and the deadline its knocks wait
+ /// to. Not a sleep: the receiver binds its port in milliseconds, but reaching
+@@ -200,6 +202,17 @@ pub trait Env: Sync {
+     fn rescan_seconds(&self) -> f64 {
+         RESCAN_SECONDS
+     }
++    /// Learned receiver port for `mac` (e.g. 8771 for `owly`/`omdrop-receiver`),
++    /// falling back to `default_port`.
++    fn resolved_port(&self, _mac: &str, default_port: u16) -> u16 {
++        default_port
++    }
++    /// Probe `default_port` (and [`ALT_AIRDROP_PORT`] when `default_port` is
++    /// [`AIRDROP_PORT`]), returning whichever port accepted TCP.
++    fn probe_ports(&self, host: Ipv6Addr, default_port: u16, timeout: f64) -> Option<u16> {
++        self.listening(host, default_port, timeout)
++            .then_some(default_port)
++    }
+ }
+ 
+ /// MAC -> EUI-64 link-local, the address an Apple peer answers on.
+@@ -485,6 +498,7 @@ pub fn main<E: Env + ?Sized>(
+     if let Err(e) = args::timeout(&SPEC, "--wait", wait_secs.max(0.0)) {
+         return usage_exit(e, out, err);
+     }
++    let explicit_port = p.value("--port").is_some();
+     let name = p
+         .value("--name")
+         .map_or_else(omdrop_identity::short_hostname, str::to_owned);
+@@ -510,7 +524,12 @@ pub fn main<E: Env + ?Sized>(
+         let row = |mac: &str, got: Option<&str>, named: bool| -> String {
+             let rssi = rssi_of.borrow().get(mac).copied().flatten();
+             let ll = link_local(mac).map(|a| a.to_string()).unwrap_or_default();
+-            let mut line = format!("{mac}  {}  [{ll}%{IFACE}]:{port}", signal(rssi));
++            let shown_port = if explicit_port {
++                port
++            } else {
++                env.resolved_port(mac, port)
++            };
++            let mut line = format!("{mac}  {}  [{ll}%{IFACE}]:{shown_port}", signal(rssi));
+             if named {
+                 // Three outcomes, three words. "(no response)", not "(not
+                 // receiving)": all we observe is that nothing answered on the
+@@ -685,23 +704,32 @@ pub fn main<E: Env + ?Sized>(
+         let _ = writeln!(err, "not a MAC: {mac}");
+         return 2;
+     };
+-    let target = format!("[{ll}%{IFACE}]:{port}");
+-    // "--" so a file whose name begins with a dash is a file, not an option.
+-    let mut cmd = env.sender_command();
+-    cmd.extend([
+-        "--direct".to_owned(),
+-        target.clone(),
+-        "--op-timeout".to_owned(),
+-        float_str(op_timeout),
+-        "--name".to_owned(),
+-        name.clone(),
+-    ]);
+-    for u in &urls {
+-        cmd.extend(["--url".to_owned(), u.clone()]);
+-    }
+-    cmd.push("--".to_owned());
+-    cmd.extend(files.iter().cloned());
++    let mut target_port = if explicit_port {
++        port
++    } else {
++        env.resolved_port(&mac, port)
++    };
++    let build_cmd = |p: u16| -> (String, Vec<String>) {
++        let target = format!("[{ll}%{IFACE}]:{p}");
++        // "--" so a file whose name begins with a dash is a file, not an option.
++        let mut cmd = env.sender_command();
++        cmd.extend([
++            "--direct".to_owned(),
++            target.clone(),
++            "--op-timeout".to_owned(),
++            float_str(op_timeout),
++            "--name".to_owned(),
++            name.clone(),
++        ]);
++        for u in &urls {
++            cmd.extend(["--url".to_owned(), u.clone()]);
++        }
++        cmd.push("--".to_owned());
++        cmd.extend(files.iter().cloned());
++        (target, cmd)
++    };
+     if p.flag("--print") {
++        let (_, cmd) = build_cmd(target_port);
+         let _ = writeln!(out, "{}", cmd.join(" "));
+         return 0;
+     }
+@@ -713,29 +741,44 @@ pub fn main<E: Env + ?Sized>(
+     // on something else waking the phone, and choosing a file closes the
+     // panel whose lookups did; so the wait raises the same wake the lookups
+     // use, for as long as it waits, and stops it before the transfer starts.
+-    if wait_secs > 0.0 && !env.listening(ll, port, 2.0) {
+-        let _ = writeln!(
+-            err,
+-            "waiting up to {wait_secs:.0}s for {mac} to start listening on {port}"
+-        );
+-        let mut opened = false;
+-        {
+-            let _guard = do_wake.then(|| wake(env, wait_secs, "waiting without a wake", err));
+-            let deadline = env.monotonic() + wait_secs;
+-            while env.monotonic() < deadline {
+-                if env.listening(ll, port, 2.0) {
+-                    opened = true;
+-                    break;
+-                }
+-                env.sleep(1.0);
+-            }
+-        }
+-        if !opened {
++    if wait_secs > 0.0 {
++        let initial = if explicit_port {
++            env.listening(ll, target_port, 2.0).then_some(target_port)
++        } else {
++            env.probe_ports(ll, target_port, 2.0)
++        };
++        if let Some(found) = initial {
++            target_port = found;
++        } else {
+             let _ = writeln!(
+                 err,
+-                "{mac} never opened {port}; on an iPhone, open a share sheet or receive something to wake sharingd"
++                "waiting up to {wait_secs:.0}s for {mac} to start listening on {target_port}"
+             );
+-            return 3;
++            let mut opened = false;
++            {
++                let _guard = do_wake.then(|| wake(env, wait_secs, "waiting without a wake", err));
++                let deadline = env.monotonic() + wait_secs;
++                while env.monotonic() < deadline {
++                    let hit = if explicit_port {
++                        env.listening(ll, target_port, 2.0).then_some(target_port)
++                    } else {
++                        env.probe_ports(ll, target_port, 2.0)
++                    };
++                    if let Some(found) = hit {
++                        target_port = found;
++                        opened = true;
++                        break;
++                    }
++                    env.sleep(1.0);
++                }
++            }
++            if !opened {
++                let _ = writeln!(
++                    err,
++                    "{mac} never opened {target_port}; on an iPhone, open a share sheet or receive something to wake sharingd"
++                );
++                return 3;
++            }
+         }
+     }
+ 
+@@ -745,9 +788,21 @@ pub fn main<E: Env + ?Sized>(
+         many if urls.is_empty() => format!("{} files", many.len()),
+         many => format!("{} links", many.len()),
+     };
++    let (target, cmd) = build_cmd(target_port);
+     let _ = writeln!(err, "sending {what} to {mac} at {target}");
+     let _ = err.flush();
+-    env.run_sender(&cmd)
++    let rc = env.run_sender(&cmd);
++    if rc != 0
++        && !explicit_port
++        && target_port == AIRDROP_PORT
++        && env.listening(ll, ALT_AIRDROP_PORT, 2.0)
++    {
++        let (alt_target, alt_cmd) = build_cmd(ALT_AIRDROP_PORT);
++        let _ = writeln!(err, "sending {what} to {mac} at {alt_target}");
++        let _ = err.flush();
++        return env.run_sender(&alt_cmd);
++    }
++    rc
+ }
+ 
+ /// Parse the radio helper's `peers` output: every `MAC  rssi=N` or

@@ -89,7 +89,10 @@ let
     pname = "omdrop-awdl";
     version = awdlVersion;
     src = omdropAwdlSrc;
-    patches = [ ./omdrop-probe-latency.patch ];
+    patches = [
+      ./omdrop-probe-latency.patch
+      ./omdrop-awdl-ch6-schedule.patch
+    ];
     dontBuild = true;
     # Keep real script files intact at exact paths annotated in Polkit policy.
     dontPatchShebangs = true;
@@ -185,6 +188,7 @@ let
     version = coreVersion;
     src = omdropPluginSrc;
     sourceRoot = "${omdropPluginSrc.name or "source"}/core";
+    patches = [ ./omdrop-core-awdl-tx.patch ];
     cargoLock.lockFile = "${omdropPluginSrc}/core/Cargo.lock";
 
     # Upstream tests invoke `unshare`, `/usr/bin/ip`, `/usr/bin/python3`, and `dbus-daemon`.

@@ -1,0 +1,28 @@
+diff --git a/userspace/awdl-up b/userspace/awdl-up
+index a9e33a4..cb52fe6 100644
+--- a/userspace/awdl-up
++++ b/userspace/awdl-up
+@@ -93,7 +93,8 @@ apply_schedule(){
+ import sys
+ peer, mch, shape = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+ slots={'sparse':[peer,0,149,0,0,0,0,0,mch,0,149,0,0,0,0,0],
+-       'dense': [peer,peer,149,0,0,0,0,peer,mch,peer,149,peer,0,0,0,peer],
++       'dense': [mch,peer,149,0,mch,0,0,peer,mch,peer,149,peer,mch,0,0,peer],
++       'dense-apple': [peer,peer,149,0,0,0,0,peer,mch,peer,149,peer,0,0,0,peer],
+        'full':  [peer,peer,149,peer,peer,149,peer,peer,mch,peer,149,peer,peer,149,peer,peer],
+        'dense44':[peer,peer,149,peer,peer,peer,peer,peer,mch,peer,149,peer,peer,peer,peer,peer]}[shape]
+ oc={0:0,1:81,6:81,11:81,36:128,40:128,44:128,48:128,149:128,153:128,157:128,161:128}
+diff --git a/userspace/mkpsf.py b/userspace/mkpsf.py
+index e5b6bd4..57f2dca 100644
+--- a/userspace/mkpsf.py
++++ b/userspace/mkpsf.py
+@@ -55,7 +55,8 @@ CHFLAGS = {6: 0x2b, 44: 0x1d, 149: 0x1d, 151: 0x1d, 0: 0x00}
+ # cannot drift.
+ def slots_for(peer, mch, shape):
+     return {'sparse': [peer, 0, 149, 0, 0, 0, 0, 0, mch, 0, 149, 0, 0, 0, 0, 0],
+-            'dense': [peer, peer, 149, 0, 0, 0, 0, peer, mch, peer, 149, peer, 0, 0, 0, peer],
++            'dense': [mch, peer, 149, 0, mch, 0, 0, peer, mch, peer, 149, peer, mch, 0, 0, peer],
++            'dense-apple': [peer, peer, 149, 0, 0, 0, 0, peer, mch, peer, 149, peer, 0, 0, 0, peer],
+             'full': [peer, peer, 149, peer, peer, 149, peer, peer, mch, peer, 149, peer, peer, 149, peer, peer],
+             'dense44': [peer, peer, 149, peer, peer, peer, peer, peer, mch, peer, 149, peer, peer, peer, peer, peer],
+             # A Mac's live shape observed on air (ten nonzero slots). Macs

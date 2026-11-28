@@ -40,6 +40,7 @@ APP_RULES = (
     (("hyprland", "hyprlock", "hyprpaper", "hypridle"), "Hyprland"),
     (("pipewire", "wireplumber", "speakerguard"), "PipeWire Audio"),
     (("opencode",), "OpenCode"),
+    (("pi",), "Pi"),
     (("murmure",), "Murmure"),
     (("rclone",), "Cloud Mounts"),
     (("nix-daemon", "nix "), "Nix Daemon"),

@@ -384,6 +384,7 @@ in
               // lib.optionalAttrs (builtins.elem "opencode" cfg.agents.targets) (
                 mkOmdropSkillFor ".config/opencode/skills/omdrop"
               )
+              // lib.optionalAttrs (builtins.elem "pi" cfg.agents.targets) (mkOmdropSkillFor ".pi/skills/omdrop")
             );
 
         home.activation.omarchnixAirDropSetup =

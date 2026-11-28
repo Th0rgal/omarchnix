@@ -377,6 +377,7 @@ in
         type = lib.types.listOf (
           lib.types.enum [
             "opencode"
+            "pi"
             "claude"
             "codex"
             "hermes"
@@ -384,6 +385,7 @@ in
         );
         default = [
           "opencode"
+          "pi"
           "claude"
           "codex"
           "hermes"

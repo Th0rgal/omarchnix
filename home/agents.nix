@@ -191,6 +191,9 @@ in
       // lib.optionalAttrs (builtins.elem "opencode" cfg.agents.targets) (
         mkSkillFilesFor ".config/opencode/skills/omarchnix"
       )
+      // lib.optionalAttrs (builtins.elem "pi" cfg.agents.targets) (
+        mkSkillFilesFor ".pi/skills/omarchnix"
+      )
     );
 
     xdg.configFile = lib.mkMerge [
